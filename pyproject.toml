@@ -1,0 +1,34 @@
+[project]
+name = "mog-server"
+version = "0.1.0"
+description = "MOG Server: self-hosted scan, scrape and sandboxed install for a PC game library"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi[standard]>=0.115",
+    "uvicorn[standard]>=0.32",
+    "sqlalchemy>=2.0",
+    "alembic>=1.13",
+    "bcrypt>=4.2",
+    "httpx>=0.27",
+    "aiohttp>=3.10",
+    "pyyaml>=6.0",
+    "pillow>=10.4",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = ["mcp[cli]>=1.2", "pytest>=8.0"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["backend"]

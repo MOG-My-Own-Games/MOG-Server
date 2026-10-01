@@ -1,0 +1,224 @@
+# Adapted from RomM (https://github.com/rommapp/romm), AGPL-3.0-or-later.
+#
+# Buttons the install auto mode knows how to press. To support another
+# installer or language, append an entry: the engine picks it up as is.
+#
+# category: next | agree | install | finish | key | deny | option
+#   deny entries are never pressed; a line containing one is ignored.
+#   agree entries only fire on a license or plain-confirmation page (see
+#     context_keywords below); option entries fire anywhere.
+# labels:   OCR text to look for (case, spaces, "&", ">" and "(N)" are ignored).
+# mnemonic: Alt+<letter> tried when clicking the label changes nothing.
+# key:      (key only) xdotool key name pressed when the text is on screen.
+# late:     only used once the install has written files (e.g. "Exit").
+# toggle:   (agree/option only) a checkbox to select before pressing Next,
+#           e.g. the EULA-accept radio or an installer preference worth
+#           always turning on. Otherwise the entry is a button.
+
+context_keywords:
+  license:
+    [
+      "license",
+      "licence",
+      "agreement",
+      "eula",
+      "terms",
+      "licenza",
+      "accordo",
+      "termini",
+      "lizenz",
+      "licencia",
+      "contrato",
+      "ライセンス",
+      "使用許諾",
+      "许可",
+      "協議",
+      "协议",
+    ]
+  # "Do you want to install DirectX/the VC++ redistributable/...?" - a plain
+  # Yes/No prerequisite prompt, not a EULA, but just as safe to answer Yes to
+  # (see the "agree" entry's own comment on why "Yes" needs a context gate
+  # at all).
+  confirm:
+    [
+      "do you want to install",
+      "would you like to install",
+      "do you wish to continue",
+      "do you want to continue",
+      "vuoi installare",
+      "desideri installare",
+      "vuoi continuare",
+      "möchten sie installieren",
+      "möchten sie fortfahren",
+      "desea instalar",
+      "desea continuar",
+      "をインストールしますか",
+      "続行しますか",
+      "是否安装",
+      "是否安裝",
+      "是否继续",
+    ]
+  # An active extraction/copy screen (an elapsed/remaining-time progress
+  # bar) - never safe to touch. Caught live: a stray action on this screen
+  # (a mnemonic retry queued a tick earlier for the "Install" button that
+  # was just clicked to get here, landing on the progress screen instead)
+  # aborted a real install within seconds of it starting, even though the
+  # same install reliably completes in well under a minute left alone.
+  progress:
+    [
+      "elapsed time",
+      "remaining time",
+      "tempo trascorso",
+      "tempo rimanente",
+      "verstrichene zeit",
+      "verbleibende zeit",
+      "temps écoulé",
+      "temps restant",
+      "tiempo transcurrido",
+      "tiempo restante",
+      "経過時間",
+      "残り時間",
+      "已用时间",
+      "剩余时间",
+    ]
+
+buttons:
+  - category: next
+    mnemonic: n
+    labels:
+      [
+        "Next",
+        "Next >",
+        "OK",
+        "Continue",
+        "Proceed",
+        "Weiter",
+        "Suivant",
+        "Siguiente",
+        "次へ",
+        "下一步",
+      ]
+  - category: next
+    mnemonic: a
+    labels: ["Avanti", "Avanti >", "Procedi", "Continua"]
+  - category: agree
+    mnemonic: a
+    labels:
+      [
+        "Agree",
+        "I Agree",
+        "Accept",
+        "Accetta",
+        "Accetto",
+        "Ich stimme zu",
+        "J'accepte",
+        "Acepto",
+        "同意",
+        "同意する",
+        "我同意",
+      ]
+  - category: agree
+    mnemonic: y
+    labels: ["Yes", "Si", "Sì", "Ja", "Oui", "はい", "是"]
+  - category: agree
+    toggle: true
+    labels:
+      - "Yes, I have read and accept EULA"
+      - "I accept the agreement"
+      - "I accept the terms of the license agreement"
+      - "I accept the license terms"
+      - "I have read and accept the license terms"
+      - "I agree to the terms"
+      - "Accetto i termini del contratto di licenza"
+      - "Accetto il contratto di licenza"
+      - "Ho letto e accettato i termini di licenza"
+      - "Ich akzeptiere die Bedingungen"
+      - "J'accepte les termes du contrat de licence"
+      - "Acepto los terminos del contrato de licencia"
+      - "同意する"
+      - "我接受协议"
+      - "我接受许可协议中的条款"
+  # Some installers offer this to cap their own memory use during
+  # extraction - worth always turning on in the sandbox, which has no
+  # guarantee of a generous RAM allowance either way.
+  - category: option
+    toggle: true
+    labels:
+      - "Limit installer to 2 GB of RAM usage"
+      - "Limit installer to 2GB of RAM usage"
+      - "Limit install to 2 GB of RAM usage"
+  - category: install
+    mnemonic: i
+    labels:
+      [
+        "Install",
+        "Installa",
+        "Installieren",
+        "Instalar",
+        "インストール",
+        "安装",
+        "安裝",
+      ]
+  # "Fine" (Italian for Finish) is also an ordinary English word, so it can
+  # match stray OCR text on an early screen (license text, a readme, ...)
+  # long before the installer is actually done - late guards against
+  # ending the install right there, same reasoning as "Exit" below.
+  - category: finish
+    late: true
+    mnemonic: f
+    labels:
+      ["Finish", "Fine", "Fertig", "Terminer", "Finalizar", "完了", "完成"]
+  # Exit ends many GOG-style installers, but on a start screen it would abort
+  # the install, so it is only pressed once files have been written.
+  - category: finish
+    late: true
+    mnemonic: x
+    labels: ["Exit", "Esci", "Beenden", "Quitter", "Salir", "終了", "退出"]
+  # Text asking for a keyboard key instead of a click.
+  - category: key
+    key: "Up"
+    labels:
+      - "Press up to unlock the screen"
+      - "Press up to unlock"
+      - "Premi su per sbloccare lo schermo"
+  - category: key
+    key: "Return"
+    labels:
+      - "Press Enter to continue"
+      - "Press Enter to start"
+      - "Premi Invio per continuare"
+  - category: key
+    key: "space"
+    labels:
+      - "Press any key to continue"
+      - "Press space to continue"
+      - "Premi un tasto per continuare"
+  # Some installers run an archive-integrity check first, in its own small
+  # window titled "Finished" once done - no OCR-visible button of its own
+  # (the window can be taller than the sandbox's fixed resolution and isn't
+  # resizable, so the rest of its chrome may not even be on screen), closed
+  # the same way a person would: Alt+F4. "All files OK" is that tool's own
+  # wording, specific enough not to fire on a real installer's finish page.
+  - category: key
+    key: "F4"
+    alt: true
+    labels:
+      - "All files OK"
+  - category: deny
+    labels:
+      - "Cancel"
+      - "Annulla"
+      - "Abbrechen"
+      - "Annuler"
+      - "Cancelar"
+      - "Back"
+      - "Indietro"
+      - "Browse"
+      - "Sfoglia"
+      - "Skip"
+      - "I do not accept"
+      - "I do not agree"
+      - "Non accetto"
+      - "Decline"
+      - "キャンセル"
+      - "取消"

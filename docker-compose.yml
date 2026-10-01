@@ -1,0 +1,23 @@
+services:
+  mog-server:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: mog-server
+    restart: unless-stopped
+    # bubblewrap needs to create a nested user+mount namespace to sandbox the
+    # installer; the simplest working grant is privileged. A narrower
+    # capability set (CAP_SYS_ADMIN + seccomp profile) is worth revisiting
+    # (see docs/TODO.md) but privileged is what's verified working today.
+    privileged: true
+    # Reaps the zombies a cancelled install's SIGKILL'd process group leaves
+    # behind (see handler/install/runner.py's cancel_install).
+    init: true
+    env_file: .env
+    ports:
+      - "${MOG_PORT:-5000}:5000"
+    volumes:
+      - ./data/mog:/mog
+      - ./data/library:/library
+  # Example library mount; add one volume line per folder you want scanned
+  # as a library root, then point a Library's root_path at /library/<name>.

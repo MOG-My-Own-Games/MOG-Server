@@ -1,0 +1,36 @@
+# Adapted from RomM (https://github.com/rommapp/romm), AGPL-3.0-or-later.
+from __future__ import annotations
+
+import functools
+from collections.abc import Callable
+from typing import cast
+
+from fastapi import HTTPException, status
+from sqlalchemy.exc import ProgrammingError
+from sqlalchemy.orm import Session
+
+from handler.database.base_handler import sync_session
+from logger.logger import log
+
+# Default for a `session` parameter that begin_session fills before the body runs.
+INJECTED_SESSION = cast(Session, None)
+
+
+def begin_session[**P, R](func: Callable[P, R]) -> Callable[P, R]:
+    @functools.wraps(func)
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        # Reuse a caller-provided session so the handler can join an existing unit of work
+        if kwargs.get("session") is not None:
+            return func(*args, **kwargs)
+
+        try:
+            with sync_session.begin() as s:
+                kwargs["session"] = s
+                return func(*args, **kwargs)
+        except ProgrammingError as exc:
+            log.critical(str(exc))
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+            ) from exc
+
+    return wrapper

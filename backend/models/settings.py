@@ -11,7 +11,7 @@ sets it through Settings.
 
 from __future__ import annotations
 
-from sqlalchemy import Integer, String
+from sqlalchemy import Boolean, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from models.base import BaseModel
@@ -34,3 +34,9 @@ class Settings(BaseModel):
     # NULL falls back to config.INSTALL_DEFAULT_PROTON_BUILD (see
     # handler/install/proton_builds.py's default_build_id).
     install_default_proton_build: Mapped[str | None] = mapped_column(String(length=255), default=None)
+    # Install-mode defaults for a session that doesn't say (no auto_mode /
+    # manual_mode in the start request). NULL falls back to
+    # config.INSTALL_AUTO_MODE_DEFAULT for auto mode and to off for manual
+    # mode (see handler/install/defaults.py).
+    install_default_auto_mode: Mapped[bool | None] = mapped_column(Boolean, default=None)
+    install_default_manual_mode: Mapped[bool | None] = mapped_column(Boolean, default=None)

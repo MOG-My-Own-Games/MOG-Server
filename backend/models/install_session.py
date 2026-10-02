@@ -48,6 +48,12 @@ class InstallPhase(enum.StrEnum):
     EXTRACTING = "extracting"
     # Reading a disc image (.iso/.chd/...) that holds the installer.
     MOUNTING = "mounting"
+    # Fetching the Proton build on first use (can take minutes).
+    DOWNLOADING = "downloading"
+    # Wine/Proton bootstrapping the prefix; the display stays black meanwhile.
+    PREPARING = "preparing"
+    # Installer process started, waiting for its first window.
+    LAUNCHING = "launching"
 
 
 # States in which the install is still doing work and should not be restarted.

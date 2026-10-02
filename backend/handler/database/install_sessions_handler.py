@@ -55,6 +55,14 @@ class DBInstallSessionsHandler(DBBaseHandler):
         )
 
     @begin_session
+    def get_installing_sessions(self, session: Session = None) -> list[InstallSession]:  # type: ignore
+        return list(
+            session.scalars(
+                select(InstallSession).where(InstallSession.state == InstallSessionState.INSTALLING)
+            ).all()
+        )
+
+    @begin_session
     def get_running_session_for_port(
         self, vnc_web_port: int, session: Session = None  # type: ignore
     ) -> InstallSession | None:

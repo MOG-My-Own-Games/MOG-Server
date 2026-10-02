@@ -56,3 +56,13 @@ class TestPlanAction:
         action, matches = plan_action(words, CATALOG, ScreenMemory())
         assert action is None
         assert matches == []
+
+
+class TestLanguagePicker:
+    def test_presses_enter_since_ok_is_unreadable(self):
+        words = [_word("Select", 0, 0), _word("Setup", 0, 60), _word("Language", 0, 120), _word("Cancel", 1)]
+
+        action, _ = plan_action(words, load_catalog(), ScreenMemory())
+
+        assert action is not None
+        assert (action.kind, action.key, action.alt) == ("key", "Return", False)

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from starlette.authentication import SimpleUser
 
 from models.base import BaseModel
+from utils.database import CustomJSON
 
 if TYPE_CHECKING:
     from models.install_session import InstallSession
@@ -47,6 +48,11 @@ class User(BaseModel, SimpleUser):
         default=Role.USER,
     )
     last_login: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    avatar_path: Mapped[str | None] = mapped_column(String(length=TEXT_FIELD_LENGTH), default=None)
+    # Library ids hidden from this user (irrelevant for an admin, who always
+    # sees everything) - a plain JSON list rather than a join table, since
+    # there's no per-user permission model beyond this one override yet.
+    hidden_library_ids: Mapped[list[int]] = mapped_column(CustomJSON(), default=list)
 
     install_sessions: Mapped[list["InstallSession"]] = relationship(
         lazy="select", back_populates="user"

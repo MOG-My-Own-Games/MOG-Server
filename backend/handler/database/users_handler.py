@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from decorators.database import begin_session
@@ -33,3 +33,7 @@ class DBUsersHandler(DBBaseHandler):
     def update_user(self, user_id: int, data: dict, session: Session = None) -> User | None:  # type: ignore
         session.execute(update(User).where(User.id == user_id).values(**data))
         return session.get(User, user_id)
+
+    @begin_session
+    def delete_user(self, user_id: int, session: Session = None) -> None:  # type: ignore
+        session.execute(delete(User).where(User.id == user_id))

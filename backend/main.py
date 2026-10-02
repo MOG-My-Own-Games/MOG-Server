@@ -6,8 +6,8 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from config import DEV_MODE
-from endpoints import games, install, libraries, settings
+from config import DEV_MODE, RESOURCES_BASE_PATH
+from endpoints import games, install, libraries, settings, users
 from logger.logger import log
 from startup import run_startup_tasks
 
@@ -27,12 +27,20 @@ app.include_router(libraries.router, prefix="/api")
 app.include_router(games.router, prefix="/api")
 app.include_router(install.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")
+app.include_router(users.router, prefix="/api")
 
 
 @app.get("/api/health")
 async def health() -> dict:
     return {"status": "ok"}
 
+
+# User-uploaded assets (avatars). Unauthenticated on purpose: a profile
+# picture isn't sensitive, and gating it would require every <img> tag to
+# somehow carry Basic-auth credentials (the same problem the VNC proxy's
+# token solves for an <iframe> - not worth it here for a non-sensitive file).
+Path(RESOURCES_BASE_PATH).mkdir(parents=True, exist_ok=True)
+app.mount("/resources", StaticFiles(directory=RESOURCES_BASE_PATH), name="resources")
 
 # Mounted last and at the root: API routes above are matched first, and
 # anything left over (/, /style.css, /app.js) falls through to the static

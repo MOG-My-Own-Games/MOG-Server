@@ -20,11 +20,13 @@ from logger.logger import log
 
 from .capture import active_window_box, click, grab_screen, press_key
 from .catalog import Catalog
-from .engine import Action, ScreenMemory, is_license_page, plan_action, same_screen
+from .engine import Action, ScreenMemory, is_license_page, is_progress_page, plan_action, same_screen
 from .matcher import Word, find_matches, screen_lines
 from .ocr import ocr_words
 
 STATUS_RUNNING = "running"
+STATUS_SCANNING = "scanning"
+STATUS_WAITING = "waiting"
 STATUS_NEEDS_MANUAL = "needs_manual"
 
 POLL_INTERVAL = 2.0
@@ -109,8 +111,12 @@ class AutoModeDriver:
 
         if now - self._idle_since >= self.stuck_seconds:
             self._set(STATUS_NEEDS_MANUAL, "No known button on screen")
-        elif self._status is None:
-            self._set(STATUS_RUNNING, None)
+        elif is_progress_page(list(lines), self.catalog):
+            self._set(STATUS_WAITING, "Installer is working (progress screen), waiting for it to finish")
+        elif matches:
+            self._set(STATUS_WAITING, f"Waiting on {', '.join(sorted({m.text for m in matches}))} (already tried)")
+        elif self._status != STATUS_NEEDS_MANUAL:
+            self._set(STATUS_SCANNING, f"Reading the screen ({len(lines)} text lines), no known button yet")
         return False
 
     def run(self, stop: threading.Event) -> None:

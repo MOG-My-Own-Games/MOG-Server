@@ -187,6 +187,16 @@ buttons:
       - "Press Enter to continue"
       - "Press Enter to start"
       - "Premi Invio per continuare"
+  # Inno Setup's language picker: its OK button is too small for OCR to read
+  # reliably, but it is the default button, so Enter confirms the preselected
+  # language.
+  - category: key
+    key: "Return"
+    alt: false
+    labels:
+      - "Select Setup Language"
+      - "Seleziona la lingua di installazione"
+      - "Setup-Sprache auswählen"
   - category: key
     key: "space"
     labels:

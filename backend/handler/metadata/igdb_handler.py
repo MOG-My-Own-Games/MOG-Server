@@ -30,13 +30,15 @@ _GAME_FIELDS = (
     "id,name,summary,storyline,cover.url,first_release_date,"
     "genres.name,"
     "screenshots.url,"
+    "age_ratings.organization.name,age_ratings.rating_category.rating,"
     "age_ratings.rating,age_ratings.category,"
     "player_perspectives.name,"
     "game_modes.name,"
     "involved_companies.company.name,involved_companies.developer,involved_companies.publisher,"
-    "dlcs.name,dlcs.cover.url,"
-    "expansions.name,expansions.cover.url,"
-    "remakes.name,remasters.name,"
+    "dlcs.name,dlcs.slug,dlcs.url,dlcs.cover.url,"
+    "expansions.name,expansions.slug,expansions.url,expansions.cover.url,"
+    "remakes.name,remakes.slug,remakes.url,remakes.cover.url,"
+    "remasters.name,remasters.slug,remasters.url,remasters.cover.url,"
     "parent_game.name,"
     "multiplayer_modes.onlinecoop,multiplayer_modes.offlinecoop,"
     "multiplayer_modes.onlinemax,multiplayer_modes.offlinemax"
@@ -68,13 +70,14 @@ def _get_token() -> tuple[str, str] | None:
     try:
         resp = httpx.post(
             _TOKEN_URL,
-            params={"client_id": client_id, "client_secret": client_secret, "grant_type": "client_credentials"},
+            data={"client_id": client_id, "client_secret": client_secret, "grant_type": "client_credentials"},
             timeout=15,
         )
         resp.raise_for_status()
         data = resp.json()
     except httpx.HTTPError as e:
-        log.warning(f"IGDB token request failed: {e}")
+        status = e.response.status_code if isinstance(e, httpx.HTTPStatusError) else type(e).__name__
+        log.warning(f"IGDB token request failed ({status}): check the Client ID / Secret in Settings")
         return None
     _token = data["access_token"]
     _token_expires_at = time.monotonic() + data.get("expires_in", 3600) - 60
@@ -98,6 +101,16 @@ def _query(body: str) -> list[dict[str, Any]]:
     except httpx.HTTPError as e:
         log.warning(f"IGDB query failed: {e}")
         return []
+
+
+def validate_credentials() -> bool:
+    """Whether the configured client id/secret actually authenticate - used
+    by Settings to show a pass/fail indicator next to the fields, not to
+    gate any real request (those already fail closed - empty results - on
+    their own)."""
+    global _token, _token_expires_at
+    _token, _token_expires_at = None, 0.0  # force a fresh token request
+    return _get_token() is not None
 
 
 def search_games(name: str, limit: int = 10) -> list[dict[str, Any]]:
@@ -135,7 +148,7 @@ def _resolve_media(game: dict[str, Any]) -> dict[str, Any]:
         game["cover"]["url"] = cover_url(game["cover"].get("url"), "cover_big")
     for shot in game.get("screenshots") or []:
         shot["url"] = cover_url(shot.get("url"), "screenshot_big")
-    for key in ("dlcs", "expansions"):
+    for key in ("dlcs", "expansions", "remakes", "remasters"):
         for item in game.get(key) or []:
             if item.get("cover"):
                 item["cover"]["url"] = cover_url(item["cover"].get("url"), "cover_big")

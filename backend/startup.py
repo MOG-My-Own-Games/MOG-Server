@@ -6,8 +6,9 @@ from pathlib import Path
 
 from config import INSTALL_CACHE_PATH, MOG_BASE_PATH, PROTON_INSTALL_ROOT, RESOURCES_BASE_PATH
 from handler.auth import hash_password
-from handler.database import db_user_handler
+from handler.database import db_install_session_handler, db_user_handler
 from logger.logger import log
+from models.install_session import InstallSessionState
 from models.user import Role, User
 
 
@@ -41,7 +42,29 @@ def _ensure_default_admin() -> None:
     log.warning(f"Created default admin user {username!r} - change its password (MOG_ADMIN_PASSWORD).")
 
 
+def _fail_orphaned_installs() -> None:
+    """Installs run inside this process, so any session still marked running
+    at boot lost its installer to the restart and would sit there forever."""
+    for install_session in db_install_session_handler.get_installing_sessions():
+        db_install_session_handler.update_session(
+            install_session.id,
+            {
+                "state": InstallSessionState.FAILED,
+                "error": "The server restarted while this install was running",
+                "vnc_url": None,
+                "vnc_web_port": None,
+                "vnc_token": None,
+                "phase": None,
+                "phase_detail": None,
+                "auto_status": None,
+                "auto_detail": None,
+            },
+        )
+        log.warning(f"Install session {install_session.id} was interrupted by a restart, marked failed")
+
+
 def run_startup_tasks() -> None:
     _ensure_dirs()
     _run_migrations()
     _ensure_default_admin()
+    _fail_orphaned_installs()

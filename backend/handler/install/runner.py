@@ -27,6 +27,7 @@ import shutil
 import signal
 import subprocess
 import threading
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -71,7 +72,7 @@ from handler.install.windows_output import (
 )
 from logger.formatter import highlight as hl
 from logger.logger import log
-from models.install_session import InstallSessionState
+from models.install_session import InstallPhase, InstallSessionState
 from utils.install_cache import ensure_session_cache_dir
 
 # noVNC static assets shipped in the server image.
@@ -398,6 +399,12 @@ def _log_install_end(install_session_id: int) -> None:
         log.info(f"Install session {hl(str(install_session_id))} completed")
 
 
+def _set_phase(install_session_id: int, phase: InstallPhase | None, detail: str | None) -> None:
+    db_install_session_handler.update_session(
+        install_session_id, {"phase": phase.value if phase else None, "phase_detail": detail}
+    )
+
+
 def _run_install(install_session_id: int) -> None:
     session = db_install_session_handler.get_session(install_session_id)
     if session is None:
@@ -488,7 +495,15 @@ def _run_install(install_session_id: int) -> None:
 
     work_dir = ensure_session_cache_dir(install_session_id)
     prefix_dir = _proton_prefix_dir(work_dir)
+    wanted_build = session.proton_build or default_build_id()
+    if wanted_build and resolve_proton_path(wanted_build) is None:
+        _set_phase(
+            install_session_id,
+            InstallPhase.DOWNLOADING,
+            f"Downloading Proton {wanted_build} (first run only, can take a few minutes)",
+        )
     proton_or_wine = _wine_or_proton(session.proton_build)
+    _set_phase(install_session_id, None, None)
     is_proton = _is_proton(proton_or_wine)
 
     extra_env: tuple[tuple[str, str], ...] = ()
@@ -522,6 +537,7 @@ def _run_install(install_session_id: int) -> None:
         windows_baseline: frozenset[Path] = frozenset()
         installer_arg = installer_abs
         if _uses_wine(installer_abs):
+            _set_phase(install_session_id, InstallPhase.PREPARING, "Preparing the Wine prefix (the display stays black until the installer opens)")
             _init_wine_prefix(
                 proton_or_wine,
                 installer_abs=installer_abs,
@@ -589,6 +605,7 @@ def _run_install(install_session_id: int) -> None:
                 daemon=True,
             )
             live_manifest_thread.start()
+        _set_phase(install_session_id, InstallPhase.LAUNCHING, f"Launching {Path(installer_abs).name}, waiting for its first window")
         timed_out = False
         try:
             _run_installer(argv, vnc.display, auto_mode_session=(install_session_id, work_dir))
@@ -874,7 +891,11 @@ def _run_installer(argv: list[str], display: str, auto_mode_session: tuple[int, 
         with _RUNNING_LOCK:
             _RUNNING_PGIDS[install_session_id] = proc.pid
     stop_focus_loop = threading.Event()
-    focus_thread = threading.Thread(target=_focus_maintenance_loop, args=(display, stop_focus_loop), daemon=True)
+    focus_thread = threading.Thread(
+        target=_focus_maintenance_loop,
+        args=(display, stop_focus_loop, lambda: _set_phase(install_session_id, None, None) if install_session_id else None),
+        daemon=True,
+    )
     focus_thread.start()
     auto_thread: threading.Thread | None = None
     if auto_mode_session is not None:
@@ -943,7 +964,9 @@ class _FocusState:
     target: str | None = None
 
 
-def _focus_maintenance_loop(display: str, stop: threading.Event) -> None:
+def _focus_maintenance_loop(
+    display: str, stop: threading.Event, on_first_window: Callable[[], None] | None = None
+) -> None:
     """Keep whatever installer dialog is currently on screen actually usable.
 
     This never clicks or types anything on the user's behalf - the user
@@ -963,9 +986,14 @@ def _focus_maintenance_loop(display: str, stop: threading.Event) -> None:
     """
     env = {**os.environ, "DISPLAY": display}
     state = _FocusState()
-    _focus_installer_window(env, state)
-    while not stop.wait(FOCUS_MAINTENANCE_INTERVAL):
+    announced = False
+    while True:
         _focus_installer_window(env, state)
+        if state.seen_ids and not announced and on_first_window is not None:
+            announced = True
+            on_first_window()
+        if stop.wait(FOCUS_MAINTENANCE_INTERVAL):
+            return
 
 
 # IceWM's own window furniture on a session used for nothing but a single

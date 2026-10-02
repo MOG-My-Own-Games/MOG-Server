@@ -19,5 +19,7 @@ services:
     volumes:
       - ./data/mog:/mog
       - ./data/library:/library
+      # Proton builds are downloaded on first use; keep them across rebuilds.
+      - ./data/proton:/opt/proton
   # Example library mount; add one volume line per folder you want scanned
   # as a library root, then point a Library's root_path at /library/<name>.

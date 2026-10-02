@@ -17,7 +17,10 @@ router = APIRouter(prefix="/libraries", tags=["libraries"])
 
 @router.get("")
 async def list_libraries(user: CurrentUser) -> list[LibrarySchema]:
-    return [LibrarySchema.model_validate(lib) for lib in db_library_handler.get_all_libraries()]
+    libraries = db_library_handler.get_all_libraries()
+    if not user.is_admin and user.hidden_library_ids:
+        libraries = [lib for lib in libraries if lib.id not in user.hidden_library_ids]
+    return [LibrarySchema.model_validate(lib) for lib in libraries]
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)

@@ -3,25 +3,39 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Path, Query, status
-from starlette.concurrency import run_in_threadpool
-
-from endpoints.responses.game import GameSchema, GameUpdateForm
 from handler.auth import AdminUser, CurrentUser
-from handler.database import db_game_handler
+from handler.database import db_game_handler, db_install_session_handler
 from handler.metadata import igdb_handler, sgdb_handler
 from handler.scrape_handler import scrape_game
+from models.install_session import InstallSessionState
+from starlette.concurrency import run_in_threadpool
+from utils.install_cache import session_cache_dir
+
+from endpoints.responses.game import GameSchema, GameUpdateForm
 
 router = APIRouter(prefix="/games", tags=["games"])
 
 
+def _installed_game_ids(user_id: int) -> set[int]:
+    return {
+        s.game_id
+        for s in db_install_session_handler.get_dashboard_sessions_for_user(user_id)
+        if s.state == InstallSessionState.DONE and session_cache_dir(s.id).is_dir()
+    }
+
+
 @router.get("")
 async def list_games(user: CurrentUser, library_id: int | None = None) -> list[GameSchema]:
-    games = (
-        db_game_handler.get_games_for_library(library_id)
-        if library_id is not None
-        else db_game_handler.get_all_games()
-    )
-    return [GameSchema.model_validate(g) for g in games]
+    if library_id is not None:
+        if not user.is_admin and library_id in user.hidden_library_ids:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        games = db_game_handler.get_games_for_library(library_id)
+    else:
+        games = db_game_handler.get_all_games()
+        if not user.is_admin and user.hidden_library_ids:
+            games = [g for g in games if g.library_id not in user.hidden_library_ids]
+    installed = _installed_game_ids(user.id)
+    return [GameSchema.model_validate(g).model_copy(update={"installed": g.id in installed}) for g in games]
 
 
 @router.get("/{id}")
@@ -29,7 +43,8 @@ async def get_game(user: CurrentUser, id: Annotated[int, Path(ge=1)]) -> GameSch
     game = db_game_handler.get_game(id)
     if game is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-    return GameSchema.model_validate(game)
+    installed = game.id in _installed_game_ids(user.id)
+    return GameSchema.model_validate(game).model_copy(update={"installed": installed})
 
 
 @router.put("/{id}")

@@ -33,15 +33,24 @@ from logger.formatter import highlight as hl
 from logger.logger import log
 
 
-def default_build_id() -> str | None:
+# Ultimate fallback once neither the DB setting nor the env var name a
+# build: Proton (via CachyOS's maintained build), not plain Wine - a game
+# that actually needs real Proton-specific compatibility fixes
+# (protonfixes, see runner.py's own note on "waitforexitandrun") would
+# otherwise silently fall back to a plain Wine run that never applies them.
+_FALLBACK_BUILD_ID = "cachyos-latest"
+
+
+def default_build_id() -> str:
     """The configured default Proton/Wine build id - the DB setting
     (editable from Settings in the web UI) takes priority over the env var,
     which stays as the bootstrap/.env-only fallback (same pattern as
-    igdb_handler._credentials and utils.install_cache.default_ttl_days)."""
+    igdb_handler._credentials and utils.install_cache.default_ttl_days);
+    _FALLBACK_BUILD_ID is what's used once neither says anything at all."""
     from handler.database import db_settings_handler
 
     configured = db_settings_handler.get_settings().install_default_proton_build
-    return configured or INSTALL_DEFAULT_PROTON_BUILD
+    return configured or INSTALL_DEFAULT_PROTON_BUILD or _FALLBACK_BUILD_ID
 
 
 @dataclass(frozen=True, slots=True)

@@ -114,3 +114,10 @@ class InstallCacheSchema(BaseModel):
 
 class InstallCacheClearSchema(BaseModel):
     cleared: int
+
+
+class InstallDefaultsSchema(BaseModel):
+    """The modes a start request that omits them gets (the server's Settings)."""
+
+    auto_mode: bool
+    manual_mode: bool

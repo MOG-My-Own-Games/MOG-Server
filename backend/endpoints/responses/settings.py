@@ -9,6 +9,15 @@ class SettingsSchema(BaseModel):
     steamgriddb_api_key: str | None
     install_cache_ttl_days: int | None
     install_default_proton_build: str | None
+    install_default_auto_mode: bool | None
+    install_default_manual_mode: bool | None
+
+
+class SettingsValidationSchema(BaseModel):
+    # None means "not configured" (nothing to validate); True/False is a
+    # live pass/fail of whatever is configured.
+    igdb_valid: bool | None
+    steamgriddb_valid: bool | None
 
 
 class SettingsUpdateForm(BaseModel):
@@ -17,3 +26,5 @@ class SettingsUpdateForm(BaseModel):
     steamgriddb_api_key: str | None = None
     install_cache_ttl_days: int | None = None
     install_default_proton_build: str | None = None
+    install_default_auto_mode: bool | None = None
+    install_default_manual_mode: bool | None = None

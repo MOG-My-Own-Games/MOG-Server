@@ -11,12 +11,16 @@ VNC proxy below talks to 127.0.0.1 instead of a worker hostname.
 from __future__ import annotations
 
 import asyncio
+import os
+import tempfile
 import threading
+import zipfile
 from pathlib import Path
 from typing import Annotated
 
 import aiohttp
 from fastapi import APIRouter, HTTPException, Path as PathVar, Request, Response, WebSocket, status
+from starlette.background import BackgroundTask
 from starlette.responses import FileResponse, StreamingResponse
 from starlette.websockets import WebSocketState
 
@@ -28,6 +32,7 @@ from endpoints.responses.install import (
     InstallCacheSchema,
     InstallCandidateSchema,
     InstallCandidatesSchema,
+    InstallDefaultsSchema,
     InstallFileSchema,
     InstallFilesSchema,
     InstallSessionSchema,
@@ -42,6 +47,7 @@ from handler.database import db_game_handler, db_install_session_handler
 from handler.filesystem import fs_game_handler
 from handler.filesystem.installer_detection import ARCHIVE_SOURCE_KINDS, pick_default_installer
 from handler.install import bandwidth
+from handler.install.defaults import default_auto_mode, default_manual_mode
 from handler.install.archive_prescan import is_archive_candidate, list_source_candidates
 from handler.install.manifest import (
     find_manifest_entry,
@@ -112,6 +118,13 @@ async def get_active_installs(user: CurrentUser) -> list[InstallSessionSchema]:
     return [_session_schema(s) for s in sessions if s.state in ACTIVE_INSTALL_STATES]
 
 
+@router.get("/install/defaults")
+async def get_install_defaults(user: CurrentUser) -> InstallDefaultsSchema:
+    """What a start request that omits auto_mode/manual_mode gets, so a client
+    can prefill its own toggles with the server's Settings."""
+    return InstallDefaultsSchema(auto_mode=default_auto_mode(), manual_mode=default_manual_mode())
+
+
 @router.get("/{id}/install/candidates")
 async def get_install_candidates(
     user: CurrentUser, id: Annotated[int, PathVar(ge=1)], source: str | None = None
@@ -174,7 +187,7 @@ async def start_install_session(
 
     installer_path = data.installer_path
     source_path = data.source_path
-    manual_mode = data.manual_mode or False
+    manual_mode = data.manual_mode if data.manual_mode is not None else default_manual_mode()
     if installer_path is None and source_path is None:
         candidates = fs_game_handler.get_installer_candidates(game)
         default = pick_default_installer(candidates)
@@ -187,7 +200,7 @@ async def start_install_session(
 
     initial_state = InstallSessionState.AWAITING_INSTALLER if needs_manual_pick else InstallSessionState.DETECTING
     previous_state = existing.state if existing else None
-    auto_mode = data.auto_mode if data.auto_mode is not None else False
+    auto_mode = data.auto_mode if data.auto_mode is not None else default_auto_mode()
 
     if existing:
         session = db_install_session_handler.update_session(
@@ -458,6 +471,38 @@ async def download_install_file(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     return FileResponse(
         path=session_cache_dir(session.id) / entry.path, filename=Path(entry.path).name, media_type="application/octet-stream"
+    )
+
+
+@router.get("/{id}/install/download")
+async def download_install_zip(
+    user: CurrentUser, id: Annotated[int, PathVar(ge=1)], session_id: int | None = None
+) -> FileResponse:
+    """The whole finished install cache as one ZIP - built to a temp file
+    (not in memory, a multi-GB game would exhaust it) and removed once the
+    response has been sent."""
+    session = _resolve_session(id, user.id, session_id)
+    if session is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    entries = read_manifest(session_cache_dir(session.id))
+    if not entries:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
+    cache_dir = session_cache_dir(session.id)
+    tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
+    tmp.close()
+
+    def build_zip() -> None:
+        with zipfile.ZipFile(tmp.name, "w", zipfile.ZIP_DEFLATED) as zf:
+            for entry in entries:
+                zf.write(cache_dir / entry.path, arcname=entry.path)
+
+    await asyncio.to_thread(build_zip)
+    return FileResponse(
+        path=tmp.name,
+        filename=f"game-{id}-install.zip",
+        media_type="application/zip",
+        background=BackgroundTask(os.unlink, tmp.name),
     )
 
 

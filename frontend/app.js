@@ -22,6 +22,7 @@ const IGDB_RATING_VALUE = {
 };
 
 let creds = null; // {user, pass}
+let currentUser = null;
 let libraries = [];
 let games = [];
 let selectedLibraryId = null;
@@ -82,16 +83,18 @@ function fmtBytes(n) {
 
 // --- Tabs (shared between the game page and the settings page) ---
 
+function activateTab(navSelector, dataAttr, panelPrefix, name) {
+  document.querySelectorAll(`${navSelector} .tab-btn`).forEach((b) => {
+    b.classList.toggle("active", b.dataset[dataAttr] === name);
+  });
+  document.querySelectorAll(`[id^="${panelPrefix}-"]`).forEach((panel) => {
+    panel.hidden = panel.id !== `${panelPrefix}-${name}`;
+  });
+}
+
 function initTabs(navSelector, dataAttr, panelPrefix) {
   document.querySelectorAll(`${navSelector} .tab-btn`).forEach((btn) => {
-    btn.addEventListener("click", () => {
-      document.querySelectorAll(`${navSelector} .tab-btn`).forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-      const name = btn.dataset[dataAttr];
-      document.querySelectorAll(`[id^="${panelPrefix}-"]`).forEach((panel) => {
-        panel.hidden = panel.id !== `${panelPrefix}-${name}`;
-      });
-    });
+    btn.addEventListener("click", () => activateTab(navSelector, dataAttr, panelPrefix, btn.dataset[dataAttr]));
   });
 }
 initTabs("#view-game .tabs", "tab", "tab");
@@ -103,12 +106,31 @@ function showScreen(id) {
   document.querySelectorAll(".screen").forEach((el) => (el.hidden = el.id !== id));
 }
 
+function applyAvatar(avatarPath, imgId, placeholderId) {
+  const img = document.getElementById(imgId);
+  const placeholder = document.getElementById(placeholderId);
+  if (avatarPath) {
+    img.src = avatarPath;
+    img.hidden = false;
+    placeholder.hidden = true;
+  } else {
+    img.hidden = true;
+    placeholder.hidden = false;
+  }
+}
+
+function applyTopbarAvatar() {
+  if (!currentUser) return;
+  document.getElementById("profile-username").textContent = currentUser.username;
+  applyAvatar(currentUser.avatar_path, "profile-avatar", "profile-avatar-placeholder");
+}
+
 async function tryLogin(user, pass) {
   creds = { user, pass };
-  await api("/api/libraries"); // throws on bad creds
+  currentUser = await api("/api/users/me"); // throws on bad creds
   sessionStorage.setItem("mog_user", user);
   sessionStorage.setItem("mog_pass", pass);
-  document.getElementById("profile-username").textContent = user;
+  applyTopbarAvatar();
   showScreen("app-screen");
   await refreshLibraries();
   router();
@@ -132,7 +154,17 @@ document.getElementById("logout-btn").addEventListener("click", () => {
   sessionStorage.removeItem("mog_user");
   sessionStorage.removeItem("mog_pass");
   creds = null;
+  currentUser = null;
   showScreen("login-screen");
+});
+
+document.getElementById("user-menu-btn").addEventListener("click", (e) => {
+  e.stopPropagation();
+  const dropdown = document.getElementById("user-menu-dropdown");
+  dropdown.hidden = !dropdown.hidden;
+});
+document.addEventListener("click", () => {
+  document.getElementById("user-menu-dropdown").hidden = true;
 });
 
 // --- Router ---
@@ -146,9 +178,13 @@ function router() {
     const id = parseInt(hash.slice("game/".length), 10);
     document.getElementById("view-game").hidden = false;
     openGamePage(id);
-  } else if (hash === "settings") {
+  } else if (hash === "profile") {
+    document.getElementById("view-profile").hidden = false;
+    openProfilePage();
+  } else if (hash.startsWith("settings")) {
     document.getElementById("view-settings").hidden = false;
-    openSettingsPage();
+    const subTab = hash.includes("/") ? hash.slice("settings/".length) : null;
+    openSettingsPage(subTab);
   } else {
     document.getElementById("view-games").hidden = false;
     refreshGames();
@@ -157,19 +193,61 @@ function router() {
 }
 window.addEventListener("hashchange", router);
 
+// --- Profile page ---
+
+async function openProfilePage() {
+  try {
+    currentUser = await api("/api/users/me");
+  } catch (_) {
+    return;
+  }
+  document.getElementById("profile-name-display").textContent = currentUser.username;
+  document.getElementById("profile-role-display").textContent = currentUser.role;
+  applyAvatar(currentUser.avatar_path, "profile-avatar-lg", "profile-avatar-lg-placeholder");
+  document.getElementById("avatar-upload-status").textContent = "";
+  document.getElementById("avatar-upload-input").value = "";
+}
+
+document.getElementById("avatar-upload-input").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  if (!file || !currentUser) return;
+  const statusEl = document.getElementById("avatar-upload-status");
+  statusEl.textContent = "Uploading...";
+  const formData = new FormData();
+  formData.append("file", file);
+  try {
+    const resp = await fetch(`/api/users/${currentUser.id}/avatar`, {
+      method: "POST",
+      headers: { Authorization: authHeader() },
+      body: formData,
+    });
+    if (!resp.ok) throw new Error(resp.statusText);
+    currentUser = await resp.json();
+    applyAvatar(currentUser.avatar_path, "profile-avatar-lg", "profile-avatar-lg-placeholder");
+    applyTopbarAvatar();
+    statusEl.textContent = "Saved.";
+  } catch (err) {
+    statusEl.textContent = `Upload failed: ${err.message}`;
+  }
+});
+
 // --- Default install-mode settings (per-browser, see localStorage) ---
 
-function getInstallDefaults() {
-  return {
-    autoMode: localStorage.getItem("mog_setting_auto_mode") === "1",
-    manualMode: localStorage.getItem("mog_setting_manual_mode") === "1",
-  };
+async function getInstallDefaults() {
+  try {
+    const d = await api("/api/games/install/defaults");
+    return { autoMode: d.auto_mode, manualMode: d.manual_mode };
+  } catch (_) {
+    return { autoMode: false, manualMode: false };
+  }
 }
 
 // --- Settings page ---
 
-async function openSettingsPage() {
-  const s = getInstallDefaults();
+async function openSettingsPage(subTab) {
+  activateTab("#view-settings .tabs", "settingsTab", "settings-tab", subTab || "libraries");
+
+  const s = await getInstallDefaults();
   document.getElementById("setting-auto-mode").checked = s.autoMode;
   document.getElementById("setting-manual-mode").checked = s.manualMode;
   document.getElementById("setting-auto-mode").onchange = saveInstallDefaults;
@@ -177,7 +255,7 @@ async function openSettingsPage() {
   document.getElementById("api-keys-saved").textContent = "";
   document.getElementById("cache-ttl-saved").textContent = "";
 
-  renderLibraryList("settings-library-list", { clickable: false, showScrape: true });
+  renderLibraryList("settings-library-list", { clickable: false, showScrape: true, allowDelete: true });
 
   try {
     const apiSettings = await api("/api/settings");
@@ -192,14 +270,132 @@ async function openSettingsPage() {
   }
 
   await refreshCacheTable();
+  await refreshProviderValidityBadges();
+  await refreshUsersTable();
 }
+
+// --- Metadata provider key validation badges ---
+
+function applyValidityBadge(el, valid) {
+  if (valid === null || valid === undefined) {
+    el.textContent = "";
+    el.className = "validity-badge";
+  } else if (valid) {
+    el.textContent = "✓";
+    el.className = "validity-badge valid";
+  } else {
+    el.textContent = "✗";
+    el.className = "validity-badge invalid";
+  }
+}
+
+async function refreshProviderValidityBadges() {
+  const igdbBadge = document.getElementById("igdb-valid-badge");
+  const sgdbBadge = document.getElementById("sgdb-valid-badge");
+  try {
+    const result = await api("/api/settings/validate");
+    applyValidityBadge(igdbBadge, result.igdb_valid);
+    applyValidityBadge(sgdbBadge, result.steamgriddb_valid);
+  } catch (_) {
+    applyValidityBadge(igdbBadge, null);
+    applyValidityBadge(sgdbBadge, null);
+  }
+}
+
+// --- Users (Settings > Users, admin only) ---
+
+async function refreshUsersTable() {
+  const body = document.getElementById("users-table-body");
+  body.innerHTML = "<tr><td colspan='4' class='muted'>Loading...</td></tr>";
+  try {
+    const users = await api("/api/users");
+    body.innerHTML = "";
+    for (const u of users) {
+      const tr = document.createElement("tr");
+
+      const nameTd = document.createElement("td");
+      nameTd.textContent = u.username;
+      tr.appendChild(nameTd);
+
+      const roleTd = document.createElement("td");
+      roleTd.textContent = u.role;
+      tr.appendChild(roleTd);
+
+      const hiddenTd = document.createElement("td");
+      const select = document.createElement("select");
+      select.multiple = true;
+      select.size = Math.min(4, Math.max(2, libraries.length || 2));
+      for (const lib of libraries) {
+        const opt = document.createElement("option");
+        opt.value = lib.id;
+        opt.textContent = lib.name;
+        opt.selected = (u.hidden_library_ids || []).includes(lib.id);
+        select.appendChild(opt);
+      }
+      select.addEventListener("change", async () => {
+        const ids = Array.from(select.selectedOptions).map((o) => parseInt(o.value, 10));
+        try {
+          await api(`/api/users/${u.id}`, { method: "PUT", body: JSON.stringify({ hidden_library_ids: ids }) });
+        } catch (err) {
+          alert(`Could not update: ${err.message}`);
+        }
+      });
+      hiddenTd.appendChild(select);
+      tr.appendChild(hiddenTd);
+
+      const actionTd = document.createElement("td");
+      const delBtn = document.createElement("button");
+      delBtn.textContent = "Delete";
+      delBtn.className = "danger";
+      delBtn.addEventListener("click", async () => {
+        if (!confirm(`Delete user "${u.username}"?`)) return;
+        try {
+          await api(`/api/users/${u.id}`, { method: "DELETE" });
+          await refreshUsersTable();
+        } catch (err) {
+          alert(`Could not delete: ${err.message}`);
+        }
+      });
+      actionTd.appendChild(delBtn);
+      tr.appendChild(actionTd);
+
+      body.appendChild(tr);
+    }
+  } catch (err) {
+    body.innerHTML = `<tr><td colspan="4" class="error">${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
+document.getElementById("show-add-user-btn").addEventListener("click", () => {
+  const form = document.getElementById("add-user-form");
+  form.hidden = !form.hidden;
+});
+
+document.getElementById("add-user-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try {
+    await api("/api/users", {
+      method: "POST",
+      body: JSON.stringify({
+        username: document.getElementById("new-user-username").value,
+        password: document.getElementById("new-user-password").value,
+        role: document.getElementById("new-user-role").value,
+      }),
+    });
+    document.getElementById("add-user-form").reset();
+    document.getElementById("add-user-form").hidden = true;
+    await refreshUsersTable();
+  } catch (err) {
+    alert(`Could not create user: ${err.message}`);
+  }
+});
 
 // --- Proton / Wine build management (Settings > Install defaults) ---
 
 async function refreshProtonBuildsTable(currentDefault) {
   const select = document.getElementById("setting-proton-default");
   const body = document.getElementById("proton-builds-table-body");
-  select.innerHTML = '<option value="">(plain Wine)</option>';
+  select.innerHTML = '<option value="">(server default - CachyOS Proton)</option>';
   body.innerHTML = "<tr><td colspan='4' class='muted'>Loading...</td></tr>";
   try {
     const data = await api("/api/games/install/proton-builds");
@@ -272,9 +468,18 @@ document.getElementById("save-proton-default-btn").addEventListener("click", asy
   }
 });
 
-function saveInstallDefaults() {
-  localStorage.setItem("mog_setting_auto_mode", document.getElementById("setting-auto-mode").checked ? "1" : "0");
-  localStorage.setItem("mog_setting_manual_mode", document.getElementById("setting-manual-mode").checked ? "1" : "0");
+async function saveInstallDefaults() {
+  try {
+    await api("/api/settings", {
+      method: "PUT",
+      body: JSON.stringify({
+        install_default_auto_mode: document.getElementById("setting-auto-mode").checked,
+        install_default_manual_mode: document.getElementById("setting-manual-mode").checked,
+      }),
+    });
+  } catch (_) {
+    // The toggles re-read the server's value next time Settings opens.
+  }
 }
 
 document.getElementById("save-api-keys-btn").addEventListener("click", async () => {
@@ -289,6 +494,7 @@ document.getElementById("save-api-keys-btn").addEventListener("click", async () 
       }),
     });
     savedEl.textContent = "Saved.";
+    await refreshProviderValidityBadges();
   } catch (err) {
     savedEl.textContent = `Could not save: ${err.message}`;
   }
@@ -406,7 +612,7 @@ async function refreshLibraries() {
 
 // Shared renderer for both the sidebar (clickable, filters the game grid)
 // and the Settings page's list (not clickable; optionally offers Scrape).
-function renderLibraryList(containerId, { clickable, showScrape = false }) {
+function renderLibraryList(containerId, { clickable, showScrape = false, allowDelete = false }) {
   const list = document.getElementById(containerId);
   list.innerHTML = "";
 
@@ -416,7 +622,6 @@ function renderLibraryList(containerId, { clickable, showScrape = false }) {
     allItem.className = selectedLibraryId === null ? "active" : "";
     allItem.addEventListener("click", () => {
       selectedLibraryId = null;
-      document.getElementById("games-heading").textContent = "All games";
       location.hash = "";
       refreshGames();
     });
@@ -432,7 +637,6 @@ function renderLibraryList(containerId, { clickable, showScrape = false }) {
     if (clickable) {
       info.addEventListener("click", () => {
         selectedLibraryId = lib.id;
-        document.getElementById("games-heading").textContent = lib.name;
         location.hash = "";
         refreshGames();
       });
@@ -477,6 +681,25 @@ function renderLibraryList(containerId, { clickable, showScrape = false }) {
       actions.appendChild(scrapeBtn);
     }
 
+    if (allowDelete) {
+      const delBtn = document.createElement("button");
+      delBtn.textContent = "Delete";
+      delBtn.className = "danger";
+      delBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        if (!confirm(`Delete library "${lib.name}"? This does not delete files on disk.`)) return;
+        try {
+          await api(`/api/libraries/${lib.id}`, { method: "DELETE" });
+          if (selectedLibraryId === lib.id) selectedLibraryId = null;
+          await refreshLibraries();
+          renderLibraryList("settings-library-list", { clickable: false, showScrape: true, allowDelete: true });
+        } catch (err) {
+          alert(`Could not delete: ${err.message}`);
+        }
+      });
+      actions.appendChild(delBtn);
+    }
+
     li.appendChild(actions);
     list.appendChild(li);
   }
@@ -489,7 +712,7 @@ document.getElementById("add-library-form").addEventListener("submit", async (e)
   await api("/api/libraries", { method: "POST", body: JSON.stringify({ name, root_path }) });
   document.getElementById("add-library-form").reset();
   await refreshLibraries();
-  renderLibraryList("settings-library-list", { clickable: false, showScrape: true });
+  renderLibraryList("settings-library-list", { clickable: false, showScrape: true, allowDelete: true });
 });
 
 // --- Games grid page ---
@@ -497,8 +720,14 @@ document.getElementById("add-library-form").addEventListener("submit", async (e)
 async function refreshGames() {
   const qs = selectedLibraryId !== null ? `?library_id=${selectedLibraryId}` : "";
   games = await api(`/api/games${qs}`);
+  const libName = selectedLibraryId === null ? "All Games" : (libraries.find((l) => l.id === selectedLibraryId) || {}).name || "Games";
+  document.getElementById("games-heading").textContent = `${libName} (${games.length})`;
   renderGameGrid(document.getElementById("game-search").value.trim().toLowerCase());
 }
+
+// Corner badge on a cover: the game has a finished install on the server.
+const INSTALLED_BADGE =
+  '<span class="installed-badge" title="Installed"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg></span>';
 
 function renderGameGrid(filterText) {
   const grid = document.getElementById("game-grid");
@@ -509,7 +738,7 @@ function renderGameGrid(filterText) {
     card.className = "game-card";
     card.title = game.name;
     card.innerHTML = `
-      <div class="cover">${game.cover_path ? `<img src="${escapeHtml(game.cover_path)}" />` : "\u{1F3AE}"}</div>
+      <div class="cover${game.cover_path ? "" : " no-cover"}">${game.cover_path ? `<img src="${escapeHtml(game.cover_path)}" />` : "\u{1F3AE}"}${game.installed ? INSTALLED_BADGE : ""}</div>
       <div class="name">${escapeHtml(game.name)}</div>
     `;
     card.addEventListener("click", () => {
@@ -589,15 +818,16 @@ async function openGamePage(id) {
   document.getElementById("vnc-container").hidden = true;
   document.getElementById("vnc-placeholder").hidden = false;
   document.getElementById("cancel-install-btn").hidden = true;
-  document.getElementById("clear-cache-btn").hidden = true;
+  document.getElementById("clear-game-cache-btn").hidden = true;
   document.getElementById("start-install-btn").hidden = false;
   document.getElementById("files-empty").hidden = false;
   document.getElementById("files-cache-path").textContent = "";
   document.getElementById("files-table-body").innerHTML = "";
 
-  const defaults = getInstallDefaults();
-  document.getElementById("auto-mode-check").checked = defaults.autoMode;
-  document.getElementById("manual-mode-check").checked = defaults.manualMode;
+  getInstallDefaults().then((defaults) => {
+    document.getElementById("auto-mode-check").checked = defaults.autoMode;
+    document.getElementById("manual-mode-check").checked = defaults.manualMode;
+  });
   document.getElementById("ttl-days-input").value = "";
   installQueue = [];
   queueActive = false;
@@ -617,6 +847,13 @@ async function openGamePage(id) {
   }
 }
 
+function relationCard(item) {
+  const href =
+    item.url || (item.slug ? `https://www.igdb.com/games/${item.slug}` : `https://www.igdb.com/search?type=1&q=${encodeURIComponent(item.name)}`);
+  const cover = item.cover?.url ? `<img src="${escapeHtml(item.cover.url)}" loading="lazy" alt="" />` : '<div class="relation-nocover"></div>';
+  return `<a class="relation-card" href="${escapeHtml(href)}" target="_blank" rel="noopener">${cover}<span>${escapeHtml(item.name)}</span></a>`;
+}
+
 function renderOverview(game) {
   const meta = game.igdb_metadata || {};
 
@@ -628,8 +865,9 @@ function renderOverview(game) {
   const ratingsEl = document.getElementById("game-age-ratings");
   ratingsEl.innerHTML = (meta.age_ratings || [])
     .map((r) => {
-      const org = IGDB_RATING_CATEGORY[r.category] || `Org ${r.category}`;
-      const val = IGDB_RATING_VALUE[r.rating] || `#${r.rating}`;
+      const org = r.organization?.name || IGDB_RATING_CATEGORY[r.category];
+      const val = r.rating_category?.rating || IGDB_RATING_VALUE[r.rating];
+      if (!org || !val) return "";
       return `<span class="chip chip-rating">${escapeHtml(org)} ${escapeHtml(val)}</span>`;
     })
     .join("");
@@ -646,8 +884,12 @@ function renderOverview(game) {
 
   const shotsEl = document.getElementById("game-screenshots");
   shotsEl.innerHTML = (meta.screenshots || [])
-    .map((s) => `<img src="${escapeHtml(s.url)}" loading="lazy" />`)
+    .map((s, i) => `<img src="${escapeHtml(s.url)}" loading="lazy" data-index="${i}" />`)
     .join("");
+  shotsEl.onclick = (e) => {
+    const idx = e.target.dataset?.index;
+    if (idx !== undefined) openGallery((meta.screenshots || []).map((s) => s.url), Number(idx));
+  };
 
   const relEl = document.getElementById("game-relations");
   const sections = [
@@ -658,10 +900,7 @@ function renderOverview(game) {
   ];
   relEl.innerHTML = sections
     .filter(([, items]) => items && items.length)
-    .map(
-      ([label, items]) =>
-        `<div class="relation-group"><h4>${label}</h4><p class="muted small">${items.map((i) => escapeHtml(i.name)).join(", ")}</p></div>`
-    )
+    .map(([label, items]) => `<div class="relation-group"><h4>${label}</h4><div class="relation-grid">${items.map(relationCard).join("")}</div></div>`)
     .join("");
 
   const hasAnything =
@@ -671,6 +910,41 @@ function renderOverview(game) {
     (meta.age_ratings || []).length;
   document.getElementById("overview-empty").hidden = !!hasAnything;
 }
+
+// --- Screenshot gallery ---
+
+let galleryUrls = [];
+let galleryIndex = 0;
+
+function showGallery() {
+  document.getElementById("gallery-img").src = galleryUrls[galleryIndex];
+  document.getElementById("gallery-count").textContent = `${galleryIndex + 1} / ${galleryUrls.length}`;
+}
+
+function openGallery(urls, index) {
+  galleryUrls = urls.map((u) => u.replace("t_screenshot_big", "t_1080p"));
+  galleryIndex = index;
+  showGallery();
+  document.getElementById("gallery").hidden = false;
+}
+
+function stepGallery(delta) {
+  galleryIndex = (galleryIndex + delta + galleryUrls.length) % galleryUrls.length;
+  showGallery();
+}
+
+document.getElementById("gallery-prev").addEventListener("click", () => stepGallery(-1));
+document.getElementById("gallery-next").addEventListener("click", () => stepGallery(1));
+document.getElementById("gallery-close").addEventListener("click", () => (document.getElementById("gallery").hidden = true));
+document.getElementById("gallery").addEventListener("click", (e) => {
+  if (e.target.id === "gallery") e.target.hidden = true;
+});
+document.addEventListener("keydown", (e) => {
+  if (document.getElementById("gallery").hidden) return;
+  if (e.key === "ArrowLeft") stepGallery(-1);
+  else if (e.key === "ArrowRight") stepGallery(1);
+  else if (e.key === "Escape") document.getElementById("gallery").hidden = true;
+});
 
 // --- Metadata (IGDB / SteamGridDB) ---
 
@@ -699,6 +973,8 @@ document.getElementById("scrape-btn").addEventListener("click", async () => {
 document.getElementById("edit-metadata-btn").addEventListener("click", () => {
   document.getElementById("edit-name").value = activeGame.name;
   document.getElementById("edit-summary").value = activeGame.summary || activeGame.igdb_metadata?.summary || "";
+  document.getElementById("edit-igdb-id").value = activeGame.igdb_id ?? "";
+  document.getElementById("edit-sgdb-id").value = activeGame.sgdb_id ?? "";
   document.getElementById("edit-metadata-form").hidden = false;
 });
 
@@ -714,6 +990,8 @@ document.getElementById("edit-metadata-form").addEventListener("submit", async (
       body: JSON.stringify({
         name: document.getElementById("edit-name").value,
         summary: document.getElementById("edit-summary").value,
+        igdb_id: document.getElementById("edit-igdb-id").value === "" ? null : parseInt(document.getElementById("edit-igdb-id").value, 10),
+        sgdb_id: document.getElementById("edit-sgdb-id").value === "" ? null : parseInt(document.getElementById("edit-sgdb-id").value, 10),
       }),
     });
     activeGame = game;
@@ -826,7 +1104,7 @@ async function loadCandidates(gameId) {
       });
       label.appendChild(check);
       const text = document.createElement("span");
-      text.textContent = `${c.path} (${c.kind}, ${fmtBytes(c.file_size_bytes)})`;
+      text.textContent = `${c.path} (${fmtBytes(c.file_size_bytes)})`;
       label.appendChild(text);
       list.appendChild(label);
     });
@@ -905,8 +1183,9 @@ document.getElementById("cancel-install-btn").addEventListener("click", async ()
   renderInstallState(session);
 });
 
-document.getElementById("clear-cache-btn").addEventListener("click", async () => {
+document.getElementById("clear-game-cache-btn").addEventListener("click", async () => {
   if (!activeGame) return;
+  if (!confirm("Clear this game's install cache?")) return;
   await api(`/api/games/${activeGame.id}/install`, { method: "DELETE" });
   location.hash = "";
 });
@@ -932,19 +1211,38 @@ function stopPolling() {
   pollTimer = null;
 }
 
+const AUTO_LABELS = {
+  running: "Auto mode: acting",
+  scanning: "Auto mode: reading the screen",
+  waiting: "Auto mode: waiting",
+  needs_manual: "Auto mode stuck: continue by hand",
+};
+
+function renderAutoIndicator(session) {
+  const el = document.getElementById("auto-indicator");
+  const active = session.auto_mode && ACTIVE_INSTALL_STATES.includes(session.state);
+  el.hidden = !active;
+  if (!active) return;
+  const status = session.auto_status || "scanning";
+  el.dataset.status = status;
+  document.getElementById("auto-label").textContent = AUTO_LABELS[status] || `Auto mode: ${status}`;
+  document.getElementById("auto-detail").textContent = session.auto_detail || "";
+}
+
 function renderInstallState(session) {
   const statusEl = document.getElementById("install-status");
   statusEl.hidden = false;
   document.getElementById("install-state").textContent = session.state;
   document.getElementById("install-detail").textContent =
-    session.phase_detail || session.auto_detail || "";
+    session.phase_detail || (session.state === "installing" ? "Installer is running, interact with it in the display" : "");
+  renderAutoIndicator(session);
   document.getElementById("install-error").textContent = session.error || "";
 
   const pct = session.bytes_total ? (session.bytes_written / session.bytes_total) * 100 : 0;
   document.getElementById("install-progress").style.width = `${pct}%`;
 
   document.getElementById("cancel-install-btn").hidden = !ACTIVE_INSTALL_STATES.includes(session.state);
-  document.getElementById("clear-cache-btn").hidden = ACTIVE_INSTALL_STATES.includes(session.state);
+  document.getElementById("clear-game-cache-btn").hidden = ACTIVE_INSTALL_STATES.includes(session.state);
   document.getElementById("start-install-btn").hidden = ACTIVE_INSTALL_STATES.includes(session.state);
 
   const vncContainer = document.getElementById("vnc-container");
@@ -990,6 +1288,7 @@ function renderInstallState(session) {
 
 async function loadFilesTab(gameId, cachePath) {
   document.getElementById("files-cache-path").textContent = cachePath || "";
+  document.getElementById("download-cache-btn").href = `/api/games/${gameId}/install/download`;
   const body = document.getElementById("files-table-body");
   const emptyEl = document.getElementById("files-empty");
   try {
@@ -1032,7 +1331,6 @@ async function loadFilesTab(gameId, cachePath) {
   const user = sessionStorage.getItem("mog_user");
   const pass = sessionStorage.getItem("mog_pass");
   if (user && pass) {
-    document.getElementById("profile-username").textContent = user;
     tryLogin(user, pass).catch(() => showScreen("login-screen"));
   } else {
     showScreen("login-screen");

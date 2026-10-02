@@ -1,13 +1,23 @@
 :root {
+  /* Design tokens - every component below reads colors/spacing/radius from
+     here, so a palette change only ever happens in one place. */
   --bg: #15171c;
   --bg-elevated: #1d2028;
+  --bg-elevated-2: #242834;
   --border: #2a2e38;
   --text: #e6e8ec;
   --muted: #8b909c;
   --accent: #5b8def;
   --accent-hover: #4878d6;
   --danger: #e2574c;
+  --danger-hover: #c94439;
+  --success: #3fb97a;
   --radius: 8px;
+  --radius-sm: 4px;
+  --space-xs: 0.3em;
+  --space-sm: 0.5em;
+  --space-md: 1em;
+  --space-lg: 1.5em;
 }
 
 * { box-sizing: border-box; }
@@ -33,42 +43,56 @@ body {
 .muted.small { font-size: 0.8em; margin: 0.2em 0 0.8em; }
 .error { color: var(--danger); min-height: 1.2em; }
 
+/* Buttons and button-like links share one rule set keyed by class, not tag
+   (`.ghost`/`.danger`, never `button.ghost`) - an element-typed selector
+   silently never matches an <a>, which is exactly what left the Settings
+   link unstyled ("malformed") before this. */
 button, .button-link {
   background: var(--accent);
   color: white;
   border: none;
   border-radius: var(--radius);
-  padding: 0.5em 1em;
+  padding: var(--space-sm) var(--space-md);
   cursor: pointer;
   font-size: 0.95em;
+  text-decoration: none;
+  display: inline-block;
 }
 button:hover, .button-link:hover { background: var(--accent-hover); }
-/* Plain class selectors (not `button.ghost`): .button-link is an <a>, not a
-   <button>, and an element-typed selector silently never matches it, which
-   is exactly what left the Settings link unstyled (looking "malformed"
-   next to the real Sign out button) before this. */
 .ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
 .ghost:hover { background: var(--bg-elevated); }
 .danger { background: var(--danger); }
-.danger:hover { background: #c94439; }
-.button-link { text-decoration: none; display: inline-block; }
+.danger:hover { background: var(--danger-hover); }
 
-input[type="text"], input[type="password"], input[type="number"], select, textarea {
+input[type="text"], input[type="password"], input[type="number"], input[type="file"], select, textarea {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   color: var(--text);
-  padding: 0.5em 0.75em;
+  padding: var(--space-sm) 0.75em;
   font-size: 0.95em;
   font-family: inherit;
 }
 
 code {
   background: var(--bg-elevated);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   padding: 0.1em 0.4em;
   font-size: 0.9em;
 }
+
+/* Shared "boxed section" component - every Settings/Files sub-section uses
+   this instead of hand-rolled spacing, so they all read as one consistent
+   structure rather than each being laid out from scratch. */
+.card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-lg);
+  margin-bottom: var(--space-lg);
+  max-width: 640px;
+}
+.card h3 { margin-top: 0; }
 
 /* Login */
 #login-screen {
@@ -99,7 +123,49 @@ code {
 .topbar h1 { margin: 0; font-size: 1.2em; }
 .topbar-brand { text-decoration: none; }
 .topbar-actions { display: flex; gap: 0.75em; align-items: center; }
-.profile-badge { color: var(--muted); font-size: 0.9em; }
+
+.avatar-sm, .avatar-placeholder {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+  vertical-align: middle;
+}
+.avatar-placeholder {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-elevated-2);
+  font-size: 0.9em;
+}
+
+.user-menu { position: relative; }
+.user-menu-btn { display: flex; align-items: center; gap: 0.5em; }
+.dropdown-menu {
+  position: absolute;
+  top: calc(100% + 0.4em);
+  right: 0;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-width: 160px;
+  overflow: hidden;
+  z-index: 50;
+}
+.dropdown-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0.6em 1em;
+  background: transparent;
+  color: var(--text);
+  text-decoration: none;
+  border: none;
+  border-radius: 0;
+  font-size: 0.9em;
+}
+.dropdown-item:hover { background: var(--bg-elevated-2); }
+.dropdown-item-btn { cursor: pointer; }
 
 .layout { display: flex; min-height: calc(100vh - 57px); }
 
@@ -137,6 +203,15 @@ code {
 }
 .active-installs-list .ai-progress-fill { height: 100%; background: var(--accent); }
 
+.cache-size-link {
+  display: block;
+  color: var(--muted);
+  font-size: 0.8em;
+  text-decoration: none;
+  margin-top: 0.8em;
+}
+.cache-size-link:hover { color: var(--text); }
+
 .library-list { list-style: none; padding: 0; margin: 0 0 1em; }
 .library-list li {
   display: flex;
@@ -146,7 +221,7 @@ code {
   border-radius: var(--radius);
   cursor: pointer;
 }
-.library-list li:hover, .library-list li.active { background: var(--bg-elevated); }
+.library-list li:hover, .library-list li.active { background: var(--bg-elevated-2); }
 .library-list .lib-name { font-weight: 500; }
 .library-list .lib-path { font-size: 0.8em; color: var(--muted); display: block; }
 .library-list button { padding: 0.25em 0.6em; font-size: 0.8em; }
@@ -155,26 +230,23 @@ code {
 .add-library-form { display: flex; flex-direction: column; gap: 0.5em; max-width: 360px; }
 
 .main { flex: 1; padding: 1.5em; overflow-y: auto; }
-.main-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1em; }
+.main-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1em; gap: 1em; }
+.main-header h3 { margin: 0; }
 
 .game-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 1em;
+  gap: 1.25em;
 }
-.game-card {
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 1em;
-  cursor: pointer;
-}
-.game-card:hover { border-color: var(--accent); }
+/* No card chrome at all on the grid - just the cover, then the title below
+   it, the way RomM's own library grid reads. The old version wrapped every
+   cover in a bordered, flat-gray-filled box, which is exactly the "ugly
+   rectangle with huge borders" this replaces. */
+.game-card { cursor: pointer; }
 .game-card .cover {
   width: 100%;
   aspect-ratio: 3 / 4;
-  background: #2a2e38;
-  border-radius: 4px;
+  border-radius: var(--radius);
   margin-bottom: 0.5em;
   display: flex;
   align-items: center;
@@ -182,14 +254,40 @@ code {
   color: var(--muted);
   font-size: 2em;
   overflow: hidden;
+  transition: box-shadow 0.15s;
 }
-/* contain, not cover: a cropped cover loses the top/bottom or sides of the
-   actual artwork - RomM's own cards never crop, they letterbox and put the
-   title below instead, which this matches. */
-.game-card .cover img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.game-card .cover { position: relative; }
+.installed-badge {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 3.2rem;
+  height: 3.2rem;
+  clip-path: polygon(100% 0, 100% 100%, 0 100%);
+  background: linear-gradient(to top left, #7fa8ff, var(--accent) 55%, #3c64c4);
+}
+.installed-badge svg {
+  position: absolute;
+  right: 0.35rem;
+  bottom: 0.35rem;
+  width: 1.2rem;
+  height: 1.2rem;
+  fill: none;
+  stroke: #fff;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.4));
+}
+.game-card .cover img { width: 100%; height: 100%; object-fit: cover; border-radius: var(--radius); }
+/* A game with no cover yet still needs *some* visible footprint, just not
+   a heavy box - a thin outline instead of a filled gray fill. */
+.game-card .cover.no-cover { border: 1px dashed var(--border); }
+.game-card:hover .cover { box-shadow: 0 0 0 2px var(--accent); }
 .game-card .name {
   font-weight: 500;
   font-size: 0.95em;
+  text-align: center;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -210,24 +308,29 @@ code {
   width: 140px;
   aspect-ratio: 3 / 4;
   flex-shrink: 0;
-  background: var(--bg-elevated);
   border-radius: var(--radius);
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
 }
-.game-header-cover img { max-width: 100%; max-height: 100%; object-fit: contain; }
-.cover-placeholder { font-size: 2.5em; color: var(--muted); }
-
-.edit-metadata-form {
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
+.game-header-cover img { width: 100%; height: 100%; object-fit: cover; border-radius: var(--radius); }
+.cover-placeholder {
+  font-size: 2.5em;
+  color: var(--muted);
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--border);
   border-radius: var(--radius);
-  padding: 1em;
-  margin-bottom: 1.25em;
-  max-width: 480px;
 }
+.avatar-lg { width: 96px; }
+
+.profile-card { display: flex; gap: 1.5em; align-items: flex-start; }
+
+.edit-metadata-form { max-width: 640px; }
 .edit-metadata-form textarea { width: 100%; resize: vertical; }
 
 .tabs { display: flex; gap: 0.25em; border-bottom: 1px solid var(--border); margin-bottom: 1.25em; }
@@ -245,17 +348,20 @@ code {
 .page-columns { display: flex; gap: 2em; }
 .page-col { flex: 1; min-width: 0; max-width: 480px; }
 .page-col-wide { max-width: none; }
+.page-col-main { flex: 1 1 auto; max-width: none; }
+.page-col-side { flex: 0 0 320px; }
+@media (max-width: 900px) { .page-columns { flex-direction: column; } .page-col-side { flex-basis: auto; } }
 .page-col h3 { font-size: 0.9em; text-transform: uppercase; color: var(--muted); margin-top: 0; }
 
 .section { margin-top: 1.25em; }
-.page-actions { display: flex; gap: 0.5em; }
+.page-actions { display: flex; gap: 0.5em; align-items: center; }
 
 .field-label { display: block; margin: 0.75em 0; }
 .field-label input, .field-label select { display: block; margin-top: 0.3em; width: 100%; max-width: 320px; }
 
 .chip-row { display: flex; flex-wrap: wrap; gap: 0.4em; margin: 0.5em 0; }
 .chip {
-  background: var(--bg-elevated);
+  background: var(--bg-elevated-2);
   border: 1px solid var(--border);
   border-radius: 999px;
   padding: 0.2em 0.75em;
@@ -264,9 +370,21 @@ code {
 .chip-rating { border-color: var(--accent); }
 
 .screenshot-row { display: flex; gap: 0.5em; overflow-x: auto; margin: 1em 0; }
-.screenshot-row img { height: 90px; border-radius: 4px; flex-shrink: 0; }
+.screenshot-row img { height: 220px; border-radius: var(--radius-sm); flex-shrink: 0; cursor: zoom-in; }
+.gallery { position: fixed; inset: 0; z-index: 1000; background: rgba(0, 0, 0, 0.88); display: flex; align-items: center; justify-content: center; }
+.gallery[hidden] { display: none; }
+.gallery img { max-width: 90vw; max-height: 88vh; border-radius: var(--radius-sm); }
+.gallery button { position: absolute; background: rgba(255, 255, 255, 0.15); color: #fff; border: 0; font-size: 2rem; padding: 0.3em 0.6em; cursor: pointer; border-radius: var(--radius-sm); }
+.gallery-prev { left: 1rem; top: 50%; }
+.gallery-next { right: 1rem; top: 50%; }
+.gallery-close { right: 1rem; top: 1rem; }
+.gallery-count { position: absolute; bottom: 1rem; color: #fff; }
 
 .relation-group { margin-top: 0.75em; }
+.relation-grid { display: flex; flex-wrap: wrap; gap: 0.75em; margin-top: 0.4em; }
+.relation-card { width: 120px; text-decoration: none; color: var(--text); font-size: 0.8em; }
+.relation-card img, .relation-card .relation-nocover { width: 120px; height: 160px; object-fit: cover; border-radius: var(--radius-sm); background: var(--bg-elevated); display: block; margin-bottom: 0.3em; }
+.relation-card:hover span { text-decoration: underline; }
 .relation-group h4 { font-size: 0.8em; text-transform: uppercase; color: var(--muted); margin: 0 0 0.2em; }
 
 .candidate-list { display: flex; flex-direction: column; gap: 0.4em; max-height: 220px; overflow-y: auto; }
@@ -292,10 +410,6 @@ code {
   background: black;
 }
 
-.files-list { list-style: none; padding: 0; font-size: 0.9em; }
-.files-list li { padding: 0.25em 0; display: flex; justify-content: space-between; }
-.files-list a { color: var(--accent); }
-
 .match-results { list-style: none; padding: 0; max-height: 300px; overflow-y: auto; }
 .match-results li {
   display: flex;
@@ -311,18 +425,63 @@ code {
 .grid-results { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.5em; max-height: 300px; overflow-y: auto; }
 .grid-results img {
   width: 100%;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   border: 2px solid transparent;
 }
 .grid-results img:hover { border-color: var(--accent); }
 
-/* Install cache table (Settings) */
-.cache-table { width: 100%; max-width: 640px; border-collapse: collapse; margin-top: 1em; font-size: 0.9em; }
-.cache-table th, .cache-table td { text-align: left; padding: 0.4em 0.6em; border-bottom: 1px solid var(--border); }
+/* Shared data table (install cache, proton builds, files, users) */
+.data-table { width: 100%; max-width: 640px; border-collapse: collapse; margin-top: 1em; font-size: 0.9em; }
+.data-table th, .data-table td { text-align: left; padding: 0.4em 0.6em; border-bottom: 1px solid var(--border); }
 
-/* Settings form fields */
-#view-settings label {
+/* Toggle switch (RomM-style): title+description to the left, a sliding
+   switch to the right, rather than a bare native checkbox. */
+.toggle-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1em;
+  padding: 0.6em 0;
+  border-bottom: 1px solid var(--border);
+}
+.toggle-row:last-child { border-bottom: none; }
+.toggle-row p { margin: 0.2em 0 0; }
+.switch { position: relative; display: inline-block; width: 42px; height: 24px; flex-shrink: 0; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.switch .slider {
+  position: absolute;
+  inset: 0;
+  background: var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.switch .slider::before {
+  content: "";
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  left: 3px;
+  top: 3px;
+  background: white;
+  border-radius: 50%;
+  transition: transform 0.15s;
+}
+.switch input:checked + .slider { background: var(--accent); }
+.switch input:checked + .slider::before { transform: translateX(18px); }
+
+/* Provider cards (Settings > Metadata providers) */
+.provider-card-header { display: flex; justify-content: space-between; align-items: baseline; gap: 1em; }
+.provider-card-header h3 { display: flex; align-items: center; gap: 0.5em; }
+.provider-card-header a { font-size: 0.85em; }
+.validity-badge { font-size: 0.8em; }
+.validity-badge.valid { color: var(--success); }
+.validity-badge.invalid { color: var(--danger); }
+
+/* Settings form fields outside a .toggle-row/.provider-card (plain label +
+   input pairs, e.g. the cache TTL / proton default fields) */
+#view-settings > .tab-panel > .card > label {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -330,9 +489,16 @@ code {
   margin-bottom: 0.6em;
   max-width: 480px;
 }
-#view-settings label input[type="text"],
-#view-settings label input[type="password"],
-#view-settings label input[type="number"] {
+#view-settings > .tab-panel > .card > label input[type="text"],
+#view-settings > .tab-panel > .card > label input[type="password"],
+#view-settings > .tab-panel > .card > label input[type="number"] {
   flex: 1;
   max-width: 260px;
 }
+
+.auto-indicator { display: flex; align-items: center; gap: 0.5em; flex-wrap: wrap; margin: 0.5em 0; padding: 0.4em 0.75em; border: 1px solid var(--border, var(--muted)); border-radius: var(--radius-sm); }
+.auto-dot { width: 0.65em; height: 0.65em; border-radius: 50%; background: var(--accent); animation: auto-pulse 1.2s ease-in-out infinite; }
+.auto-indicator[data-status="waiting"] .auto-dot { background: var(--muted); }
+.auto-indicator[data-status="needs_manual"] { border-color: var(--danger); }
+.auto-indicator[data-status="needs_manual"] .auto-dot { background: var(--danger); animation: none; }
+@keyframes auto-pulse { 50% { opacity: 0.3; } }

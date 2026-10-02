@@ -22,9 +22,18 @@
     <header class="topbar">
       <a href="#" class="topbar-brand"><h1>MOG</h1></a>
       <div class="topbar-actions">
-        <span id="profile-badge" class="profile-badge">&#128100; <span id="profile-username"></span></span>
-        <a href="#settings" class="ghost button-link">Settings</a>
-        <button id="logout-btn" class="ghost">Sign out</button>
+        <div class="user-menu">
+          <button id="user-menu-btn" class="ghost user-menu-btn" type="button">
+            <img id="profile-avatar" class="avatar-sm" hidden />
+            <span id="profile-avatar-placeholder" class="avatar-sm avatar-placeholder">&#128100;</span>
+            <span id="profile-username"></span>
+          </button>
+          <div id="user-menu-dropdown" class="dropdown-menu" hidden>
+            <a href="#profile" class="dropdown-item">My profile</a>
+            <a href="#settings" class="dropdown-item">Settings</a>
+            <button id="logout-btn" class="dropdown-item dropdown-item-btn">Sign out</button>
+          </div>
+        </div>
       </div>
     </header>
 
@@ -41,7 +50,7 @@
           <h2>Libraries</h2>
           <ul id="library-list" class="library-list"></ul>
 
-          <p class="muted small">Install cache: <span id="total-cache-size">...</span></p>
+          <a href="#settings/cache" class="cache-size-link">Install cache: <span id="total-cache-size">...</span></a>
         </div>
       </aside>
       <button id="sidebar-toggle" class="ghost sidebar-toggle" title="Collapse sidebar">&laquo;</button>
@@ -50,7 +59,7 @@
         <!-- Games grid view -->
         <section id="view-games" class="view">
           <div class="main-header">
-            <h2 id="games-heading">All games</h2>
+            <h2 id="games-heading">All Games</h2>
             <button id="refresh-games-btn" class="ghost">Refresh</button>
           </div>
           <div id="game-grid" class="game-grid"></div>
@@ -63,23 +72,35 @@
           <div class="game-header">
             <div class="game-header-cover">
               <img id="game-cover-img" hidden />
-              <div id="game-cover-placeholder" class="cover-placeholder">&#127918;</div>
+              <div id="game-cover-placeholder" class="cover-placeholder" hidden>&#127918;</div>
             </div>
             <div>
               <h2 id="game-title"></h2>
               <p id="game-library" class="muted small"></p>
               <p class="muted small">Game ID: <code id="game-id-display"></code></p>
               <div class="page-actions">
-                <button id="scrape-btn" class="ghost" type="button">Scrape (IGDB + SteamGridDB)</button>
+                <button id="scrape-btn" class="ghost" type="button">Scrape</button>
                 <button id="edit-metadata-btn" class="ghost" type="button">Edit metadata</button>
               </div>
               <p id="scrape-status" class="muted small"></p>
             </div>
           </div>
 
-          <form id="edit-metadata-form" class="edit-metadata-form" hidden>
+          <form id="edit-metadata-form" class="card edit-metadata-form" hidden>
             <label class="field-label">Name<input type="text" id="edit-name" required /></label>
             <label class="field-label">Summary<textarea id="edit-summary" rows="4"></textarea></label>
+            <label class="field-label">IGDB ID (manual override)<input type="number" id="edit-igdb-id" placeholder="unset" /></label>
+            <label class="field-label">SteamGridDB ID (manual override)<input type="number" id="edit-sgdb-id" placeholder="unset" /></label>
+            <div class="metadata-search">
+              <h4>IGDB</h4>
+              <button id="igdb-search-btn" class="ghost" type="button">Search by name</button>
+              <ul id="igdb-results" class="match-results"></ul>
+            </div>
+            <div class="metadata-search">
+              <h4>SteamGridDB cover</h4>
+              <button id="sgdb-search-btn" class="ghost" type="button">Search by name</button>
+              <div id="sgdb-results" class="grid-results"></div>
+            </div>
             <div class="page-actions">
               <button type="submit">Save</button>
               <button type="button" id="edit-metadata-cancel-btn" class="ghost">Cancel</button>
@@ -95,7 +116,7 @@
           <!-- Overview tab -->
           <div id="tab-overview" class="tab-panel">
             <div class="page-columns">
-              <div class="page-col">
+              <div class="page-col page-col-main">
                 <p id="game-summary" class="muted"></p>
                 <div id="game-genres" class="chip-row"></div>
                 <div id="game-age-ratings" class="chip-row"></div>
@@ -104,21 +125,7 @@
                 <div id="game-screenshots" class="screenshot-row"></div>
 
                 <div id="game-relations"></div>
-                <p id="overview-empty" class="muted" hidden>No metadata yet - click "Scrape" above, or search/apply a match below.</p>
-              </div>
-
-              <div class="page-col">
-                <h3>Match metadata manually</h3>
-                <div class="metadata-search">
-                  <h4>IGDB</h4>
-                  <button id="igdb-search-btn" class="ghost" type="button">Search by name</button>
-                  <ul id="igdb-results" class="match-results"></ul>
-                </div>
-                <div class="metadata-search">
-                  <h4>SteamGridDB cover</h4>
-                  <button id="sgdb-search-btn" class="ghost" type="button">Search by name</button>
-                  <div id="sgdb-results" class="grid-results"></div>
-                </div>
+                <p id="overview-empty" class="muted" hidden>No metadata yet - click "Scrape" above, or use "Edit metadata" to search and apply a match.</p>
               </div>
             </div>
           </div>
@@ -137,17 +144,28 @@
                 <label class="field-label">Cache TTL (days, 0 = unlimited)
                   <input type="number" id="ttl-days-input" min="0" placeholder="(server default)" />
                 </label>
-                <label><input type="checkbox" id="auto-mode-check" /> Auto mode (experimental, OCR-driven)</label>
-                <label><input type="checkbox" id="manual-mode-check" /> Force manual pick</label>
+
+                <div class="toggle-row">
+                  <div><strong>Auto mode</strong><p class="muted small">Experimental, OCR-driven - presses the installer's own buttons.</p></div>
+                  <label class="switch"><input type="checkbox" id="auto-mode-check" /><span class="slider"></span></label>
+                </div>
+                <div class="toggle-row">
+                  <div><strong>Force manual pick</strong><p class="muted small">Sit in "awaiting installer" so you can pick a file by hand.</p></div>
+                  <label class="switch"><input type="checkbox" id="manual-mode-check" /><span class="slider"></span></label>
+                </div>
 
                 <div class="section page-actions">
                   <button id="start-install-btn">Install</button>
                   <button id="cancel-install-btn" class="danger" hidden>Cancel</button>
-                  <button id="clear-cache-btn" class="ghost" hidden>Clear cache</button>
                 </div>
 
                 <div id="install-status" class="section" hidden>
                   <p><strong id="install-state"></strong> <span id="install-detail" class="muted"></span></p>
+                  <div id="auto-indicator" class="auto-indicator" hidden>
+                    <span class="auto-dot"></span>
+                    <strong id="auto-label"></strong>
+                    <span id="auto-detail" class="muted small"></span>
+                  </div>
                   <div class="progress-bar"><div id="install-progress" class="progress-fill"></div></div>
                   <p id="install-error" class="error"></p>
                 </div>
@@ -165,12 +183,43 @@
 
           <!-- Files tab: the finished install's own cache, root and files (like RomM's file manager) -->
           <div id="tab-files" class="tab-panel" hidden>
-            <p class="muted small">Cache root: <code id="files-cache-path"></code></p>
-            <table id="files-table" class="cache-table">
-              <thead><tr><th>Path</th><th>Size</th><th>SHA1</th><th></th></tr></thead>
-              <tbody id="files-table-body"></tbody>
-            </table>
-            <p id="files-empty" class="muted" hidden>No finished install yet - see the Install tab.</p>
+            <div class="card">
+              <h3>Root</h3>
+              <p class="muted small">Where this install's files live inside the server container.</p>
+              <p class="muted small"><code id="files-cache-path"></code></p>
+            </div>
+
+            <div class="card">
+              <div class="main-header">
+                <h3>Installer cache</h3>
+                <div class="page-actions">
+                  <a id="download-cache-btn" class="ghost button-link" download>Download (.zip)</a>
+                  <button id="clear-game-cache-btn" class="danger" type="button">Clear cache</button>
+                </div>
+              </div>
+              <table id="files-table" class="data-table">
+                <thead><tr><th>Path</th><th>Size</th><th>SHA1</th><th></th></tr></thead>
+                <tbody id="files-table-body"></tbody>
+              </table>
+              <p id="files-empty" class="muted" hidden>No finished install yet - see the Install tab.</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- My profile view -->
+        <section id="view-profile" class="view" hidden>
+          <a href="#" class="back-link">&laquo; Back to library</a>
+          <h2>My profile</h2>
+          <div class="card profile-card">
+            <div class="game-header-cover avatar-lg">
+              <img id="profile-avatar-lg" hidden />
+              <div id="profile-avatar-lg-placeholder" class="cover-placeholder">&#128100;</div>
+            </div>
+            <div>
+              <p><strong id="profile-name-display"></strong> <span id="profile-role-display" class="chip"></span></p>
+              <label class="field-label">Upload a new avatar<input type="file" id="avatar-upload-input" accept="image/png,image/jpeg,image/webp" /></label>
+              <p id="avatar-upload-status" class="muted small"></p>
+            </div>
           </div>
         </section>
 
@@ -184,68 +233,137 @@
             <button class="tab-btn" data-settings-tab="install">Install defaults</button>
             <button class="tab-btn" data-settings-tab="cache">Install cache</button>
             <button class="tab-btn" data-settings-tab="providers">Metadata providers</button>
+            <button class="tab-btn" data-settings-tab="users">Users</button>
           </nav>
 
           <div id="settings-tab-libraries" class="tab-panel">
-            <ul id="settings-library-list" class="library-list"></ul>
-            <form id="add-library-form" class="add-library-form">
-              <input id="lib-name" type="text" placeholder="Name" required />
-              <input id="lib-path" type="text" placeholder="Path inside container, e.g. /library" required />
-              <button type="submit">Add library</button>
-            </form>
+            <div class="card">
+              <h3>Your libraries</h3>
+              <ul id="settings-library-list" class="library-list"></ul>
+            </div>
+            <div class="card">
+              <h3>Add a library</h3>
+              <form id="add-library-form" class="add-library-form">
+                <input id="lib-name" type="text" placeholder="Name" required />
+                <input id="lib-path" type="text" placeholder="Path inside container, e.g. /library" required />
+                <button type="submit">Add library</button>
+              </form>
+            </div>
           </div>
 
           <div id="settings-tab-install" class="tab-panel" hidden>
-            <p class="muted">Applied the next time you start an install (overridable per-install on its own Install tab).</p>
-            <label><input type="checkbox" id="setting-auto-mode" /> Auto mode by default (experimental, OCR-driven)</label>
-            <label><input type="checkbox" id="setting-manual-mode" /> Force manual pick by default</label>
+            <div class="card">
+              <h3>Default install mode</h3>
+              <p class="muted small">Server-wide: used by any client that starts an install without choosing (overridable per-install on its own Install tab).</p>
+              <div class="toggle-row">
+                <div><strong>Auto mode by default</strong><p class="muted small">Experimental, OCR-driven.</p></div>
+                <label class="switch"><input type="checkbox" id="setting-auto-mode" /><span class="slider"></span></label>
+              </div>
+              <div class="toggle-row">
+                <div><strong>Force manual pick by default</strong></div>
+                <label class="switch"><input type="checkbox" id="setting-manual-mode" /><span class="slider"></span></label>
+              </div>
+            </div>
 
-            <h3>Proton / Wine builds</h3>
-            <label class="field-label">Default build
-              <select id="setting-proton-default"><option value="">(plain Wine)</option></select>
-            </label>
-            <button id="save-proton-default-btn" type="button">Save default</button>
-            <p id="proton-default-saved" class="muted small"></p>
+            <div class="card">
+              <h3>Proton / Wine builds</h3>
+              <label class="field-label">Default build
+                <select id="setting-proton-default"><option value="">(server default - CachyOS Proton)</option></select>
+              </label>
+              <button id="save-proton-default-btn" type="button">Save default</button>
+              <p id="proton-default-saved" class="muted small"></p>
 
-            <button id="refresh-proton-builds-btn" class="ghost" type="button">Refresh</button>
-            <table id="proton-builds-table" class="cache-table">
-              <thead><tr><th>Build</th><th>Version</th><th>Status</th><th></th></tr></thead>
-              <tbody id="proton-builds-table-body"></tbody>
-            </table>
+              <button id="refresh-proton-builds-btn" class="ghost" type="button">Refresh</button>
+              <table id="proton-builds-table" class="data-table">
+                <thead><tr><th>Build</th><th>Version</th><th>Status</th><th></th></tr></thead>
+                <tbody id="proton-builds-table-body"></tbody>
+              </table>
+            </div>
           </div>
 
           <div id="settings-tab-cache" class="tab-panel" hidden>
-            <label class="field-label">Default cache TTL (days, 0 = unlimited)
-              <input type="number" id="setting-cache-ttl" min="0" />
-            </label>
-            <button id="save-cache-ttl-btn" type="button">Save</button>
-            <p id="cache-ttl-saved" class="muted small"></p>
+            <div class="card">
+              <h3>Default cache TTL</h3>
+              <label class="field-label">Days (0 = unlimited)<input type="number" id="setting-cache-ttl" min="0" /></label>
+              <button id="save-cache-ttl-btn" type="button">Save</button>
+              <p id="cache-ttl-saved" class="muted small"></p>
+            </div>
 
-            <h3>Cached installs</h3>
-            <button id="refresh-cache-btn" class="ghost" type="button">Refresh</button>
-            <button id="clear-all-cache-btn" class="danger" type="button">Clear all</button>
-            <table id="cache-table" class="cache-table">
-              <thead><tr><th>Session</th><th>Game</th><th>State</th><th>Size</th><th></th></tr></thead>
-              <tbody id="cache-table-body"></tbody>
-            </table>
+            <div class="card">
+              <div class="main-header">
+                <h3>Cached installs</h3>
+                <div class="page-actions">
+                  <button id="refresh-cache-btn" class="ghost" type="button">Refresh</button>
+                  <button id="clear-all-cache-btn" class="danger" type="button">Clear all</button>
+                </div>
+              </div>
+              <table id="cache-table" class="data-table">
+                <thead><tr><th>Session</th><th>Game</th><th>State</th><th>Size</th><th></th></tr></thead>
+                <tbody id="cache-table-body"></tbody>
+              </table>
+            </div>
           </div>
 
           <div id="settings-tab-providers" class="tab-panel" hidden>
-            <p class="muted">
-              Stored on the server. IGDB uses Twitch's OAuth client-credentials flow, which needs both the
-              Client ID and Client Secret (https://dev.twitch.tv/docs/authentication/getting-tokens-oauth/).
-            </p>
-            <label class="field-label">IGDB Client ID<input type="text" id="setting-igdb-id" autocomplete="off" /></label>
-            <label class="field-label">IGDB Client Secret<input type="password" id="setting-igdb-secret" autocomplete="off" /></label>
-            <label class="field-label">SteamGridDB API Key<input type="password" id="setting-sgdb-key" autocomplete="off" /></label>
+            <div class="card provider-card">
+              <div class="provider-card-header">
+                <h3>IGDB <span id="igdb-valid-badge" class="validity-badge"></span></h3>
+                <a href="https://api-docs.igdb.com/#getting-started" target="_blank" rel="noopener">Getting started guide &#8599;</a>
+              </div>
+              <p class="muted small">
+                Create a Twitch developer app at
+                <a href="https://dev.twitch.tv/console/apps" target="_blank" rel="noopener">dev.twitch.tv/console/apps</a>
+                - IGDB auth goes through Twitch's OAuth. You need both values below; a Client ID alone isn't enough.
+              </p>
+              <label class="field-label">Client ID<input type="text" id="setting-igdb-id" autocomplete="off" /></label>
+              <label class="field-label">Client Secret<input type="password" id="setting-igdb-secret" autocomplete="off" /></label>
+            </div>
+
+            <div class="card provider-card">
+              <div class="provider-card-header">
+                <h3>SteamGridDB <span id="sgdb-valid-badge" class="validity-badge"></span></h3>
+                <a href="https://www.steamgriddb.com/profile/preferences/api" target="_blank" rel="noopener">Get an API key &#8599;</a>
+              </div>
+              <p class="muted small">Used for cover art. Free account, no approval wait.</p>
+              <label class="field-label">API Key<input type="password" id="setting-sgdb-key" autocomplete="off" /></label>
+            </div>
+
             <button id="save-api-keys-btn" type="button">Save API keys</button>
             <p id="api-keys-saved" class="muted small"></p>
+          </div>
+
+          <div id="settings-tab-users" class="tab-panel" hidden>
+            <div class="card">
+              <div class="main-header">
+                <h3>Users</h3>
+                <button id="show-add-user-btn" class="ghost" type="button">Add user</button>
+              </div>
+              <form id="add-user-form" class="add-library-form" hidden>
+                <input id="new-user-username" type="text" placeholder="Username" required />
+                <input id="new-user-password" type="password" placeholder="Password" required />
+                <label class="field-label">Role
+                  <select id="new-user-role"><option value="user">User</option><option value="admin">Admin</option></select>
+                </label>
+                <button type="submit">Create</button>
+              </form>
+              <table id="users-table" class="data-table">
+                <thead><tr><th>Username</th><th>Role</th><th>Hidden libraries</th><th></th></tr></thead>
+                <tbody id="users-table-body"></tbody>
+              </table>
+            </div>
           </div>
         </section>
       </main>
     </div>
   </div>
 
+  <div id="gallery" class="gallery" hidden>
+    <button id="gallery-prev" class="gallery-prev" aria-label="Previous">&#8249;</button>
+    <img id="gallery-img" alt="" />
+    <button id="gallery-next" class="gallery-next" aria-label="Next">&#8250;</button>
+    <button id="gallery-close" class="gallery-close" aria-label="Close">&times;</button>
+    <span id="gallery-count" class="gallery-count"></span>
+  </div>
   <script src="app.js"></script>
 </body>
 </html>

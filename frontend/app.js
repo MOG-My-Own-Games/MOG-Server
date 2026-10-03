@@ -247,6 +247,10 @@ async function getInstallDefaults() {
 async function openSettingsPage(subTab) {
   activateTab("#view-settings .tabs", "settingsTab", "settings-tab", subTab || "libraries");
 
+  api("/api/health")
+    .then((h) => { document.getElementById("server-version").textContent = h.version; })
+    .catch(() => {});
+
   const s = await getInstallDefaults();
   document.getElementById("setting-auto-mode").checked = s.autoMode;
   document.getElementById("setting-manual-mode").checked = s.manualMode;

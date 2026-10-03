@@ -1,3 +1,5 @@
+<p align="center"><img src="frontend/assets/mascotte.png" width="200" alt="MOG" /></p>
+
 # MOG Server
 
 Self-hosted scan + scrape + sandboxed install for a personal PC game library.

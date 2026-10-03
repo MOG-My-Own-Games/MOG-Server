@@ -4,12 +4,14 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>MOG</title>
+  <link rel="icon" type="image/png" href="assets/favicon.png" />
+  <link rel="apple-touch-icon" href="assets/icon.png" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <div id="login-screen" class="screen">
     <form id="login-form" class="login-card">
-      <h1>MOG</h1>
+      <img class="login-logo" src="assets/mascotte.png" alt="MOG" />
       <p class="muted">Sign in to your server</p>
       <input id="login-user" type="text" placeholder="Username" autocomplete="username" required />
       <input id="login-pass" type="password" placeholder="Password" autocomplete="current-password" required />
@@ -20,10 +22,10 @@
 
   <div id="app-screen" class="screen" hidden>
     <header class="topbar">
-      <a href="#" class="topbar-brand"><h1>MOG</h1></a>
+      <a href="#" class="topbar-brand" title="MOG"><img class="brand-icon" src="assets/icon.png" alt="" /><img class="brand-title" src="assets/title.png" alt="MOG" /></a>
       <div class="topbar-actions">
         <div class="user-menu">
-          <button id="user-menu-btn" class="ghost user-menu-btn" type="button">
+          <button id="user-menu-btn" class="user-menu-btn" type="button">
             <img id="profile-avatar" class="avatar-sm" hidden />
             <span id="profile-avatar-placeholder" class="avatar-sm avatar-placeholder">&#128100;</span>
             <span id="profile-username"></span>
@@ -53,14 +55,14 @@
           <a href="#settings/cache" class="cache-size-link">Install cache: <span id="total-cache-size">...</span></a>
         </div>
       </aside>
-      <button id="sidebar-toggle" class="ghost sidebar-toggle" title="Collapse sidebar">&laquo;</button>
+      <button id="sidebar-toggle" class="sidebar-toggle" title="Collapse sidebar">&laquo;</button>
 
       <main class="main">
         <!-- Games grid view -->
         <section id="view-games" class="view">
           <div class="main-header">
             <h2 id="games-heading">All Games</h2>
-            <button id="refresh-games-btn" class="ghost">Refresh</button>
+            <button id="refresh-games-btn">Refresh</button>
           </div>
           <div id="game-grid" class="game-grid"></div>
         </section>
@@ -94,17 +96,17 @@
             <label class="field-label">SteamGridDB ID (manual override)<input type="number" id="edit-sgdb-id" placeholder="unset" /></label>
             <div class="metadata-search">
               <h4>IGDB</h4>
-              <button id="igdb-search-btn" class="ghost" type="button">Search by name</button>
+              <button id="igdb-search-btn" type="button">Search by name</button>
               <ul id="igdb-results" class="match-results"></ul>
             </div>
             <div class="metadata-search">
               <h4>SteamGridDB cover</h4>
-              <button id="sgdb-search-btn" class="ghost" type="button">Search by name</button>
+              <button id="sgdb-search-btn" type="button">Search by name</button>
               <div id="sgdb-results" class="grid-results"></div>
             </div>
             <div class="page-actions">
               <button type="submit">Save</button>
-              <button type="button" id="edit-metadata-cancel-btn" class="ghost">Cancel</button>
+              <button type="button" id="edit-metadata-cancel-btn">Cancel</button>
             </div>
           </form>
 
@@ -203,7 +205,7 @@
                   <div class="main-header">
                     <h3>Installer cache</h3>
                     <div class="page-actions">
-                      <a id="download-cache-btn" class="ghost button-link" download>Download (.zip)</a>
+                      <a id="download-cache-btn" class="button-link" download>Download (.zip)</a>
                       <button id="clear-game-cache-btn" class="danger" type="button">Clear cache</button>
                     </div>
                   </div>
@@ -294,7 +296,7 @@
               <button id="save-proton-default-btn" type="button">Save default</button>
               <p id="proton-default-saved" class="muted small"></p>
 
-              <button id="refresh-proton-builds-btn" class="ghost" type="button">Refresh</button>
+              <button id="refresh-proton-builds-btn" type="button">Refresh</button>
               <table id="proton-builds-table" class="data-table">
                 <thead><tr><th>Build</th><th>Version</th><th>Status</th><th></th></tr></thead>
                 <tbody id="proton-builds-table-body"></tbody>
@@ -314,7 +316,7 @@
               <div class="main-header">
                 <h3>Cached installs</h3>
                 <div class="page-actions">
-                  <button id="refresh-cache-btn" class="ghost" type="button">Refresh</button>
+                  <button id="refresh-cache-btn" type="button">Refresh</button>
                   <button id="clear-all-cache-btn" class="danger" type="button">Clear all</button>
                 </div>
               </div>
@@ -330,7 +332,7 @@
               <div class="main-header">
                 <h3>Missing games</h3>
                 <div class="page-actions">
-                  <button id="refresh-missing-btn" class="ghost" type="button">Refresh</button>
+                  <button id="refresh-missing-btn" type="button">Refresh</button>
                   <button id="clear-all-missing-btn" class="danger" type="button">Clear all</button>
                 </div>
               </div>
@@ -374,7 +376,7 @@
             <div class="card">
               <div class="main-header">
                 <h3>Users</h3>
-                <button id="show-add-user-btn" class="ghost" type="button">Add user</button>
+                <button id="show-add-user-btn" type="button">Add user</button>
               </div>
               <form id="add-user-form" class="add-library-form" hidden>
                 <input id="new-user-username" type="text" placeholder="Username" required />

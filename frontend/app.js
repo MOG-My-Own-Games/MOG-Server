@@ -426,8 +426,8 @@ async function refreshProtonBuildsTable(currentDefault) {
       tr.innerHTML = `<td>${escapeHtml(b.label)}</td><td>${escapeHtml(b.version || "")}</td><td>${b.installed ? "Installed" : "Not installed"}</td>`;
       const actionTd = document.createElement("td");
       const btn = document.createElement("button");
-      btn.className = "ghost";
       if (b.installed) {
+        btn.className = "danger";
         btn.textContent = "Remove";
         btn.addEventListener("click", async () => {
           if (!confirm(`Remove ${b.label}?`)) return;
@@ -551,7 +551,7 @@ async function refreshCacheTable() {
       const actionTd = document.createElement("td");
       const delBtn = document.createElement("button");
       delBtn.textContent = "Delete";
-      delBtn.className = "ghost";
+      delBtn.className = "danger";
       delBtn.addEventListener("click", async () => {
         try {
           await api(`/api/games/install/cache/${entry.session_id}`, { method: "DELETE" });
@@ -605,7 +605,7 @@ async function refreshMissingTable() {
       const actionTd = document.createElement("td");
       const delBtn = document.createElement("button");
       delBtn.textContent = "Clear";
-      delBtn.className = "ghost";
+      delBtn.className = "danger";
       delBtn.addEventListener("click", async () => {
         try {
           await api(`/api/games/${game.id}`, { method: "DELETE" });
@@ -719,7 +719,6 @@ function renderLibraryList(containerId, { clickable, showScrape = false, allowDe
 
     const scanBtn = document.createElement("button");
     scanBtn.textContent = "Scan";
-    scanBtn.className = "ghost";
     scanBtn.addEventListener("click", async (e) => {
       e.stopPropagation();
       scanBtn.textContent = "...";
@@ -735,7 +734,6 @@ function renderLibraryList(containerId, { clickable, showScrape = false, allowDe
     if (showScrape) {
       const scrapeBtn = document.createElement("button");
       scrapeBtn.textContent = "Scrape";
-      scrapeBtn.className = "ghost";
       scrapeBtn.title = "Fill in missing metadata (IGDB + SteamGridDB) for every game in this library";
       scrapeBtn.addEventListener("click", async (e) => {
         e.stopPropagation();
@@ -1158,7 +1156,6 @@ document.getElementById("igdb-search-btn").addEventListener("click", async () =>
       name.textContent = r.name;
       li.appendChild(name);
       const applyBtn = document.createElement("button");
-      applyBtn.className = "ghost";
       applyBtn.textContent = "Apply";
       applyBtn.addEventListener("click", async () => {
         const game = await api(`/api/games/${activeGame.id}/metadata/igdb/${r.id}`, { method: "POST" });

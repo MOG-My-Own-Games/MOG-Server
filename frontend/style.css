@@ -46,7 +46,7 @@ body {
 .error { color: var(--danger); min-height: 1.2em; }
 
 /* Buttons and button-like links share one rule set keyed by class, not tag
-   (`.ghost`/`.danger`, never `button.ghost`) - an element-typed selector
+   (`.danger`, never `button.danger`) - an element-typed selector
    silently never matches an <a>, which is exactly what left the Settings
    link unstyled ("malformed") before this. */
 button, .button-link {
@@ -61,8 +61,6 @@ button, .button-link {
   display: inline-block;
 }
 button:hover, .button-link:hover { filter: brightness(1.12); }
-.ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
-.ghost:hover { background: var(--bg-elevated); }
 .danger { background: var(--danger); }
 .danger:hover { background: var(--danger-hover); }
 
@@ -112,7 +110,7 @@ code {
   border-radius: var(--radius);
   border: 1px solid var(--border);
 }
-.login-card h1 { margin: 0; }
+.login-logo { width: 160px; align-self: center; }
 
 /* App shell */
 .topbar {
@@ -123,7 +121,9 @@ code {
   border-bottom: 1px solid var(--border);
 }
 .topbar h1 { margin: 0; font-size: 1.2em; }
-.topbar-brand { text-decoration: none; }
+.topbar-brand { display: flex; align-items: center; gap: 0.6em; text-decoration: none; }
+.brand-icon { height: 32px; }
+.brand-title { height: 28px; }
 .topbar-actions { display: flex; gap: 0.75em; align-items: center; }
 
 .avatar-sm, .avatar-placeholder {

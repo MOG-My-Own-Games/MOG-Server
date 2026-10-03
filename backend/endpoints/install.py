@@ -47,7 +47,7 @@ from handler.database import db_game_handler, db_install_session_handler
 from handler.filesystem import fs_game_handler
 from handler.filesystem.installer_detection import ARCHIVE_SOURCE_KINDS, pick_default_installer
 from handler.install import bandwidth
-from handler.install.defaults import default_auto_mode, default_manual_mode
+from handler.install.defaults import default_auto_mode, default_download_workers, default_manual_mode
 from handler.install.archive_prescan import is_archive_candidate, list_source_candidates
 from handler.install.manifest import (
     find_manifest_entry,
@@ -122,7 +122,9 @@ async def get_active_installs(user: CurrentUser) -> list[InstallSessionSchema]:
 async def get_install_defaults(user: CurrentUser) -> InstallDefaultsSchema:
     """What a start request that omits auto_mode/manual_mode gets, so a client
     can prefill its own toggles with the server's Settings."""
-    return InstallDefaultsSchema(auto_mode=default_auto_mode(), manual_mode=default_manual_mode())
+    return InstallDefaultsSchema(
+        auto_mode=default_auto_mode(), manual_mode=default_manual_mode(), download_workers=default_download_workers()
+    )
 
 
 @router.get("/{id}/install/candidates")
@@ -354,7 +356,7 @@ async def get_install_stream_manifest(
     )
 
 
-_STREAM_PIECE_SIZE = 256 * 1024
+_STREAM_PIECE_SIZE = 1024 * 1024
 
 
 def _parse_range(range_header: str | None, sealed_bytes: int) -> tuple[int, int] | tuple[None, None]:

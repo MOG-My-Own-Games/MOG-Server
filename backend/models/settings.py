@@ -18,6 +18,9 @@ from models.base import BaseModel
 
 SETTINGS_ROW_ID = 1
 
+# Files a client downloads at once (see handler/install/defaults.py).
+DOWNLOAD_WORKERS_MIN, DOWNLOAD_WORKERS_MAX = 1, 16
+
 
 class Settings(BaseModel):
     __tablename__ = "settings"
@@ -40,3 +43,6 @@ class Settings(BaseModel):
     # mode (see handler/install/defaults.py).
     install_default_auto_mode: Mapped[bool | None] = mapped_column(Boolean, default=None)
     install_default_manual_mode: Mapped[bool | None] = mapped_column(Boolean, default=None)
+    # Files a client downloads in parallel. NULL falls back to
+    # config.INSTALL_DOWNLOAD_WORKERS_DEFAULT.
+    download_workers: Mapped[int | None] = mapped_column(Integer, default=None)

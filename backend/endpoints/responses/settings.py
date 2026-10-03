@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from models.settings import DOWNLOAD_WORKERS_MAX, DOWNLOAD_WORKERS_MIN
 
 
 class SettingsSchema(BaseModel):
@@ -11,6 +13,7 @@ class SettingsSchema(BaseModel):
     install_default_proton_build: str | None
     install_default_auto_mode: bool | None
     install_default_manual_mode: bool | None
+    download_workers: int | None
 
 
 class SettingsValidationSchema(BaseModel):
@@ -28,3 +31,4 @@ class SettingsUpdateForm(BaseModel):
     install_default_proton_build: str | None = None
     install_default_auto_mode: bool | None = None
     install_default_manual_mode: bool | None = None
+    download_workers: int | None = Field(default=None, ge=DOWNLOAD_WORKERS_MIN, le=DOWNLOAD_WORKERS_MAX)

@@ -350,9 +350,9 @@ document.getElementById("avatar-upload-input").addEventListener("change", async 
 async function getInstallDefaults() {
   try {
     const d = await api("/api/games/install/defaults");
-    return { autoMode: d.auto_mode, manualMode: d.manual_mode };
+    return { autoMode: d.auto_mode, manualMode: d.manual_mode, downloadWorkers: d.download_workers };
   } catch (_) {
-    return { autoMode: false, manualMode: false };
+    return { autoMode: false, manualMode: false, downloadWorkers: 4 };
   }
 }
 
@@ -368,6 +368,8 @@ async function openSettingsPage(subTab) {
   const s = await getInstallDefaults();
   document.getElementById("setting-auto-mode").checked = s.autoMode;
   document.getElementById("setting-manual-mode").checked = s.manualMode;
+  document.getElementById("setting-download-workers").value = s.downloadWorkers;
+  document.getElementById("download-workers-saved").textContent = "";
   document.getElementById("setting-auto-mode").onchange = saveInstallDefaults;
   document.getElementById("setting-manual-mode").onchange = saveInstallDefaults;
   const groupToggle = document.getElementById("setting-group-games");
@@ -624,6 +626,22 @@ document.getElementById("save-api-keys-btn").addEventListener("click", async () 
     });
     savedEl.textContent = "Saved.";
     await refreshProviderValidityBadges();
+  } catch (err) {
+    savedEl.textContent = `Could not save: ${err.message}`;
+  }
+});
+
+document.getElementById("save-download-workers-btn").addEventListener("click", async () => {
+  const savedEl = document.getElementById("download-workers-saved");
+  const input = document.getElementById("setting-download-workers");
+  const value = parseInt(input.value, 10);
+  if (!(value >= 1 && value <= 16)) {
+    savedEl.textContent = "Enter a number from 1 to 16.";
+    return;
+  }
+  try {
+    await api("/api/settings", { method: "PUT", body: JSON.stringify({ download_workers: value }) });
+    savedEl.textContent = "Saved.";
   } catch (err) {
     savedEl.textContent = `Could not save: ${err.message}`;
   }

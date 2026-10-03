@@ -28,3 +28,10 @@ def test_default_manual_mode(monkeypatch, configured, expected):
     row = _settings(monkeypatch)
     row.install_default_manual_mode = configured
     assert defaults.default_manual_mode() is expected
+
+
+@pytest.mark.parametrize("configured,env,expected", [(8, 4, 8), (None, 6, 6), (0, 4, 1), (99, 4, 16)])
+def test_download_workers_prefers_db_setting_and_stays_in_range(monkeypatch, configured, env, expected):
+    row = _settings(monkeypatch, download_workers=configured)
+    monkeypatch.setattr(defaults, "INSTALL_DOWNLOAD_WORKERS_DEFAULT", env)
+    assert defaults.default_download_workers() == expected

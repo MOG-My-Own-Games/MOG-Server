@@ -76,6 +76,7 @@ INSTALL_AUTO_STUCK_SECONDS: Final[int] = max(
     10, safe_int(_get_env("INSTALL_AUTO_STUCK_SECONDS"), 60)
 )
 
+INSTALL_DOWNLOAD_WORKERS_DEFAULT: Final[int] = safe_int(_get_env("INSTALL_DOWNLOAD_WORKERS"), 4)
 INSTALL_AUTO_MODE_DEFAULT: Final[bool] = safe_str_to_bool(_get_env("INSTALL_AUTO_MODE_DEFAULT") or "true")
 
 # --- Metadata providers ---

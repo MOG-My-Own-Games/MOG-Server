@@ -38,6 +38,20 @@ class DBGamesHandler(DBBaseHandler):
         )
 
     @begin_session
+    def get_missing_games(self, library_id: int | None = None, session: Session = None) -> list[Game]:  # type: ignore
+        query = select(Game).where(Game.missing_from_fs.is_(True)).order_by(Game.name)
+        if library_id is not None:
+            query = query.where(Game.library_id == library_id)
+        return list(session.scalars(query).all())
+
+    @begin_session
+    def delete_missing_games(self, library_id: int | None = None, session: Session = None) -> int:  # type: ignore
+        query = delete(Game).where(Game.missing_from_fs.is_(True))
+        if library_id is not None:
+            query = query.where(Game.library_id == library_id)
+        return session.execute(query).rowcount
+
+    @begin_session
     def get_all_games(self, session: Session = None) -> list[Game]:  # type: ignore
         return list(session.scalars(select(Game).order_by(Game.name)).all())
 

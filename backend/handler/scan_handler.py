@@ -19,7 +19,7 @@ from models.library import Library
 @dataclass(frozen=True, slots=True)
 class ScanResult:
     added: int
-    removed: int
+    missing: int
     total: int
 
 
@@ -34,10 +34,13 @@ def scan_library(library: Library) -> ScanResult:
         db_game_handler.add_game(Game(library_id=library.id, fs_name=fs_name, name=fs_name))
         added += 1
 
-    removed = 0
+    # Vanished games are only flagged, never deleted, so their metadata and
+    # install history survive a temporarily unmounted share.
+    missing = 0
     for fs_name, game in existing.items():
-        if fs_name not in on_disk:
-            db_game_handler.delete_game(game.id)
-            removed += 1
+        is_missing = fs_name not in on_disk
+        if is_missing != game.missing_from_fs:
+            db_game_handler.update_game(game.id, {"missing_from_fs": is_missing})
+        missing += is_missing
 
-    return ScanResult(added=added, removed=removed, total=len(on_disk))
+    return ScanResult(added=added, missing=missing, total=len(on_disk))

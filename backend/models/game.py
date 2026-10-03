@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from models.base import BaseModel
@@ -38,6 +38,9 @@ class Game(BaseModel):
     igdb_metadata: Mapped[dict[str, Any] | None] = mapped_column(CustomJSON(), default=dict)
     sgdb_id: Mapped[int | None] = mapped_column(Integer(), default=None)
     cover_path: Mapped[str | None] = mapped_column(String(length=1000), default=None)
+
+    # Set by a scan when the file/directory is gone from disk; cleared if it reappears.
+    missing_from_fs: Mapped[bool] = mapped_column(Boolean(), default=False, server_default="0")
 
     # Plain lazy loading for Phase 1 simplicity (RomM uses lazy="raise" + explicit
     # eager-loading everywhere to catch N+1s; worth adopting once this grows).

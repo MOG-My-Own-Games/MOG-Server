@@ -1,17 +1,20 @@
 from __future__ import annotations
 
+from pathlib import PurePosixPath
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Path, Query, status
 from handler.auth import AdminUser, CurrentUser
 from handler.database import db_game_handler, db_install_session_handler
+from handler.filesystem import fs_game_handler
+from handler.filesystem.installer_detection import category_for_path
 from handler.metadata import igdb_handler, sgdb_handler
-from handler.scrape_handler import scrape_game
+from handler.scrape_handler import refresh_game, scrape_game, search_name
 from models.install_session import InstallSessionState
 from starlette.concurrency import run_in_threadpool
 from utils.install_cache import session_cache_dir
 
-from endpoints.responses.game import GameSchema, GameUpdateForm
+from endpoints.responses.game import GameFileSchema, GameFilesSchema, GameSchema, GameUpdateForm
 
 router = APIRouter(prefix="/games", tags=["games"])
 
@@ -38,6 +41,27 @@ async def list_games(user: CurrentUser, library_id: int | None = None) -> list[G
     return [GameSchema.model_validate(g).model_copy(update={"installed": g.id in installed}) for g in games]
 
 
+@router.get("/missing")
+async def list_missing_games(user: AdminUser) -> list[GameSchema]:
+    return [GameSchema.model_validate(g) for g in db_game_handler.get_missing_games()]
+
+
+@router.delete("/missing")
+async def clear_missing_games(user: AdminUser) -> dict:
+    return {"cleared": db_game_handler.delete_missing_games()}
+
+
+@router.delete("/{id}")
+async def delete_missing_game(user: AdminUser, id: Annotated[int, Path(ge=1)]) -> None:
+    """Only for games a scan flagged as missing: a present game would just be re-added."""
+    game = db_game_handler.get_game(id)
+    if game is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    if not game.missing_from_fs:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Game is not missing from disk")
+    db_game_handler.delete_game(id)
+
+
 @router.get("/{id}")
 async def get_game(user: CurrentUser, id: Annotated[int, Path(ge=1)]) -> GameSchema:
     game = db_game_handler.get_game(id)
@@ -47,13 +71,46 @@ async def get_game(user: CurrentUser, id: Annotated[int, Path(ge=1)]) -> GameSch
     return GameSchema.model_validate(game).model_copy(update={"installed": installed})
 
 
+@router.get("/{id}/files")
+async def get_game_files(user: CurrentUser, id: Annotated[int, Path(ge=1)]) -> GameFilesSchema:
+    """The game's own files in its library (not the install cache)."""
+    game = db_game_handler.get_game(id)
+    if game is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    detected = await run_in_threadpool(fs_game_handler.list_game_files_flat, game)
+    return GameFilesSchema(
+        root_path=str(fs_game_handler.get_game_root_abs_path(game)),
+        files=[
+            GameFileSchema(path=f.path, size_bytes=f.size_bytes, category=category_for_path(PurePosixPath(f.path)))
+            for f in sorted(detected, key=lambda f: f.path.lower())
+        ],
+    )
+
+
 @router.put("/{id}")
 async def update_game(user: AdminUser, id: Annotated[int, Path(ge=1)], data: GameUpdateForm) -> GameSchema:
     """Manual metadata edit, for a field a scrape got wrong or when there's
-    no provider match to scrape at all."""
-    game = db_game_handler.update_game(id, data.model_dump(exclude_unset=True))
-    if game is None:
+    no provider match to scrape at all. Changing the match (name, igdb_id or
+    sgdb_id) re-scrapes everything else from the providers; fields edited in
+    the same request win over the re-scraped values."""
+    current = db_game_handler.get_game(id)
+    if current is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
+    body = data.model_dump(exclude_unset=True)
+    changed = {k for k, v in body.items() if getattr(current, k) != v}
+    rematch = changed & {"name", "igdb_id", "sgdb_id"}
+    if rematch:
+        # An id left untouched while the name or the other id changed is stale.
+        if "igdb_id" not in rematch:
+            body["igdb_id"] = None
+        if "sgdb_id" not in rematch:
+            body["sgdb_id"] = None
+
+    game = db_game_handler.update_game(id, body)
+    if rematch:
+        await run_in_threadpool(refresh_game, game, frozenset(changed | (body.keys() & {"cover_path"})))
+        game = db_game_handler.get_game(id)
     return GameSchema.model_validate(game)
 
 
@@ -74,7 +131,7 @@ async def search_igdb(
     game = db_game_handler.get_game(id)
     if game is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-    return await run_in_threadpool(igdb_handler.search_games, query or game.name)
+    return await run_in_threadpool(igdb_handler.search_games, query or search_name(game.name))
 
 
 @router.post("/{id}/metadata/igdb/{igdb_id}")
@@ -91,7 +148,9 @@ async def apply_igdb_match(user: AdminUser, id: Annotated[int, Path(ge=1)], igdb
     )
     if game is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-    return GameSchema.model_validate(game)
+    game = db_game_handler.update_game(id, {"sgdb_id": None})
+    await run_in_threadpool(refresh_game, game, frozenset({"name", "summary"}))
+    return GameSchema.model_validate(db_game_handler.get_game(id))
 
 
 @router.get("/{id}/metadata/sgdb/search")
@@ -101,7 +160,7 @@ async def search_sgdb(
     game = db_game_handler.get_game(id)
     if game is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-    return await run_in_threadpool(sgdb_handler.search_grids, query or game.name)
+    return await run_in_threadpool(sgdb_handler.search_grids, query or search_name(game.name))
 
 
 @router.post("/{id}/metadata/sgdb")

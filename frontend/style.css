@@ -632,3 +632,5 @@ a.chip { color: inherit; text-decoration: none; }
 .toast strong { display: block; margin-bottom: 0.2em; }
 
 .form-actions { margin-top: 2.5em; padding-top: 1.25em; border-top: 1px solid var(--border); }
+.password-form { max-width: 360px; margin-top: 1.5em; }
+.password-form .field-label input { width: 100%; }

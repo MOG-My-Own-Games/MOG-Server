@@ -320,7 +320,34 @@ async function openProfilePage() {
   applyAvatar(currentUser.avatar_path, "profile-avatar-lg", "profile-avatar-lg-placeholder");
   document.getElementById("avatar-upload-status").textContent = "";
   document.getElementById("avatar-upload-input").value = "";
+  document.getElementById("password-form").reset();
+  document.getElementById("password-status").textContent = "";
+  applyRole();
 }
+
+document.getElementById("password-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const statusEl = document.getElementById("password-status");
+  const current = document.getElementById("pw-current").value;
+  const next = document.getElementById("pw-new").value;
+  if (next !== document.getElementById("pw-repeat").value) {
+    statusEl.textContent = "The two new passwords do not match.";
+    return;
+  }
+  try {
+    await api("/api/users/me/password", {
+      method: "POST",
+      body: JSON.stringify({ current_password: current, new_password: next }),
+    });
+    // The browser's own sign-in follows the new password.
+    creds = { user: creds.user, pass: next };
+    sessionStorage.setItem("mog_pass", next);
+    document.getElementById("password-form").reset();
+    statusEl.textContent = "Password changed.";
+  } catch (err) {
+    statusEl.textContent = `Could not change the password: ${err.message}`;
+  }
+});
 
 document.getElementById("avatar-upload-input").addEventListener("change", async (e) => {
   const file = e.target.files[0];

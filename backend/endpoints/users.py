@@ -6,8 +6,8 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Path as PathVar, UploadFile, status
 
 from config import RESOURCES_BASE_PATH
-from endpoints.responses.user import UserCreateForm, UserSchema, UserUpdateForm
-from handler.auth import AdminUser, CurrentUser, hash_password
+from endpoints.responses.user import PasswordChangeForm, UserCreateForm, UserSchema, UserUpdateForm
+from handler.auth import AdminUser, CurrentUser, hash_password, verify_password
 from handler.database import db_user_handler
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -19,6 +19,17 @@ _ALLOWED_AVATAR_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp"
 @router.get("/me")
 async def get_me(user: CurrentUser) -> UserSchema:
     return UserSchema.model_validate(user)
+
+
+@router.post("/me/password")
+async def change_my_password(user: CurrentUser, data: PasswordChangeForm) -> None:
+    """A user changes their own password by proving the current one. The check
+    fails with 400, not 401: a 401 makes the web UI sign the user out."""
+    if not verify_password(data.current_password, user.hashed_password):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
+    if data.new_password == data.current_password:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The new password must differ from the current one")
+    db_user_handler.update_user(user.id, {"hashed_password": hash_password(data.new_password)})
 
 
 @router.get("")

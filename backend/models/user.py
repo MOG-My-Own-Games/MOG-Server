@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from models.install_session import InstallSession
 
 TEXT_FIELD_LENGTH = 255
+PASSWORD_MIN_LENGTH = 8
 
 # Id of the synthetic, unauthenticated visitor a future kiosk mode could hand
 # out. Reserved now so it never collides with a real auto-increment row.

@@ -42,6 +42,7 @@ from handler.database import db_game_handler, db_install_session_handler
 from handler.filesystem import fs_game_handler
 from handler.install.archive_prescan import extract_and_rescan, is_archive_candidate, source_phase
 from handler.install.auto_mode.runtime import start_auto_mode
+from handler.notifications import notify_auto_mode_failed
 from handler.install.manifest import (
     LiveManifestEntry,
     delete_live_manifest,
@@ -1132,3 +1133,4 @@ def _fail(install_session_id: int, error: str) -> None:
             "phase_detail": None,
         },
     )
+    notify_auto_mode_failed(install_session_id, error)

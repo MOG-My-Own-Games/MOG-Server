@@ -8,6 +8,7 @@ from pathlib import Path
 
 from handler.database import db_install_session_handler
 from handler.install.manifest import read_live_manifest
+from handler.notifications import notify_auto_mode_stuck
 from logger.formatter import highlight as hl
 from logger.logger import log
 
@@ -16,16 +17,17 @@ from .driver import STATUS_NEEDS_MANUAL, AutoModeDriver, make_x11_actor, make_x1
 
 
 def _notify_needs_manual(install_session_id: int, detail: str | None) -> None:
-    """Tell the server log auto mode is stuck and needs a hand.
+    """Log that auto mode is stuck and notify the user who started the install.
 
-    Runs on the driver's own background thread. A real user-facing
-    notification channel is Phase 2 (see docs/TODO.md); for now the
-    session's own auto_status/auto_detail fields (set by `report` below)
-    are what a client polls to surface this.
+    Runs on the driver's own background thread.
     """
     log.warning(
         f"Install session {hl(str(install_session_id))} auto mode needs manual help: {detail}"
     )
+    try:
+        notify_auto_mode_stuck(install_session_id, detail)
+    except Exception as e:  # noqa: BLE001 - a lost notification must not stop auto mode
+        log.warning(f"Could not create the auto mode notification: {e}")
 
 
 def build_driver(install_session_id: int, display: str, work_dir: Path) -> AutoModeDriver:

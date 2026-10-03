@@ -73,3 +73,30 @@ class TestPickDefaultInstaller:
 
     def test_empty_list_returns_none(self):
         assert pick_default_installer([]) is None
+
+
+class TestCategoryFolders:
+    def test_addon_folders_tag_candidates_and_rank_after_the_game(self):
+        files = [
+            DetectedFile(path="dlc/setup.exe", size_bytes=9_000_000),
+            DetectedFile(path="Mods/pack.exe", size_bytes=9_000_000),
+            DetectedFile(path="setup.exe", size_bytes=1_000),
+        ]
+        candidates = detect_installer_candidates(files)
+        assert [(c.path, c.category) for c in candidates] == [
+            ("setup.exe", "game"),
+            ("dlc/setup.exe", "dlc"),
+            ("Mods/pack.exe", "mod"),
+        ]
+
+    def test_non_installable_folders_are_skipped(self):
+        files = [DetectedFile(path="soundtrack/play.exe", size_bytes=1), DetectedFile(path="manuals/a.exe", size_bytes=1)]
+        assert detect_installer_candidates(files) == []
+
+    def test_only_the_top_folder_counts(self):
+        files = [DetectedFile(path="game/dlc/setup.exe", size_bytes=1)]
+        assert detect_installer_candidates(files)[0].category == "game"
+
+    def test_addon_is_never_the_default_pick(self):
+        files = [DetectedFile(path="dlc/setup.exe", size_bytes=1)]
+        assert pick_default_installer(detect_installer_candidates(files)) is None

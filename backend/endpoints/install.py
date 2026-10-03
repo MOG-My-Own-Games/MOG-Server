@@ -153,7 +153,7 @@ async def get_install_candidates(
     return InstallCandidatesSchema(
         game_id=game.id,
         candidates=[
-            InstallCandidateSchema(path=c.path, file_name=c.file_name, file_size_bytes=c.file_size_bytes, rank=c.rank, kind=c.kind)
+            InstallCandidateSchema(path=c.path, file_name=c.file_name, file_size_bytes=c.file_size_bytes, rank=c.rank, kind=c.kind, category=c.category)
             for c in candidates
         ],
         needs_manual_pick=len(candidates) == 0,

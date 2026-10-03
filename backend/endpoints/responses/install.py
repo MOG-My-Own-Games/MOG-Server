@@ -12,6 +12,7 @@ class InstallCandidateSchema(BaseModel):
     file_size_bytes: int
     rank: int
     kind: str
+    category: str = "game"
 
 
 class InstallCandidatesSchema(BaseModel):

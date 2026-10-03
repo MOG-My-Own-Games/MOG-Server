@@ -14,12 +14,18 @@ Detection order (lower rank = higher priority):
   4. Archives (.zip/.7z/.rar/.tar/.gz/.tgz/.tbz2/.txz/.bz2/.xz).
   5. Generic installers packaged as a shell script or AppImage (.sh/.run/.appimage).
 When nothing matches, the caller falls back to a manual file picker.
+
+Like RomM's file categories, a top-level folder inside the game directory
+named after a category (dlc/dlcs, mod/mods, update, patch, ...) tags every file
+under it with that category. Those candidates rank after the base game's and
+are never the default pick, so a game's DLC or mods can be installed on top of
+it. Folders holding no installable content (manual, soundtrack, ...) are skipped.
 """
 
 from __future__ import annotations
 
 import fnmatch
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import PurePosixPath
 
 # Rank buckets.
@@ -53,6 +59,26 @@ ARCHIVE_EXTENSIONS: frozenset[str] = frozenset(
     (".zip", ".7z", ".rar", ".tar", ".gz", ".tgz", ".tbz2", ".txz", ".bz2", ".xz")
 )
 LINUX_INSTALLER_EXTENSIONS: frozenset[str] = frozenset((".sh", ".run", ".appimage"))
+
+# Category folder names (singular; plural "s"/"es" forms also match), as in RomM.
+GAME_CATEGORY = "game"
+ADDON_CATEGORIES: tuple[str, ...] = (
+    "dlc",
+    "mod",
+    "update",
+    "patch",
+    "hack",
+    "translation",
+    "demo",
+    "prototype",
+)
+NON_INSTALLABLE_CATEGORIES: tuple[str, ...] = ("manual", "walkthrough", "soundtrack", "screenshot", "cheat")
+
+_CATEGORY_BY_FOLDER: dict[str, str] = {
+    form: category
+    for category in (*ADDON_CATEGORIES, *NON_INSTALLABLE_CATEGORIES)
+    for form in (category, f"{category}s", f"{category}es")
+}
 
 # Bundled prerequisite installers (VC++ Redistributable, DirectX, .NET, PhysX,
 # OpenAL, ...) ship inside a conventionally-named subfolder in virtually every
@@ -94,6 +120,14 @@ class InstallerCandidate:
     file_size_bytes: int
     rank: int
     kind: str
+    category: str = GAME_CATEGORY
+
+
+def category_for_path(posix: PurePosixPath) -> str:
+    """The category a file's top-level folder gives it, GAME_CATEGORY outside any."""
+    if len(posix.parts) < 2:
+        return GAME_CATEGORY
+    return _CATEGORY_BY_FOLDER.get(posix.parts[0].lower(), GAME_CATEGORY)
 
 
 def _matches_known_installer(name_lower: str) -> bool:
@@ -105,11 +139,22 @@ def _under_prerequisite_dir(posix: PurePosixPath) -> bool:
 
 
 def _classify(file: DetectedFile) -> InstallerCandidate | None:
+    candidate = _classify_file(file)
+    if candidate is None:
+        return None
+    category = category_for_path(PurePosixPath(file.path))
+    return replace(candidate, category=category)
+
+
+def _classify_file(file: DetectedFile) -> InstallerCandidate | None:
     posix = PurePosixPath(file.path)
     name = posix.name
     name_lower = name.lower()
     ext = posix.suffix.lower()
     is_top_level = len(posix.parts) == 1
+
+    if category_for_path(posix) in NON_INSTALLABLE_CATEGORIES:
+        return None
 
     if ext in EXECUTABLE_EXTENSIONS and _under_prerequisite_dir(posix):
         return None
@@ -147,11 +192,11 @@ def _make(file: DetectedFile, rank: int, kind: str) -> InstallerCandidate:
 def detect_installer_candidates(files: list[DetectedFile]) -> list[InstallerCandidate]:
     """Rank installer candidates from a flat file listing.
 
-    Results are sorted by rank (priority), then by descending size (bigger installers
-    first within a bucket), then by path for stable ordering.
+    Base-game candidates come first; each group is sorted by rank (priority), then
+    by descending size (bigger installers first within a bucket), then by path.
     """
     candidates = [c for c in (_classify(f) for f in files) if c is not None]
-    candidates.sort(key=lambda c: (c.rank, -c.file_size_bytes, c.path))
+    candidates.sort(key=lambda c: (c.category != GAME_CATEGORY, c.rank, -c.file_size_bytes, c.path))
     return candidates
 
 
@@ -161,6 +206,9 @@ def pick_default_installer(candidates: list[InstallerCandidate]) -> InstallerCan
     Lets a client start an install without naming a file (the CLI, ...) and
     get the same choice a human would make first. The winner may be an
     archive or disc image, whose installer is then resolved after unpacking
-    it (see handler.install.archive_prescan).
+    it (see handler.install.archive_prescan). DLC/mod candidates are never
+    the default.
     """
-    return candidates[0] if candidates else None
+    if candidates and candidates[0].category == GAME_CATEGORY:
+        return candidates[0]
+    return None

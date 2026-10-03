@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, computed_field
+
+from handler.filesystem.fs_tags import parse_fs_tags
 
 
 class GameSchema(BaseModel):
@@ -17,8 +19,25 @@ class GameSchema(BaseModel):
     igdb_metadata: dict[str, Any] | None
     sgdb_id: int | None
     cover_path: str | None
+    missing_from_fs: bool = False
     # This user has a finished install whose cache is still on disk.
     installed: bool = False
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def fs_tags(self) -> list[str]:
+        return parse_fs_tags(self.fs_name)
+
+
+class GameFileSchema(BaseModel):
+    path: str
+    size_bytes: int
+    category: str
+
+
+class GameFilesSchema(BaseModel):
+    root_path: str
+    files: list[GameFileSchema]
 
 
 class GameUpdateForm(BaseModel):
@@ -53,7 +72,7 @@ class LibraryCreateForm(BaseModel):
 class ScanResultSchema(BaseModel):
     library_id: int
     added: int
-    removed: int
+    missing: int
     total: int
 
 

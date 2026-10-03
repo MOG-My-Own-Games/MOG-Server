@@ -46,16 +46,21 @@ def _get(path: str, api_key: str) -> list:
     return resp.json().get("data", [])
 
 
-def search_game_id(name: str) -> int | None:
-    """SteamGridDB id of the best name match, or None."""
+def search_games(name: str) -> list[dict]:
+    """SteamGridDB autocomplete results (id, name, ...), best first."""
     api_key = _api_key()
     if not api_key:
-        return None
+        return []
     try:
-        results = _get(f"search/autocomplete/{quote(name, safe='')}", api_key)
+        return _get(f"search/autocomplete/{quote(name, safe='')}", api_key)
     except httpx.HTTPError as e:
         log.warning(f"SteamGridDB search for {name!r} failed: {e}")
-        return None
+        return []
+
+
+def search_game_id(name: str) -> int | None:
+    """SteamGridDB id of the first name match, or None."""
+    results = search_games(name)
     return results[0]["id"] if results else None
 
 

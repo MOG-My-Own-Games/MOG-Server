@@ -40,7 +40,7 @@ async def scan_one_library(user: AdminUser, id: Annotated[int, Path(ge=1)]) -> S
     if library is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     result = await run_in_threadpool(scan_library, library)
-    return ScanResultSchema(library_id=id, added=result.added, removed=result.removed, total=result.total)
+    return ScanResultSchema(library_id=id, added=result.added, missing=result.missing, total=result.total)
 
 
 @router.post("/{id}/scrape")

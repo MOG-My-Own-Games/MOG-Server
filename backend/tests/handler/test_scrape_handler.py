@@ -24,7 +24,7 @@ class TestScrapeGame:
             "summary": "A game.",
             "genres": [{"name": "Adventure"}],
         }
-        sgdb.search_game_id.return_value = 7
+        sgdb.search_games.return_value = [{"id": 7, "name": "Some Game"}]
         sgdb.get_grids.return_value = ["https://example.com/cover.png"]
 
         applied = scrape_game(_game())
@@ -42,21 +42,21 @@ class TestScrapeGame:
     @patch("handler.scrape_handler.igdb_handler")
     def test_already_matched_game_is_not_re_searched(self, igdb, sgdb, db):
         igdb.search_games.return_value = []
-        sgdb.search_game_id.return_value = None
+        sgdb.search_games.return_value = []
         sgdb.get_grids.return_value = []
 
         applied = scrape_game(_game(igdb_id=99, igdb_metadata={"id": 99}, cover_path="already-set.png"))
 
         assert applied is False
         igdb.search_games.assert_not_called()
-        sgdb.search_game_id.assert_not_called()
+        sgdb.search_games.assert_not_called()
 
     @patch("handler.scrape_handler.db_game_handler")
     @patch("handler.scrape_handler.sgdb_handler")
     @patch("handler.scrape_handler.igdb_handler")
     def test_no_results_applies_nothing(self, igdb, sgdb, db):
         igdb.search_games.return_value = []
-        sgdb.search_game_id.return_value = None
+        sgdb.search_games.return_value = []
         sgdb.get_grids.return_value = []
 
         applied = scrape_game(_game())
@@ -77,7 +77,7 @@ class TestManualIds:
 
         assert applied is True
         igdb.search_games.assert_not_called()
-        sgdb.search_game_id.assert_not_called()
+        sgdb.search_games.assert_not_called()
         igdb.get_game_by_id.assert_called_once_with(99)
         sgdb.get_grids.assert_called_once_with(5)
         assert db.update_game.call_args_list[1].args[1] == {"cover_path": "https://example.com/g.png", "sgdb_id": 5}
@@ -89,5 +89,87 @@ class TestSearchName:
         assert search_name("The_Witcher_3_v1.31.exe") == "The Witcher 3"
         assert search_name("Portal 2 - GOG") == "Portal 2"
 
+    def test_scene_name_dots_and_group(self):
+        assert search_name("FANTASY.LIFE.i.The.Girl.Who.Steals.Time-TENOKE") == "FANTASY LIFE i The Girl Who Steals Time"
+
+    def test_hyphenated_title_survives(self):
+        assert search_name("Half-Life") == "Half-Life"
+        assert search_name("Marvels.Spider-Man") == "Marvels Spider-Man"
+
     def test_plain_name_untouched(self):
         assert search_name("Some Game") == "Some Game"
+
+
+class TestRefreshGame:
+    @patch("handler.scrape_handler.db_game_handler")
+    @patch("handler.scrape_handler.sgdb_handler")
+    @patch("handler.scrape_handler.igdb_handler")
+    def test_refetches_igdb_and_cover_by_the_new_ids(self, igdb, sgdb, db):
+        from handler.scrape_handler import refresh_game
+
+        igdb.get_game_by_id.return_value = {"id": 9, "name": "New", "summary": "S", "genres": [{"name": "RPG"}]}
+        sgdb.get_grids.return_value = ["https://example.com/new.png"]
+
+        assert refresh_game(_game(igdb_id=9, sgdb_id=5, cover_path="old.png"))
+
+        igdb.search_games.assert_not_called()
+        sgdb.search_games.assert_not_called()
+        updates = [c.args[1] for c in db.update_game.call_args_list]
+        assert {"igdb_id": 9, "igdb_metadata": igdb.get_game_by_id.return_value, "summary": "S", "name": "New"} in updates
+        assert {"sgdb_id": 5, "cover_path": "https://example.com/new.png"} in updates
+
+    @patch("handler.scrape_handler.db_game_handler")
+    @patch("handler.scrape_handler.sgdb_handler")
+    @patch("handler.scrape_handler.igdb_handler")
+    def test_keeps_fields_edited_by_hand_and_searches_by_name(self, igdb, sgdb, db):
+        from handler.scrape_handler import refresh_game
+
+        igdb.search_games.return_value = [{"id": 3, "name": "My Name"}]
+        igdb.get_game_by_id.return_value = {"id": 3, "name": "My Name", "summary": "S"}
+        sgdb.search_games.return_value = [{"id": 8, "name": "My Name"}]
+        sgdb.get_grids.return_value = ["https://example.com/c.png"]
+
+        refresh_game(_game(name="My Name"), keep=frozenset({"name", "cover_path"}))
+
+        updates = [c.args[1] for c in db.update_game.call_args_list]
+        assert all("name" not in u and "cover_path" not in u for u in updates)
+        igdb.search_games.assert_called_with("My Name")
+
+
+class TestFuzzyMatching:
+    @patch("handler.scrape_handler.db_game_handler")
+    @patch("handler.scrape_handler.sgdb_handler")
+    @patch("handler.scrape_handler.igdb_handler")
+    def test_picks_best_scoring_result_not_the_first(self, igdb, sgdb, db):
+        igdb.search_games.return_value = [
+            {"id": 1, "name": "Fantasy Life"},
+            {"id": 2, "name": "Fantasy Life i: The Girl Who Steals Time"},
+        ]
+        igdb.get_game_by_id.return_value = {"id": 2, "name": "Fantasy Life i: The Girl Who Steals Time"}
+        sgdb.search_games.return_value = []
+
+        scrape_game(_game(name="Fantasy.Life.i.The.Girl.Who.Steals.Time-TENOKE", fs_name="x"))
+
+        igdb.get_game_by_id.assert_called_once_with(2)
+
+    @patch("handler.scrape_handler.db_game_handler")
+    @patch("handler.scrape_handler.sgdb_handler")
+    @patch("handler.scrape_handler.igdb_handler")
+    def test_trailing_noise_is_dropped_by_retrying_shorter_queries(self, igdb, sgdb, db):
+        igdb.search_games.side_effect = lambda q: [] if "zzz" in q else [{"id": 5, "name": "Some Game"}]
+        igdb.get_game_by_id.return_value = {"id": 5, "name": "Some Game"}
+        sgdb.search_games.return_value = []
+
+        scrape_game(_game(name="Some Game zzz", fs_name="Some Game zzz"))
+
+        igdb.get_game_by_id.assert_called_once_with(5)
+
+    @patch("handler.scrape_handler.db_game_handler")
+    @patch("handler.scrape_handler.sgdb_handler")
+    @patch("handler.scrape_handler.igdb_handler")
+    def test_unrelated_results_are_rejected(self, igdb, sgdb, db):
+        igdb.search_games.return_value = [{"id": 9, "name": "Completely Different Title"}]
+        sgdb.search_games.return_value = []
+
+        assert scrape_game(_game(name="Some Game", fs_name="Some Game")) is False
+        igdb.get_game_by_id.assert_not_called()

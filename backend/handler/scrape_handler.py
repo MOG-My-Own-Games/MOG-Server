@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 from handler.database import db_game_handler
 from handler.metadata import igdb_handler, sgdb_handler
+from handler.name_matching import best_match, query_variants
 from models.game import Game
 
 _BRACKETED = re.compile(r"[\[(\{][^\])}]*[\])}]")
@@ -20,25 +21,45 @@ _TAGS = re.compile(r"[\s_.-]+(gog|repack|setup|installer|multi\d*|goty|drm[\s_.-
 _ARCHIVE_EXT = re.compile(r"\.(exe|iso|zip|rar|7z|tar|gz)$", re.IGNORECASE)
 
 
+_SCENE_GROUP = re.compile(r"(?<=\S)-([A-Z0-9]{2,})$")
+
+
 def search_name(raw: str) -> str:
-    """Folder/file name reduced to a plausible game title for provider search
-    (extension, bracketed tags, version and release-group suffixes dropped)."""
+    """Folder/file name reduced to a plausible game title for provider search:
+    extension, bracketed tags, version and release suffixes dropped, dots and
+    underscores read as spaces, and a trailing `-GROUP` of a scene-style name
+    removed."""
     name = _ARCHIVE_EXT.sub("", raw)
     name = _BRACKETED.sub(" ", name)
     name = _VERSION.sub("", name)
     name = _TAGS.sub("", name)
-    if " " not in name.strip():
-        name = re.sub(r"[_.]+", " ", name)
+    scene = " " not in name.strip() and len(re.findall(r"[._]", name)) >= 2
     name = re.sub(r"[_]+", " ", name)
-    return re.sub(r"\s+", " ", name).strip() or raw
+    if " " not in name.strip() or scene:
+        name = re.sub(r"[.]+", " ", name)
+    name = re.sub(r"\s+", " ", name).strip()
+    if scene:
+        name = _SCENE_GROUP.sub("", name)
+    return name or raw
 
 
-def _candidates(game: Game) -> list[str]:
+def _names(game: Game) -> list[str]:
     seen: list[str] = []
-    for n in (game.name, search_name(game.name), search_name(game.fs_name)):
+    for n in (search_name(game.name), search_name(game.fs_name), game.name):
         if n and n not in seen:
             seen.append(n)
     return seen
+
+
+def _find_igdb(game: Game) -> dict | None:
+    names = _names(game)
+    return best_match(query_variants(names), names[0], igdb_handler.search_games, lambda r: r.get("name", ""))
+
+
+def _find_sgdb_id(game: Game) -> int | None:
+    names = _names(game)
+    match = best_match(query_variants(names), names[0], sgdb_handler.search_games, lambda r: r.get("name", ""))
+    return match["id"] if match else None
 
 
 def _apply_igdb(game: Game, igdb_id: int) -> bool:
@@ -62,36 +83,62 @@ def scrape_game(game: Game) -> bool:
         if not game.igdb_metadata:
             applied |= _apply_igdb(game, game.igdb_id)
     else:
-        for query in _candidates(game):
-            results = igdb_handler.search_games(query)
-            if results:
-                # Search results can come back with sparser nested fields
-                # than a by-id fetch, so re-fetch the full record.
-                if not _apply_igdb(game, results[0]["id"]):
-                    full = results[0]
-                    db_game_handler.update_game(
-                        game.id,
-                        {
-                            "igdb_id": full["id"],
-                            "name": full.get("name") or game.name,
-                            "summary": full.get("summary"),
-                            "igdb_metadata": full,
-                        },
-                    )
-                applied = True
-                break
+        match = _find_igdb(game)
+        if match:
+            # Search results can come back with sparser nested fields
+            # than a by-id fetch, so re-fetch the full record.
+            if not _apply_igdb(game, match["id"]):
+                db_game_handler.update_game(
+                    game.id,
+                    {
+                        "igdb_id": match["id"],
+                        "name": match.get("name") or game.name,
+                        "summary": match.get("summary"),
+                        "igdb_metadata": match,
+                    },
+                )
+            applied = True
 
     if not game.cover_path:
-        sgdb_id = game.sgdb_id
-        if not sgdb_id:
-            for query in _candidates(game):
-                sgdb_id = sgdb_handler.search_game_id(query)
-                if sgdb_id:
-                    break
+        sgdb_id = game.sgdb_id or _find_sgdb_id(game)
         grids = sgdb_handler.get_grids(sgdb_id) if sgdb_id else []
         if grids:
             db_game_handler.update_game(game.id, {"cover_path": grids[0], "sgdb_id": sgdb_id})
             applied = True
+
+    return applied
+
+
+def refresh_game(game: Game, keep: frozenset[str] = frozenset()) -> bool:
+    """Re-fetch everything from the providers after the match changed: IGDB
+    record (summary, genres, screenshots, ...) and the SteamGridDB cover. A set
+    igdb_id / sgdb_id is used directly, otherwise the current name is searched.
+    Fields named in `keep` (edited by hand in the same request) are left alone.
+    Returns True if anything was applied."""
+    applied = False
+
+    full = igdb_handler.get_game_by_id(game.igdb_id) if game.igdb_id else None
+    if full is None and not game.igdb_id:
+        match = _find_igdb(game)
+        if match:
+            full = igdb_handler.get_game_by_id(match["id"]) or match
+    if full is not None:
+        update = {"igdb_id": full["id"], "igdb_metadata": full}
+        if "summary" not in keep:
+            update["summary"] = full.get("summary")
+        if "name" not in keep and full.get("name"):
+            update["name"] = full["name"]
+        db_game_handler.update_game(game.id, update)
+        applied = True
+
+    sgdb_id = game.sgdb_id or _find_sgdb_id(game)
+    grids = sgdb_handler.get_grids(sgdb_id) if sgdb_id else []
+    if grids:
+        update = {"sgdb_id": sgdb_id}
+        if "cover_path" not in keep:
+            update["cover_path"] = grids[0]
+        db_game_handler.update_game(game.id, update)
+        applied = True
 
     return applied
 

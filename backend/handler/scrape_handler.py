@@ -127,12 +127,14 @@ def scrape_game(game: Game) -> bool:
     return applied
 
 
-def refresh_game(game: Game, keep: frozenset[str] = frozenset()) -> bool:
+def refresh_game(game: Game, keep: frozenset[str] = frozenset(), rematch_cover: bool = False) -> bool:
     """Re-fetch everything from the providers after the match changed: IGDB
     record (summary, genres, screenshots, ...) and the SteamGridDB cover. A set
     igdb_id / sgdb_id is used directly, otherwise the current name is searched.
     Fields named in `keep` (edited by hand in the same request) are left alone.
-    Returns True if anything was applied."""
+    With `rematch_cover` the SteamGridDB game is searched by name again even when an
+    id is stored, so a cover matched to the wrong game is replaced rather than
+    refetched from it. Returns True if anything was applied."""
     applied = False
 
     full = igdb_handler.get_game_by_id(game.igdb_id) if game.igdb_id else None
@@ -149,7 +151,8 @@ def refresh_game(game: Game, keep: frozenset[str] = frozenset()) -> bool:
         db_game_handler.update_game(game.id, update)
         applied = True
 
-    sgdb_id = game.sgdb_id or _find_sgdb_id(game)
+    sgdb_id = _find_sgdb_id(game) if rematch_cover or not game.sgdb_id else game.sgdb_id
+    sgdb_id = sgdb_id or game.sgdb_id
     grids = sgdb_handler.get_grids(sgdb_id) if sgdb_id else []
     if grids:
         update = {"sgdb_id": sgdb_id}
@@ -175,7 +178,10 @@ def scrape_library(library_id: int, refresh: bool = False) -> ScrapeResult:
     """Fill what is missing for every present game; with `refresh`, re-fetch
     everything (metadata and cover) instead."""
     games = [g for g in db_game_handler.get_games_for_library(library_id) if not g.missing_from_fs]
-    fetch = refresh_game if refresh else scrape_game
+
+    def fetch(game: Game) -> bool:
+        return refresh_game(game, rematch_cover=True) if refresh else scrape_game(game)
+
     scraped = 0
     for game in games:
         try:

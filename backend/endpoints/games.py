@@ -152,7 +152,12 @@ async def scrape_one_game(user: AdminUser, id: Annotated[int, Path(ge=1)]) -> Ga
     game = db_game_handler.get_game(id)
     if game is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-    await run_in_threadpool(refresh_game, game)
+    applied = await run_in_threadpool(refresh_game, game, frozenset(), True)
+    if not applied:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Nothing could be fetched from IGDB or SteamGridDB (check the provider keys in Settings)",
+        )
     return GameSchema.model_validate(db_game_handler.get_game(id))
 
 

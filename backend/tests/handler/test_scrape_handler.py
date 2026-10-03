@@ -231,3 +231,29 @@ class TestExplicitScrapeReplaces:
 
         scrape_library(1, refresh=True)
         assert fill.call_count == 1 and refresh.call_count == 1
+
+
+class TestRematchCover:
+    def _run(self, igdb, sgdb, db, rematch):
+        from handler.scrape_handler import refresh_game
+
+        igdb.get_game_by_id.return_value = {"id": 9, "name": "Right Game"}
+        sgdb.search_games.return_value = [{"id": 8, "name": "Right Game"}]
+        sgdb.get_grids.side_effect = lambda sid: [f"https://example.com/{sid}.png"]
+        refresh_game(_game(name="Right Game", igdb_id=9, sgdb_id=5), rematch_cover=rematch)
+        return [c.args[1] for c in db.update_game.call_args_list]
+
+    @patch("handler.scrape_handler.db_game_handler")
+    @patch("handler.scrape_handler.sgdb_handler")
+    @patch("handler.scrape_handler.igdb_handler")
+    def test_rematch_replaces_a_cover_matched_to_the_wrong_game(self, igdb, sgdb, db):
+        updates = self._run(igdb, sgdb, db, rematch=True)
+        assert {"sgdb_id": 8, "cover_path": "https://example.com/8.png"} in updates
+
+    @patch("handler.scrape_handler.db_game_handler")
+    @patch("handler.scrape_handler.sgdb_handler")
+    @patch("handler.scrape_handler.igdb_handler")
+    def test_without_rematch_the_stored_sgdb_id_is_trusted(self, igdb, sgdb, db):
+        updates = self._run(igdb, sgdb, db, rematch=False)
+        assert {"sgdb_id": 5, "cover_path": "https://example.com/5.png"} in updates
+        sgdb.search_games.assert_not_called()

@@ -8,6 +8,7 @@ separately, not as part of scanning (see docs/TODO.md for auto-matching).
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -23,9 +24,16 @@ class ScanResult:
     total: int
 
 
+def has_files(path: Path) -> bool:
+    """A file, or a directory with a file anywhere inside: an empty folder is not a game."""
+    if not path.is_dir():
+        return True
+    return any(files for _, _, files in os.walk(path))
+
+
 def scan_library(library: Library) -> ScanResult:
     root = Path(library.root_path)
-    on_disk = {p.name for p in root.iterdir()} if root.is_dir() else set()
+    on_disk = {p.name for p in root.iterdir() if has_files(p)} if root.is_dir() else set()
 
     existing = {g.fs_name: g for g in db_game_handler.get_games_for_library(library.id)}
 

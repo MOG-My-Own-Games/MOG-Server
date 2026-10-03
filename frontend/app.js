@@ -1219,6 +1219,7 @@ document.getElementById("scrape-btn").addEventListener("click", async () => {
   const statusEl = document.getElementById("scrape-status");
   statusEl.textContent = "Searching...";
   try {
+    const previousCover = activeGame.cover_path;
     const game = await api(`/api/games/${activeGame.id}/scrape`, { method: "POST" });
     activeGame = game;
     document.getElementById("game-title").textContent = game.name;
@@ -1230,7 +1231,8 @@ document.getElementById("scrape-btn").addEventListener("click", async () => {
       coverImg.hidden = false;
       coverPlaceholder.hidden = true;
     }
-    statusEl.textContent = `Matched: ${game.name}`;
+    const cover = game.cover_path === previousCover ? "cover unchanged (still SteamGridDB's first result)" : "cover replaced";
+    statusEl.textContent = `Matched: ${game.name}, ${cover}`;
     await refreshGames();
   } catch (err) {
     statusEl.textContent = `Failed: ${err.message}`;

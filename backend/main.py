@@ -6,7 +6,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from config import DEV_MODE, RESOURCES_BASE_PATH
+from config import DEV_MODE, MOG_VERSION, RESOURCES_BASE_PATH
 from endpoints import games, install, libraries, settings, users
 from logger.logger import log
 from startup import run_startup_tasks
@@ -21,7 +21,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="MOG Server", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="MOG Server", version=MOG_VERSION, lifespan=lifespan)
 
 app.include_router(libraries.router, prefix="/api")
 app.include_router(games.router, prefix="/api")
@@ -32,7 +32,7 @@ app.include_router(users.router, prefix="/api")
 
 @app.get("/api/health")
 async def health() -> dict:
-    return {"status": "ok"}
+    return {"status": "ok", "version": MOG_VERSION}
 
 
 # User-uploaded assets (avatars). Unauthenticated on purpose: a profile

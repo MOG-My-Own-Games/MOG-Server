@@ -89,6 +89,8 @@ RUN useradd --create-home --uid 10001 mog && \
 COPY ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
+ARG MOG_VERSION=dev
+ENV MOG_VERSION=${MOG_VERSION}
 ENV INSTALL_SANDBOX_ENABLED=true
 ENV PROTON_INSTALL_ROOT=/opt/proton
 

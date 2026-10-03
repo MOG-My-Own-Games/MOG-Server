@@ -31,6 +31,7 @@ def safe_str_to_bool(value: str | None) -> bool:
 IS_PYTEST_RUN: Final[bool] = _get_env("PYTEST_VERSION") is not None
 
 DEV_MODE: Final[bool] = safe_str_to_bool(_get_env("DEV_MODE"))
+MOG_VERSION: Final[str] = _get_env("MOG_VERSION", "dev")  # type: ignore[assignment]
 
 MOG_BASE_PATH: Final[str] = _get_env("MOG_BASE_PATH") or "/mog"
 RESOURCES_BASE_PATH: Final[str] = f"{MOG_BASE_PATH}/resources"

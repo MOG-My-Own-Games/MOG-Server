@@ -74,6 +74,8 @@ class ScanResultSchema(BaseModel):
     added: int
     missing: int
     total: int
+    # Games without a match are being matched in the background.
+    scraping: bool = False
 
 
 class ScrapeResultSchema(BaseModel):

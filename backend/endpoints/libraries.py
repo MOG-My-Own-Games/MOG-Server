@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Path, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Path, status
 from starlette.concurrency import run_in_threadpool
 
 from endpoints.responses.game import LibraryCreateForm, LibrarySchema, ScanResultSchema, ScrapeResultSchema
 from handler.auth import AdminUser, CurrentUser
-from handler.database import db_library_handler
+from handler.database import db_game_handler, db_library_handler
 from handler.scan_handler import scan_library
-from handler.scrape_handler import scrape_library
+from handler.scrape_handler import needs_scrape, scrape_library, scrape_library_in_background
 from models.library import Library
 
 router = APIRouter(prefix="/libraries", tags=["libraries"])
@@ -35,12 +35,19 @@ async def delete_library(user: AdminUser, id: Annotated[int, Path(ge=1)]) -> Non
 
 
 @router.post("/{id}/scan")
-async def scan_one_library(user: AdminUser, id: Annotated[int, Path(ge=1)]) -> ScanResultSchema:
+async def scan_one_library(
+    user: AdminUser, id: Annotated[int, Path(ge=1)], background: BackgroundTasks
+) -> ScanResultSchema:
     library = db_library_handler.get_library(id)
     if library is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     result = await run_in_threadpool(scan_library, library)
-    return ScanResultSchema(library_id=id, added=result.added, missing=result.missing, total=result.total)
+    scraping = any(needs_scrape(g) for g in db_game_handler.get_games_for_library(id))
+    if scraping:
+        background.add_task(scrape_library_in_background, id)
+    return ScanResultSchema(
+        library_id=id, added=result.added, missing=result.missing, total=result.total, scraping=scraping
+    )
 
 
 @router.post("/{id}/scrape")

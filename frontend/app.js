@@ -638,6 +638,24 @@ document.getElementById("clear-all-missing-btn").addEventListener("click", async
   }
 });
 
+// After a scan the server matches new games in the background; reload the
+// grid while it works so matches (and the grouping they enable) show up by themselves.
+let scrapePoll = null;
+
+function pollWhileScraping() {
+  clearInterval(scrapePoll);
+  let ticks = 0;
+  scrapePoll = setInterval(async () => {
+    ticks += 1;
+    try {
+      await refreshGames();
+    } catch (_) {
+      // Transient: the next tick retries.
+    }
+    if (ticks >= 20) clearInterval(scrapePoll);
+  }, 6000);
+}
+
 // --- Sidebar widgets: active installs, total cache size ---
 
 async function refreshSidebarWidgets() {
@@ -723,8 +741,9 @@ function renderLibraryList(containerId, { clickable, showScrape = false, allowDe
       e.stopPropagation();
       scanBtn.textContent = "...";
       try {
-        await api(`/api/libraries/${lib.id}/scan`, { method: "POST" });
+        const result = await api(`/api/libraries/${lib.id}/scan`, { method: "POST" });
         await refreshGames();
+        if (result.scraping) pollWhileScraping();
       } finally {
         scanBtn.textContent = "Scan";
       }

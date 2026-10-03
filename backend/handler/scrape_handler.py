@@ -8,46 +8,64 @@ revisit if that turns out not to hold (see docs/TODO.md).
 from __future__ import annotations
 
 import re
+import threading
 from dataclasses import dataclass
 
 from handler.database import db_game_handler
 from handler.metadata import igdb_handler, sgdb_handler
+from logger.logger import log
 from handler.name_matching import best_match, query_variants
 from models.game import Game
 
 _BRACKETED = re.compile(r"[\[(\{][^\])}]*[\])}]")
 _VERSION = re.compile(r"[\s_.-]+v?\d+(\.\d+)+\b.*$", re.IGNORECASE)
-_TAGS = re.compile(r"[\s_.-]+(gog|repack|setup|installer|multi\d*|goty|drm[\s_.-]?free)\b.*$", re.IGNORECASE)
+# Release/packaging words that start the noise after the title; everything after one is dropped.
+_TAGS = re.compile(
+    r"[\s_.-]+(gog|repack|setup|installer|multi\d*|goty|drm[\s_.-]?free|proper|readnfo|internal|retail|"
+    r"dvd\d*|x64|x86|win(32|64)|rip|cracked|incl|(build|update|patch|hotfix)[\s_.-]*v?\d+)\b.*$",
+    re.IGNORECASE,
+)
 _ARCHIVE_EXT = re.compile(r"\.(exe|iso|zip|rar|7z|tar|gz)$", re.IGNORECASE)
+# A scene release group: the last hyphen-joined token, shaped like a tag rather than a word
+# (all caps, several capitals as in "TiNYiSO", or letters mixed with digits as in "razor1911").
+_SCENE_GROUP = re.compile(r"(?<=\S)-((?=[A-Za-z0-9]*([A-Z].*[A-Z]|\d))[A-Za-z0-9]{2,})$")
+_SPACED_GROUP = re.compile(r"\s+-\s+[A-Z0-9]{3,}$")
 
 
-_SCENE_GROUP = re.compile(r"(?<=\S)-([A-Z0-9]{2,})$")
-
-
-def search_name(raw: str) -> str:
-    """Folder/file name reduced to a plausible game title for provider search:
-    extension, bracketed tags, version and release suffixes dropped, dots and
-    underscores read as spaces, and a trailing `-GROUP` of a scene-style name
-    removed."""
+def search_names(raw: str) -> list[str]:
+    """Folder/file name reduced to plausible game titles for provider search:
+    extension, bracketed tags, version and release suffixes dropped, and dots
+    and underscores read as spaces. A trailing `-GROUP` is removed from the first
+    title; when one was removed, a second title keeps it as a word, in case the
+    hyphen was part of the real name."""
     name = _ARCHIVE_EXT.sub("", raw)
     name = _BRACKETED.sub(" ", name)
     name = _VERSION.sub("", name)
     name = _TAGS.sub("", name)
-    scene = " " not in name.strip() and len(re.findall(r"[._]", name)) >= 2
+    scene = " " not in name.strip() and len(re.findall(r"[._]", name)) >= 1
     name = re.sub(r"[_]+", " ", name)
     if " " not in name.strip() or scene:
         name = re.sub(r"[.]+", " ", name)
     name = re.sub(r"\s+", " ", name).strip()
-    if scene:
-        name = _SCENE_GROUP.sub("", name)
-    return name or raw
+    stripped = _SPACED_GROUP.sub("", _SCENE_GROUP.sub("", name)) if scene else _SPACED_GROUP.sub("", name)
+    titles = [stripped or raw]
+    if name != stripped and name:
+        titles.append(name.replace("-", " "))
+    return titles
+
+
+def search_name(raw: str) -> str:
+    return search_names(raw)[0]
 
 
 def _names(game: Game) -> list[str]:
     seen: list[str] = []
-    for n in (search_name(game.name), search_name(game.fs_name), game.name):
-        if n and n not in seen:
-            seen.append(n)
+    for source in (game.name, game.fs_name):
+        for n in search_names(source):
+            if n and n not in seen:
+                seen.append(n)
+    if game.name not in seen:
+        seen.append(game.name)
     return seen
 
 
@@ -149,7 +167,34 @@ class ScrapeResult:
     scraped: int
 
 
+def needs_scrape(game: Game) -> bool:
+    return not game.missing_from_fs and (not game.igdb_id or not game.cover_path)
+
+
 def scrape_library(library_id: int) -> ScrapeResult:
-    games = db_game_handler.get_games_for_library(library_id)
-    scraped = sum(1 for g in games if scrape_game(g))
+    games = [g for g in db_game_handler.get_games_for_library(library_id) if not g.missing_from_fs]
+    scraped = 0
+    for game in games:
+        try:
+            scraped += scrape_game(game)
+        except Exception as e:  # noqa: BLE001 - one bad game must not stop the rest
+            log.warning(f"Scrape of {game.name!r} failed: {e}")
     return ScrapeResult(total=len(games), scraped=scraped)
+
+
+_scraping: set[int] = set()
+_scraping_lock = threading.Lock()
+
+
+def scrape_library_in_background(library_id: int) -> None:
+    """Auto-match after a scan, so duplicates group without scraping each game
+    by hand. A library already being scraped is left to the running pass."""
+    with _scraping_lock:
+        if library_id in _scraping:
+            return
+        _scraping.add(library_id)
+    try:
+        scrape_library(library_id)
+    finally:
+        with _scraping_lock:
+            _scraping.discard(library_id)

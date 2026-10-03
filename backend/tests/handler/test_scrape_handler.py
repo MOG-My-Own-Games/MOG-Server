@@ -173,3 +173,30 @@ class TestFuzzyMatching:
 
         assert scrape_game(_game(name="Some Game", fs_name="Some Game")) is False
         igdb.get_game_by_id.assert_not_called()
+
+
+class TestScrapeLibrary:
+    @patch("handler.scrape_handler.scrape_game")
+    @patch("handler.scrape_handler.db_game_handler")
+    def test_skips_missing_games_and_survives_a_failure(self, db, scrape, caplog):
+        from handler.scrape_handler import scrape_library
+
+        db.get_games_for_library.return_value = [
+            _game(id=1, name="boom"),
+            _game(id=2, name="gone", missing_from_fs=True),
+            _game(id=3, name="ok"),
+        ]
+        scrape.side_effect = lambda g: (_ for _ in ()).throw(RuntimeError("x")) if g.id == 1 else True
+
+        result = scrape_library(1)
+
+        assert [c.args[0].id for c in scrape.call_args_list] == [1, 3]
+        assert (result.total, result.scraped) == (2, 1)
+
+    def test_needs_scrape_only_for_present_games_missing_a_match_or_cover(self):
+        from handler.scrape_handler import needs_scrape
+
+        assert needs_scrape(_game())
+        assert needs_scrape(_game(igdb_id=1))
+        assert not needs_scrape(_game(igdb_id=1, cover_path="c.png"))
+        assert not needs_scrape(_game(missing_from_fs=True))

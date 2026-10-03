@@ -257,3 +257,41 @@ class TestRematchCover:
         updates = self._run(igdb, sgdb, db, rematch=False)
         assert {"sgdb_id": 5, "cover_path": "https://example.com/5.png"} in updates
         sgdb.search_games.assert_not_called()
+
+
+class TestNameFromTheMatch:
+    @patch("handler.scrape_handler.db_game_handler")
+    @patch("handler.scrape_handler.sgdb_handler")
+    @patch("handler.scrape_handler.igdb_handler")
+    def test_igdb_match_renames_the_game(self, igdb, sgdb, db):
+        from handler.scrape_handler import refresh_game
+
+        igdb.get_game_by_id.return_value = {"id": 9, "name": "The Real Title"}
+        sgdb.search_games.return_value = []
+        refresh_game(_game(name="the.real.title-GRP", fs_name="the.real.title-GRP", igdb_id=9))
+        assert any(c.args[1].get("name") == "The Real Title" for c in db.update_game.call_args_list)
+
+    @patch("handler.scrape_handler.db_game_handler")
+    @patch("handler.scrape_handler.sgdb_handler")
+    @patch("handler.scrape_handler.igdb_handler")
+    def test_without_igdb_a_raw_name_takes_the_steamgriddb_one(self, igdb, sgdb, db):
+        from handler.scrape_handler import refresh_game
+
+        igdb.search_games.return_value = []
+        sgdb.search_games.return_value = [{"id": 4, "name": "Some Game"}]
+        sgdb.get_grids.return_value = ["https://example.com/c.png"]
+        refresh_game(_game(name="some.game", fs_name="some.game"))
+        updates = [c.args[1] for c in db.update_game.call_args_list]
+        assert {"sgdb_id": 4, "name": "Some Game", "cover_path": "https://example.com/c.png"} in updates
+
+    @patch("handler.scrape_handler.db_game_handler")
+    @patch("handler.scrape_handler.sgdb_handler")
+    @patch("handler.scrape_handler.igdb_handler")
+    def test_a_name_set_by_hand_is_not_overwritten_by_steamgriddb(self, igdb, sgdb, db):
+        from handler.scrape_handler import refresh_game
+
+        igdb.search_games.return_value = []
+        sgdb.search_games.return_value = [{"id": 4, "name": "Provider Name"}]
+        sgdb.get_grids.return_value = ["https://example.com/c.png"]
+        refresh_game(_game(name="My Name", fs_name="raw-folder"), rematch_cover=True)
+        assert all("name" not in c.args[1] for c in db.update_game.call_args_list)

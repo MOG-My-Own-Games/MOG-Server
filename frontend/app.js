@@ -1232,7 +1232,8 @@ document.getElementById("scrape-btn").addEventListener("click", async () => {
       coverPlaceholder.hidden = true;
     }
     const cover = game.cover_path === previousCover ? "cover unchanged (still SteamGridDB's first result)" : "cover replaced";
-    statusEl.textContent = `Matched: ${game.name}, ${cover}`;
+    const igdb = game.igdb_id ? "" : "; no IGDB match (check the IGDB keys in Settings)";
+    statusEl.textContent = `Matched: ${game.name}, ${cover}${igdb}`;
     await refreshGames();
   } catch (err) {
     statusEl.textContent = `Failed: ${err.message}`;

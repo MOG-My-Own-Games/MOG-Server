@@ -74,10 +74,22 @@ def _find_igdb(game: Game) -> dict | None:
     return best_match(query_variants(names), names[0], igdb_handler.search_games, lambda r: r.get("name", ""))
 
 
-def _find_sgdb_id(game: Game) -> int | None:
+def _find_sgdb(game: Game) -> dict | None:
     names = _names(game)
-    match = best_match(query_variants(names), names[0], sgdb_handler.search_games, lambda r: r.get("name", ""))
+    return best_match(query_variants(names), names[0], sgdb_handler.search_games, lambda r: r.get("name", ""))
+
+
+def _find_sgdb_id(game: Game) -> int | None:
+    match = _find_sgdb(game)
     return match["id"] if match else None
+
+
+def _sgdb_name(game: Game, match: dict | None, igdb_matched: bool, keep: frozenset[str] = frozenset()) -> dict:
+    """With no IGDB match to name it, a game still called by its raw file or folder
+    name takes the name of the SteamGridDB game it matched."""
+    if match and not igdb_matched and "name" not in keep and game.name == game.fs_name and match.get("name"):
+        return {"name": match["name"]}
+    return {}
 
 
 def _apply_igdb(game: Game, igdb_id: int) -> bool:
@@ -118,10 +130,13 @@ def scrape_game(game: Game) -> bool:
             applied = True
 
     if not game.cover_path:
-        sgdb_id = game.sgdb_id or _find_sgdb_id(game)
+        sgdb_match = None if game.sgdb_id else _find_sgdb(game)
+        sgdb_id = game.sgdb_id or (sgdb_match["id"] if sgdb_match else None)
         grids = sgdb_handler.get_grids(sgdb_id) if sgdb_id else []
         if grids:
-            db_game_handler.update_game(game.id, {"cover_path": grids[0], "sgdb_id": sgdb_id})
+            update = {"cover_path": grids[0], "sgdb_id": sgdb_id}
+            update.update(_sgdb_name(game, sgdb_match, igdb_matched=applied))
+            db_game_handler.update_game(game.id, update)
             applied = True
 
     return applied
@@ -151,11 +166,12 @@ def refresh_game(game: Game, keep: frozenset[str] = frozenset(), rematch_cover: 
         db_game_handler.update_game(game.id, update)
         applied = True
 
-    sgdb_id = _find_sgdb_id(game) if rematch_cover or not game.sgdb_id else game.sgdb_id
-    sgdb_id = sgdb_id or game.sgdb_id
+    sgdb_match = _find_sgdb(game) if rematch_cover or not game.sgdb_id else None
+    sgdb_id = (sgdb_match["id"] if sgdb_match else None) or game.sgdb_id
     grids = sgdb_handler.get_grids(sgdb_id) if sgdb_id else []
     if grids:
         update = {"sgdb_id": sgdb_id}
+        update.update(_sgdb_name(game, sgdb_match, igdb_matched=full is not None, keep=keep))
         if "cover_path" not in keep:
             update["cover_path"] = grids[0]
         db_game_handler.update_game(game.id, update)

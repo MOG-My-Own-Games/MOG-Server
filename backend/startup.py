@@ -5,7 +5,7 @@ import subprocess
 from pathlib import Path
 
 from config import INSTALL_CACHE_PATH, MOG_BASE_PATH, PROTON_INSTALL_ROOT, RESOURCES_BASE_PATH
-from handler.auth import hash_password
+from handler.auth import hash_password, verify_password
 from handler.database import db_install_session_handler, db_user_handler
 from logger.logger import log
 from models.install_session import InstallSessionState
@@ -29,17 +29,27 @@ def _run_migrations() -> None:
 
 
 def _ensure_default_admin() -> None:
-    """First-boot convenience: create an admin from env vars if the users
-    table is empty. A production deployment should change the password
-    immediately (no forced-reset flow yet, see docs/TODO.md)."""
-    if db_user_handler.get_all_users():
-        return
+    """Create the admin from env vars if the users table is empty. After that,
+    MOG_ADMIN_PASSWORD (when set) is the source of truth for that account's
+    password: a changed value is rewritten to the DB on every boot."""
     username = os.getenv("MOG_ADMIN_USERNAME", "admin")
-    password = os.getenv("MOG_ADMIN_PASSWORD", "mog-admin")
-    db_user_handler.add_user(
-        User(username=username, hashed_password=hash_password(password), role=Role.ADMIN, enabled=True)
-    )
-    log.warning(f"Created default admin user {username!r} - change its password (MOG_ADMIN_PASSWORD).")
+    env_password = os.getenv("MOG_ADMIN_PASSWORD")
+    if not db_user_handler.get_all_users():
+        db_user_handler.add_user(
+            User(
+                username=username,
+                hashed_password=hash_password(env_password or "mog-admin"),
+                role=Role.ADMIN,
+                enabled=True,
+            )
+        )
+        log.warning(f"Created default admin user {username!r} - change its password (MOG_ADMIN_PASSWORD).")
+        return
+
+    admin = db_user_handler.get_user_by_username(username)
+    if env_password and admin and not verify_password(env_password, admin.hashed_password):
+        db_user_handler.update_user(admin.id, {"hashed_password": hash_password(env_password)})
+        log.warning(f"Password of {username!r} reset from MOG_ADMIN_PASSWORD.")
 
 
 def _fail_orphaned_installs() -> None:

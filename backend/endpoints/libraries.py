@@ -52,11 +52,11 @@ async def scan_one_library(
 
 @router.post("/{id}/scrape")
 async def scrape_one_library(user: AdminUser, id: Annotated[int, Path(ge=1)]) -> ScrapeResultSchema:
-    """Best-effort metadata fill (IGDB + SteamGridDB) for every game in this
-    library that's still missing it. See handler/scrape_handler.py for what
-    "best-effort" means here."""
+    """Re-fetch metadata and covers (IGDB + SteamGridDB) for every present game
+    in this library, replacing what is stored. The automatic pass after a scan
+    only fills what is missing."""
     library = db_library_handler.get_library(id)
     if library is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-    result = await run_in_threadpool(scrape_library, id)
+    result = await run_in_threadpool(scrape_library, id, True)
     return ScrapeResultSchema(library_id=id, total=result.total, scraped=result.scraped)

@@ -214,3 +214,20 @@ class TestScrapeLibrary:
         assert needs_scrape(_game(igdb_id=1))
         assert not needs_scrape(_game(igdb_id=1, cover_path="c.png"))
         assert not needs_scrape(_game(missing_from_fs=True))
+
+
+class TestExplicitScrapeReplaces:
+    @patch("handler.scrape_handler.refresh_game")
+    @patch("handler.scrape_handler.scrape_game")
+    @patch("handler.scrape_handler.db_game_handler")
+    def test_library_refresh_replaces_while_the_default_only_fills(self, db, fill, refresh):
+        from handler.scrape_handler import scrape_library
+
+        db.get_games_for_library.return_value = [_game(id=1), _game(id=2, missing_from_fs=True)]
+        fill.return_value = refresh.return_value = True
+
+        scrape_library(1)
+        assert fill.call_count == 1 and refresh.call_count == 0
+
+        scrape_library(1, refresh=True)
+        assert fill.call_count == 1 and refresh.call_count == 1

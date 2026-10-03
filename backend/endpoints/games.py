@@ -9,7 +9,7 @@ from handler.database import db_game_handler, db_install_session_handler
 from handler.filesystem import fs_game_handler
 from handler.filesystem.installer_detection import category_for_path
 from handler.metadata import igdb_handler, sgdb_handler
-from handler.scrape_handler import refresh_game, scrape_game, search_name
+from handler.scrape_handler import refresh_game, search_name
 from models.install_session import InstallSessionState
 from starlette.concurrency import run_in_threadpool
 from utils.install_cache import session_cache_dir
@@ -116,11 +116,12 @@ async def update_game(user: AdminUser, id: Annotated[int, Path(ge=1)], data: Gam
 
 @router.post("/{id}/scrape")
 async def scrape_one_game(user: AdminUser, id: Annotated[int, Path(ge=1)]) -> GameSchema:
-    """Best-effort metadata fill for this one game - see handler/scrape_handler.py."""
+    """Re-fetch this game's metadata and cover from the providers, replacing what is
+    stored (by its IGDB/SteamGridDB id when set, otherwise by name)."""
     game = db_game_handler.get_game(id)
     if game is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-    await run_in_threadpool(scrape_game, game)
+    await run_in_threadpool(refresh_game, game)
     return GameSchema.model_validate(db_game_handler.get_game(id))
 
 

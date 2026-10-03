@@ -171,12 +171,15 @@ def needs_scrape(game: Game) -> bool:
     return not game.missing_from_fs and (not game.igdb_id or not game.cover_path)
 
 
-def scrape_library(library_id: int) -> ScrapeResult:
+def scrape_library(library_id: int, refresh: bool = False) -> ScrapeResult:
+    """Fill what is missing for every present game; with `refresh`, re-fetch
+    everything (metadata and cover) instead."""
     games = [g for g in db_game_handler.get_games_for_library(library_id) if not g.missing_from_fs]
+    fetch = refresh_game if refresh else scrape_game
     scraped = 0
     for game in games:
         try:
-            scraped += scrape_game(game)
+            scraped += fetch(game)
         except Exception as e:  # noqa: BLE001 - one bad game must not stop the rest
             log.warning(f"Scrape of {game.name!r} failed: {e}")
     return ScrapeResult(total=len(games), scraped=scraped)

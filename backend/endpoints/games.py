@@ -4,6 +4,7 @@ from pathlib import PurePosixPath
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Path, Query, status
+from fastapi.responses import FileResponse
 from handler.auth import AdminUser, CurrentUser
 from handler.database import db_game_handler, db_install_session_handler
 from handler.filesystem import fs_game_handler
@@ -12,6 +13,7 @@ from handler.metadata import igdb_handler, sgdb_handler
 from handler.scrape_handler import refresh_game, search_name
 from models.install_session import InstallSessionState
 from starlette.concurrency import run_in_threadpool
+from utils.image_cache import COVER_MAX_HEIGHT, cached_image
 from utils.install_cache import session_cache_dir
 
 from endpoints.responses.game import GameFileSchema, GameFilesSchema, GameSchema, GameUpdateForm
@@ -69,6 +71,35 @@ async def get_game(user: CurrentUser, id: Annotated[int, Path(ge=1)]) -> GameSch
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     installed = game.id in _installed_game_ids(user.id)
     return GameSchema.model_validate(game).model_copy(update={"installed": installed})
+
+
+def _serve_image(url: str | None, max_height: int | None = None) -> FileResponse:
+    path = cached_image(url, max_height) if url else None
+    if path is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
+
+
+@router.get("/{id}/cover")
+async def get_game_cover(user: CurrentUser, id: Annotated[int, Path(ge=1)]) -> FileResponse:
+    """The cover through this server (cached, shrunk), for clients that cannot reach the CDN quickly."""
+    game = db_game_handler.get_game(id)
+    if game is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    url = game.cover_path or ((game.igdb_metadata or {}).get("cover") or {}).get("url")
+    return await run_in_threadpool(_serve_image, url, COVER_MAX_HEIGHT)
+
+
+@router.get("/{id}/screenshots/{index}")
+async def get_game_screenshot(
+    user: CurrentUser, id: Annotated[int, Path(ge=1)], index: Annotated[int, Path(ge=0)]
+) -> FileResponse:
+    game = db_game_handler.get_game(id)
+    if game is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    shots = (game.igdb_metadata or {}).get("screenshots") or []
+    url = shots[index].get("url") if index < len(shots) else None
+    return await run_in_threadpool(_serve_image, url, None)
 
 
 @router.get("/{id}/files")

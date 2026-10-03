@@ -36,6 +36,15 @@ async def health() -> dict:
     return {"status": "ok", "version": MOG_VERSION}
 
 
+@app.middleware("http")
+async def revalidate_frontend(request, call_next):
+    """Always revalidate the web UI's own files, so a new version is never shadowed by a stale cached script."""
+    response = await call_next(request)
+    if not request.url.path.startswith(("/api", "/resources")):
+        response.headers.setdefault("Cache-Control", "no-cache")
+    return response
+
+
 # User-uploaded assets (avatars). Unauthenticated on purpose: a profile
 # picture isn't sensitive, and gating it would require every <img> tag to
 # somehow carry Basic-auth credentials (the same problem the VNC proxy's

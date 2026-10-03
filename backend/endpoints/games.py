@@ -16,7 +16,7 @@ from starlette.concurrency import run_in_threadpool
 from utils.image_cache import COVER_MAX_HEIGHT, cached_image
 from utils.install_cache import session_cache_dir
 
-from endpoints.responses.game import GameFileSchema, GameFilesSchema, GameSchema, GameUpdateForm
+from endpoints.responses.game import GameFileSchema, GameFilesSchema, GameSchema, GameSizeSchema, GameUpdateForm
 
 router = APIRouter(prefix="/games", tags=["games"])
 
@@ -100,6 +100,16 @@ async def get_game_screenshot(
     shots = (game.igdb_metadata or {}).get("screenshots") or []
     url = shots[index].get("url") if index < len(shots) else None
     return await run_in_threadpool(_serve_image, url, None)
+
+
+@router.get("/{id}/size")
+async def get_game_size(user: CurrentUser, id: Annotated[int, Path(ge=1)]) -> GameSizeSchema:
+    """What the game's folder (or file) takes on the server's disk."""
+    game = db_game_handler.get_game(id)
+    if game is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    detected = await run_in_threadpool(fs_game_handler.list_game_files_flat, game)
+    return GameSizeSchema(size_bytes=sum(f.size_bytes for f in detected), file_count=len(detected))
 
 
 @router.get("/{id}/files")

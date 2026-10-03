@@ -35,6 +35,11 @@ class GameFileSchema(BaseModel):
     category: str
 
 
+class GameSizeSchema(BaseModel):
+    size_bytes: int
+    file_count: int
+
+
 class GameFilesSchema(BaseModel):
     root_path: str
     files: list[GameFileSchema]

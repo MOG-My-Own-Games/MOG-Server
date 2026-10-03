@@ -125,6 +125,114 @@ function applyTopbarAvatar() {
   applyAvatar(currentUser.avatar_path, "profile-avatar", "profile-avatar-placeholder");
 }
 
+// --- Notifications (bell, menu entry, page) ---
+
+let notificationData = { notifications: [], unread: 0 };
+let newestNotificationId = null;
+let notificationTimer = null;
+
+function showToast(n) {
+  const toast = document.createElement("div");
+  toast.className = "toast";
+  toast.innerHTML = `<strong>${escapeHtml(n.title)}</strong>${n.body ? `<span class="muted small">${escapeHtml(n.body)}</span>` : ""}`;
+  toast.addEventListener("click", () => {
+    toast.remove();
+    location.hash = "notifications";
+  });
+  document.getElementById("toast-area").appendChild(toast);
+  setTimeout(() => toast.remove(), 8000);
+}
+
+function renderNotificationCounts() {
+  const unread = notificationData.unread;
+  const badge = document.getElementById("bell-badge");
+  badge.textContent = unread > 99 ? "99+" : String(unread);
+  badge.hidden = unread === 0;
+  const menuCount = document.getElementById("menu-notif-count");
+  menuCount.textContent = String(unread);
+  menuCount.hidden = unread === 0;
+}
+
+async function loadNotifications() {
+  const data = await api("/api/notifications");
+  const newest = data.notifications.reduce((m, n) => Math.max(m, n.id), 0);
+  if (newestNotificationId !== null) {
+    data.notifications.filter((n) => n.id > newestNotificationId && !n.read).forEach(showToast);
+  }
+  newestNotificationId = newest;
+  notificationData = data;
+  renderNotificationCounts();
+  if (!document.getElementById("view-notifications").hidden) renderNotificationList();
+}
+
+function startNotificationPolling() {
+  clearInterval(notificationTimer);
+  newestNotificationId = null;
+  const poll = () => loadNotifications().catch(() => {});
+  poll();
+  notificationTimer = setInterval(poll, 15000);
+}
+
+function stopNotificationPolling() {
+  clearInterval(notificationTimer);
+  notificationData = { notifications: [], unread: 0 };
+  renderNotificationCounts();
+}
+
+function renderNotificationList() {
+  const list = document.getElementById("notifications-list");
+  list.innerHTML = "";
+  document.getElementById("notifications-empty").hidden = notificationData.notifications.length > 0;
+  for (const n of notificationData.notifications) {
+    const li = document.createElement("li");
+    li.className = `notification-item${n.read ? "" : " unread"}`;
+    const game = n.game_id ? `<a href="#game/${n.game_id}">Open game</a> &middot; ` : "";
+    li.innerHTML = `
+      <div>
+        <h4 class="notification-title">${escapeHtml(n.title)}</h4>
+        ${n.body ? `<p class="notification-body">${escapeHtml(n.body)}</p>` : ""}
+        <div class="notification-meta">${game}${escapeHtml(new Date(n.created_at).toLocaleString())}</div>
+      </div>
+    `;
+    const actions = document.createElement("div");
+    actions.className = "notification-actions";
+    if (!n.read) {
+      const readBtn = document.createElement("button");
+      readBtn.textContent = "Mark read";
+      readBtn.addEventListener("click", async () => {
+        await api(`/api/notifications/${n.id}/read`, { method: "POST" });
+        await loadNotifications();
+      });
+      actions.appendChild(readBtn);
+    }
+    const delBtn = document.createElement("button");
+    delBtn.className = "danger";
+    delBtn.textContent = "Delete";
+    delBtn.addEventListener("click", async () => {
+      await api(`/api/notifications/${n.id}`, { method: "DELETE" });
+      await loadNotifications();
+    });
+    actions.appendChild(delBtn);
+    li.appendChild(actions);
+    list.appendChild(li);
+  }
+}
+
+document.getElementById("bell-btn").addEventListener("click", () => {
+  location.hash = "notifications";
+});
+
+document.getElementById("notif-read-all-btn").addEventListener("click", async () => {
+  await api("/api/notifications/read", { method: "POST" });
+  await loadNotifications();
+});
+
+document.getElementById("notif-clear-btn").addEventListener("click", async () => {
+  if (!confirm("Delete every notification?")) return;
+  await api("/api/notifications", { method: "DELETE" });
+  await loadNotifications();
+});
+
 async function tryLogin(user, pass) {
   creds = { user, pass };
   currentUser = await api("/api/users/me"); // throws on bad creds
@@ -132,6 +240,7 @@ async function tryLogin(user, pass) {
   sessionStorage.setItem("mog_pass", pass);
   applyTopbarAvatar();
   showScreen("app-screen");
+  startNotificationPolling();
   await refreshLibraries();
   router();
 }
@@ -155,6 +264,7 @@ document.getElementById("logout-btn").addEventListener("click", () => {
   sessionStorage.removeItem("mog_pass");
   creds = null;
   currentUser = null;
+  stopNotificationPolling();
   showScreen("login-screen");
 });
 
@@ -178,6 +288,10 @@ function router() {
     const id = parseInt(hash.slice("game/".length), 10);
     document.getElementById("view-game").hidden = false;
     openGamePage(id);
+  } else if (hash === "notifications") {
+    document.getElementById("view-notifications").hidden = false;
+    loadNotifications().catch(() => {});
+    renderNotificationList();
   } else if (hash === "profile") {
     document.getElementById("view-profile").hidden = false;
     openProfilePage();

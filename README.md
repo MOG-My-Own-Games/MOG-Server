@@ -17,7 +17,9 @@ copy of.
   ratings, DLC/expansions/remakes all come along with a match).
 - Runs an installer for a Game inside a sandboxed Wine/Proton environment
   (bubblewrap + Xvfb + VNC, viewable live in the web UI), with an
-  experimental OCR-driven "auto mode" that presses the installer's own
+  experimental OCR-driven "auto mode" (on by default; if it gets stuck or the
+  install fails the user gets a notification, bell icon and Notifications page
+  in the web UI and in the client) that presses the installer's own
   buttons, and a checklist to chain several installers (e.g. a patch) into
   the same install run.
 - Exposes the installed files over HTTP, including while the install is

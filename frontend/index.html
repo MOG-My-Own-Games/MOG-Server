@@ -24,6 +24,10 @@
     <header class="topbar">
       <a href="#" class="topbar-brand" title="MOG"><img class="brand-icon" src="assets/icon.png" alt="" /><img class="brand-title" src="assets/title.png" alt="MOG" /></a>
       <div class="topbar-actions">
+        <button id="bell-btn" class="bell-btn" type="button" title="Notifications" aria-label="Notifications">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a6 6 0 0 0-6 6v3.5L4.5 16h15L18 12.5V9a6 6 0 0 0-6-6zm-2 15a2 2 0 0 0 4 0z" /></svg>
+          <span id="bell-badge" class="bell-badge" hidden>0</span>
+        </button>
         <div class="user-menu">
           <button id="user-menu-btn" class="user-menu-btn" type="button">
             <img id="profile-avatar" class="avatar-sm" hidden />
@@ -32,6 +36,7 @@
           </button>
           <div id="user-menu-dropdown" class="dropdown-menu" hidden>
             <a href="#profile" class="dropdown-item">My profile</a>
+            <a href="#notifications" class="dropdown-item">Notifications <span id="menu-notif-count" class="menu-count" hidden></span></a>
             <a href="#settings" class="dropdown-item">Settings</a>
             <button id="logout-btn" class="dropdown-item dropdown-item-btn">Sign out</button>
           </div>
@@ -221,6 +226,19 @@
         </section>
 
         <!-- My profile view -->
+        <!-- Notifications view -->
+        <section id="view-notifications" class="view" hidden>
+          <div class="main-header">
+            <h2>Notifications</h2>
+            <div class="page-actions">
+              <button id="notif-read-all-btn" type="button">Mark all read</button>
+              <button id="notif-clear-btn" class="danger" type="button">Clear all</button>
+            </div>
+          </div>
+          <ul id="notifications-list" class="notification-list"></ul>
+          <p id="notifications-empty" class="muted" hidden>No notifications.</p>
+        </section>
+
         <section id="view-profile" class="view" hidden>
           <a href="#" class="back-link">&laquo; Back to library</a>
           <h2>My profile</h2>
@@ -396,6 +414,8 @@
       </main>
     </div>
   </div>
+
+  <div id="toast-area" class="toast-area"></div>
 
   <div id="gallery" class="gallery" hidden>
     <button id="gallery-prev" class="gallery-prev" aria-label="Previous">&#8249;</button>

@@ -256,6 +256,16 @@ async function openSettingsPage(subTab) {
   document.getElementById("setting-manual-mode").checked = s.manualMode;
   document.getElementById("setting-auto-mode").onchange = saveInstallDefaults;
   document.getElementById("setting-manual-mode").onchange = saveInstallDefaults;
+  const groupToggle = document.getElementById("setting-group-games");
+  groupToggle.checked = groupGamesEnabled();
+  groupToggle.onchange = () => {
+    try {
+      localStorage.setItem("mog_group_games", groupToggle.checked ? "1" : "0");
+    } catch (_) {
+      // Preference just won't persist.
+    }
+    refreshGames();
+  };
   document.getElementById("api-keys-saved").textContent = "";
   document.getElementById("cache-ttl-saved").textContent = "";
 
@@ -274,6 +284,7 @@ async function openSettingsPage(subTab) {
   }
 
   await refreshCacheTable();
+  await refreshMissingTable();
   await refreshProviderValidityBadges();
   await refreshUsersTable();
 }
@@ -571,6 +582,62 @@ document.getElementById("clear-all-cache-btn").addEventListener("click", async (
   }
 });
 
+// --- Missing games (files a scan could no longer find) ---
+
+async function refreshMissingTable() {
+  const body = document.getElementById("missing-table-body");
+  body.innerHTML = "<tr><td colspan='4' class='muted'>Loading...</td></tr>";
+  try {
+    const missing = await api("/api/games/missing");
+    if (missing.length === 0) {
+      body.innerHTML = "<tr><td colspan='4' class='muted'>No missing games.</td></tr>";
+      return;
+    }
+    body.innerHTML = "";
+    for (const game of missing) {
+      const tr = document.createElement("tr");
+      const libName = (libraries.find((l) => l.id === game.library_id) || {}).name || "";
+      tr.innerHTML = `
+        <td>${escapeHtml(game.name)}</td>
+        <td>${escapeHtml(libName)}</td>
+        <td>${escapeHtml(game.fs_name)}</td>
+      `;
+      const actionTd = document.createElement("td");
+      const delBtn = document.createElement("button");
+      delBtn.textContent = "Clear";
+      delBtn.className = "ghost";
+      delBtn.addEventListener("click", async () => {
+        try {
+          await api(`/api/games/${game.id}`, { method: "DELETE" });
+          await refreshMissingTable();
+          await refreshGames();
+        } catch (err) {
+          alert(`Could not clear: ${err.message}`);
+        }
+      });
+      actionTd.appendChild(delBtn);
+      tr.appendChild(actionTd);
+      body.appendChild(tr);
+    }
+  } catch (err) {
+    body.innerHTML = `<tr><td colspan="4" class="error">${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
+document.getElementById("refresh-missing-btn").addEventListener("click", refreshMissingTable);
+
+document.getElementById("clear-all-missing-btn").addEventListener("click", async () => {
+  if (!confirm("Remove every missing game from MOG?")) return;
+  try {
+    const result = await api("/api/games/missing", { method: "DELETE" });
+    alert(`Cleared ${result.cleared} game(s).`);
+    await refreshMissingTable();
+    await refreshGames();
+  } catch (err) {
+    alert(`Could not clear: ${err.message}`);
+  }
+});
+
 // --- Sidebar widgets: active installs, total cache size ---
 
 async function refreshSidebarWidgets() {
@@ -725,7 +792,7 @@ async function refreshGames() {
   const qs = selectedLibraryId !== null ? `?library_id=${selectedLibraryId}` : "";
   games = await api(`/api/games${qs}`);
   const libName = selectedLibraryId === null ? "All Games" : (libraries.find((l) => l.id === selectedLibraryId) || {}).name || "Games";
-  document.getElementById("games-heading").textContent = `${libName} (${games.length})`;
+  document.getElementById("games-heading").textContent = `${libName} (${gridEntries().length})`;
   renderGameGrid(document.getElementById("game-search").value.trim().toLowerCase());
 }
 
@@ -733,16 +800,56 @@ async function refreshGames() {
 const INSTALLED_BADGE =
   '<span class="installed-badge" title="Installed"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg></span>';
 
+// Corner badge (top left): a scan could not find this game on disk.
+const MISSING_BADGE =
+  '<span class="missing-badge" title="Missing from disk"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5l9 9M14 5l-9 9" /></svg></span>';
+
+// Games sharing an IGDB id are versions of one title; the grid shows one
+// representative (preferring one that is still on disk) per group.
+function groupGames(list) {
+  const groups = new Map();
+  const out = [];
+  for (const game of list) {
+    if (!game.igdb_id) {
+      out.push({ game, versions: 1 });
+      continue;
+    }
+    let entry = groups.get(game.igdb_id);
+    if (!entry) {
+      entry = { game, versions: 0 };
+      groups.set(game.igdb_id, entry);
+      out.push(entry);
+    } else if (entry.game.missing_from_fs && !game.missing_from_fs) {
+      entry.game = game;
+    }
+    entry.versions += 1;
+  }
+  return out;
+}
+
+function groupGamesEnabled() {
+  try {
+    return localStorage.getItem("mog_group_games") !== "0";
+  } catch (_) {
+    return true;
+  }
+}
+
+function gridEntries() {
+  return groupGamesEnabled() ? groupGames(games) : games.map((game) => ({ game, versions: 1 }));
+}
+
 function renderGameGrid(filterText) {
   const grid = document.getElementById("game-grid");
   grid.innerHTML = "";
-  const visible = filterText ? games.filter((g) => g.name.toLowerCase().includes(filterText)) : games;
-  for (const game of visible) {
+  const entries = gridEntries();
+  const visible = filterText ? entries.filter((e) => e.game.name.toLowerCase().includes(filterText)) : entries;
+  for (const { game, versions } of visible) {
     const card = document.createElement("div");
     card.className = "game-card";
     card.title = game.name;
     card.innerHTML = `
-      <div class="cover${game.cover_path ? "" : " no-cover"}">${game.cover_path ? `<img src="${escapeHtml(game.cover_path)}" />` : "\u{1F3AE}"}${game.installed ? INSTALLED_BADGE : ""}</div>
+      <div class="cover${game.cover_path ? "" : " no-cover"}">${game.cover_path ? `<img src="${escapeHtml(game.cover_path)}" />` : "\u{1F3AE}"}${game.installed ? INSTALLED_BADGE : ""}${game.missing_from_fs ? MISSING_BADGE : ""}${versions > 1 ? `<span class="sibling-badge" title="${versions} versions">${versions}</span>` : ""}</div>
       <div class="name">${escapeHtml(game.name)}</div>
     `;
     card.addEventListener("click", () => {
@@ -811,7 +918,9 @@ async function openGamePage(id) {
     coverPlaceholder.hidden = false;
   }
 
+  renderVersions(game);
   renderOverview(game);
+  loadGameFiles(game.id);
 
   document.getElementById("scrape-status").textContent = "";
   document.getElementById("igdb-results").innerHTML = "";
@@ -824,9 +933,10 @@ async function openGamePage(id) {
   document.getElementById("cancel-install-btn").hidden = true;
   document.getElementById("clear-game-cache-btn").hidden = true;
   document.getElementById("start-install-btn").hidden = false;
-  document.getElementById("files-empty").hidden = false;
-  document.getElementById("files-cache-path").textContent = "";
-  document.getElementById("files-table-body").innerHTML = "";
+  libFiles = null;
+  cacheFiles = null;
+  filesSubtab = "all";
+  renderFilesTab();
 
   getInstallDefaults().then((defaults) => {
     document.getElementById("auto-mode-check").checked = defaults.autoMode;
@@ -858,13 +968,34 @@ function relationCard(item) {
   return `<a class="relation-card" href="${escapeHtml(href)}" target="_blank" rel="noopener">${cover}<span>${escapeHtml(item.name)}</span></a>`;
 }
 
+function renderVersions(game) {
+  const el = document.getElementById("game-versions");
+  const versions = game.igdb_id ? games.filter((g) => g.igdb_id === game.igdb_id) : [];
+  el.hidden = versions.length < 2;
+  el.innerHTML = versions
+    .map((g) => {
+      const lib = (libraries.find((l) => l.id === g.library_id) || {}).name || "";
+      const label = libraries.length > 1 ? `${g.fs_name} (${lib})` : g.fs_name;
+      return `<a class="chip${g.id === game.id ? " chip-active" : ""}" href="#game/${g.id}">${escapeHtml(label)}</a>`;
+    })
+    .join("");
+}
+
 function renderOverview(game) {
   const meta = game.igdb_metadata || {};
+
+  const yearEl = document.getElementById("game-year");
+  const year = meta.first_release_date ? new Date(meta.first_release_date * 1000).getUTCFullYear() : null;
+  yearEl.textContent = year ? `Released ${year}` : "";
+  yearEl.hidden = !year;
 
   document.getElementById("game-summary").textContent = meta.summary || game.summary || meta.storyline || "";
 
   const genresEl = document.getElementById("game-genres");
-  genresEl.innerHTML = (meta.genres || []).map((g) => `<span class="chip">${escapeHtml(g.name)}</span>`).join("");
+  genresEl.innerHTML =
+    (game.missing_from_fs ? '<span class="chip chip-missing">Missing</span>' : "") +
+    (game.fs_tags || []).map((t) => `<span class="chip chip-tag">${escapeHtml(t)}</span>`).join("") +
+    (meta.genres || []).map((g) => `<span class="chip">${escapeHtml(g.name)}</span>`).join("");
 
   const ratingsEl = document.getElementById("game-age-ratings");
   ratingsEl.innerHTML = (meta.age_ratings || [])
@@ -909,6 +1040,7 @@ function renderOverview(game) {
 
   const hasAnything =
     (meta.summary || game.summary || meta.storyline) ||
+    year ||
     (meta.genres || []).length ||
     (meta.screenshots || []).length ||
     (meta.age_ratings || []).length;
@@ -1003,6 +1135,7 @@ document.getElementById("edit-metadata-form").addEventListener("submit", async (
     renderOverview(game);
     document.getElementById("edit-metadata-form").hidden = true;
     await refreshGames();
+    renderVersions(game);
   } catch (err) {
     alert(`Could not save: ${err.message}`);
   }
@@ -1034,6 +1167,7 @@ document.getElementById("igdb-search-btn").addEventListener("click", async () =>
         renderOverview(game);
         document.getElementById("scrape-status").textContent = `Matched: ${game.name}`;
         await refreshGames();
+        renderVersions(game);
       });
       li.appendChild(applyBtn);
       list.appendChild(li);
@@ -1101,14 +1235,15 @@ async function loadCandidates(gameId) {
       label.className = "candidate-row";
       const check = document.createElement("input");
       check.type = "checkbox";
-      check.checked = i === 0;
-      if (i === 0) installQueue = [c];
+      const isBase = c.category === "game";
+      check.checked = i === 0 && isBase;
+      if (check.checked) installQueue = [c];
       check.addEventListener("change", () => {
         installQueue = chainable.filter((_, j) => list.children[j].querySelector("input").checked);
       });
       label.appendChild(check);
       const text = document.createElement("span");
-      text.textContent = `${c.path} (${fmtBytes(c.file_size_bytes)})`;
+      text.textContent = `${isBase ? "" : `[${c.category.toUpperCase()}] `}${c.path} (${fmtBytes(c.file_size_bytes)})`;
       label.appendChild(text);
       list.appendChild(label);
     });
@@ -1116,7 +1251,7 @@ async function loadCandidates(gameId) {
     // An archive/disc image with nothing directly executable alongside it
     // (e.g. the whole game ships as one .zip) - not chainable, but still
     // worth surfacing so Install has something to run.
-    if (chainable.length === 0 && data.candidates.length > 0) {
+    if (chainable.length === 0 && data.candidates.length > 0 && data.candidates[0].category === "game") {
       installQueue = [data.candidates[0]];
       const note = document.createElement("p");
       note.className = "muted small";
@@ -1270,7 +1405,7 @@ function renderInstallState(session) {
   }
 
   if (session.state === "done") {
-    loadFilesTab(session.game_id, session.cache_path);
+    loadCacheFiles(session.game_id, session.cache_path);
     // Checklist: this candidate is done - if more were checked, run the
     // next one straight into the same cache (see loadCandidates's own
     // note). Only when this page view actually drove the install itself
@@ -1290,42 +1425,119 @@ function renderInstallState(session) {
   }
 }
 
-async function loadFilesTab(gameId, cachePath) {
-  document.getElementById("files-cache-path").textContent = cachePath || "";
-  document.getElementById("download-cache-btn").href = `/api/games/${gameId}/install/download`;
-  const body = document.getElementById("files-table-body");
-  const emptyEl = document.getElementById("files-empty");
+// Files tab: a subtab list (All files, Root, Installer cache, one per folder
+// in the game directory) on the left, the selected subtab's files on the right.
+let libFiles = null; // { root_path, files } from /api/games/{id}/files
+let cacheFiles = null; // { gameId, cachePath, files } of a finished install
+let filesSubtab = "all";
+
+const ROOT_SUBTAB = "__root__";
+const CACHE_SUBTAB = "__cache__";
+
+function topFolder(path) {
+  const slash = path.indexOf("/");
+  return slash < 0 ? ROOT_SUBTAB : path.slice(0, slash);
+}
+
+function folderSubtabLabel(folder, files) {
+  const category = files[0].category;
+  return category === "game" ? folder : category.charAt(0).toUpperCase() + category.slice(1);
+}
+
+function filesSubtabs() {
+  const files = libFiles ? libFiles.files : [];
+  const tabs = [{ id: "all", label: "All files", count: files.length }];
+  const byFolder = new Map();
+  for (const f of files) {
+    const key = topFolder(f.path);
+    if (!byFolder.has(key)) byFolder.set(key, []);
+    byFolder.get(key).push(f);
+  }
+  if (byFolder.has(ROOT_SUBTAB)) tabs.push({ id: ROOT_SUBTAB, label: "Root", count: byFolder.get(ROOT_SUBTAB).length });
+  if (cacheFiles && cacheFiles.files.length > 0) {
+    tabs.push({ id: CACHE_SUBTAB, label: "Installer cache", count: cacheFiles.files.length });
+  }
+  const folders = [...byFolder.keys()]
+    .filter((k) => k !== ROOT_SUBTAB)
+    .map((k) => ({ id: k, label: folderSubtabLabel(k, byFolder.get(k)), count: byFolder.get(k).length }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+  return [...tabs, ...folders];
+}
+
+function renderFilesTab() {
+  const tabs = filesSubtabs();
+  if (!tabs.some((t) => t.id === filesSubtab)) filesSubtab = "all";
+
+  const nav = document.getElementById("files-subtabs");
+  nav.innerHTML = "";
+  for (const t of tabs) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = `subtab-btn${t.id === filesSubtab ? " active" : ""}`;
+    btn.innerHTML = `<span>${escapeHtml(t.label)}</span><span class="subtab-count">${t.count}</span>`;
+    btn.addEventListener("click", () => {
+      filesSubtab = t.id;
+      renderFilesTab();
+    });
+    nav.appendChild(btn);
+  }
+
+  const showCache = filesSubtab === CACHE_SUBTAB;
+  document.getElementById("files-panel-cache").hidden = !showCache;
+  document.getElementById("files-panel-library").hidden = showCache;
+  if (showCache) {
+    renderCachePanel();
+    return;
+  }
+
+  const files = libFiles ? libFiles.files : [];
+  const shown = filesSubtab === "all" ? files : files.filter((f) => topFolder(f.path) === filesSubtab);
+  const prefix = filesSubtab === "all" || filesSubtab === ROOT_SUBTAB ? "" : `${filesSubtab}/`;
+  document.getElementById("files-panel-title").textContent = tabs.find((t) => t.id === filesSubtab).label;
+  const root = libFiles ? libFiles.root_path : "";
+  document.getElementById("game-files-root").textContent = prefix ? `${root}/${prefix}` : root;
+  document.getElementById("game-files-empty").hidden = shown.length > 0;
+  document.getElementById("game-files-table-body").innerHTML = shown
+    .map((f) => {
+      const tag = f.category === "game" || filesSubtab !== "all" ? "" : ` <span class="chip chip-tag">${escapeHtml(f.category)}</span>`;
+      return `<tr><td>${escapeHtml(f.path.slice(prefix.length))}${tag}</td><td>${fmtBytes(f.size_bytes)}</td></tr>`;
+    })
+    .join("");
+}
+
+async function loadGameFiles(gameId) {
+  try {
+    libFiles = await api(`/api/games/${gameId}/files`);
+  } catch (_) {
+    libFiles = null;
+  }
+  renderFilesTab();
+}
+
+async function loadCacheFiles(gameId, cachePath) {
   try {
     const data = await api(`/api/games/${gameId}/install/files`);
-    if (data.files.length === 0) {
-      emptyEl.hidden = false;
-      body.innerHTML = "";
-      return;
-    }
-    emptyEl.hidden = true;
-    body.innerHTML = "";
-    for (const f of data.files) {
-      const tr = document.createElement("tr");
-      const pathTd = document.createElement("td");
-      pathTd.textContent = f.path;
-      tr.appendChild(pathTd);
-      const sizeTd = document.createElement("td");
-      sizeTd.textContent = fmtBytes(f.size_bytes);
-      tr.appendChild(sizeTd);
-      const sha1Td = document.createElement("td");
-      sha1Td.innerHTML = `<code>${f.sha1.slice(0, 10)}...</code>`;
-      tr.appendChild(sha1Td);
-      const linkTd = document.createElement("td");
-      const link = document.createElement("a");
-      link.href = `/api/games/${gameId}/install/files/${encodeURIComponent(f.path)}`;
-      link.textContent = "Download";
-      linkTd.appendChild(link);
-      tr.appendChild(linkTd);
-      body.appendChild(tr);
-    }
+    cacheFiles = { gameId, cachePath: cachePath || "", files: data.files };
   } catch (_) {
-    emptyEl.hidden = false;
-    body.innerHTML = "";
+    cacheFiles = null;
+  }
+  renderFilesTab();
+}
+
+function renderCachePanel() {
+  document.getElementById("files-cache-path").textContent = cacheFiles.cachePath;
+  document.getElementById("download-cache-btn").href = `/api/games/${cacheFiles.gameId}/install/download`;
+  const body = document.getElementById("files-table-body");
+  body.innerHTML = "";
+  for (const f of cacheFiles.files) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${escapeHtml(f.path)}</td>
+      <td>${fmtBytes(f.size_bytes)}</td>
+      <td><code>${escapeHtml(f.sha1.slice(0, 10))}...</code></td>
+      <td><a href="/api/games/${cacheFiles.gameId}/install/files/${encodeURIComponent(f.path)}">Download</a></td>
+    `;
+    body.appendChild(tr);
   }
 }
 

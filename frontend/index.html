@@ -77,10 +77,11 @@
             <div>
               <h2 id="game-title"></h2>
               <p id="game-library" class="muted small"></p>
+              <div id="game-versions" class="chip-row" hidden></div>
               <p class="muted small">Game ID: <code id="game-id-display"></code></p>
               <div class="page-actions">
-                <button id="scrape-btn" class="ghost" type="button">Scrape</button>
-                <button id="edit-metadata-btn" class="ghost" type="button">Edit metadata</button>
+                <button id="scrape-btn" type="button">Scrape</button>
+                <button id="edit-metadata-btn" type="button">Edit metadata</button>
               </div>
               <p id="scrape-status" class="muted small"></p>
             </div>
@@ -117,6 +118,7 @@
           <div id="tab-overview" class="tab-panel">
             <div class="page-columns">
               <div class="page-col page-col-main">
+                <p id="game-year" class="muted small" hidden></p>
                 <p id="game-summary" class="muted"></p>
                 <div id="game-genres" class="chip-row"></div>
                 <div id="game-age-ratings" class="chip-row"></div>
@@ -181,27 +183,37 @@
             </div>
           </div>
 
-          <!-- Files tab: the finished install's own cache, root and files (like RomM's file manager) -->
+          <!-- Files tab: subtab list on the left (like RomM's file manager), the selected subtab's files on the right -->
           <div id="tab-files" class="tab-panel" hidden>
-            <div class="card">
-              <h3>Root</h3>
-              <p class="muted small">Where this install's files live inside the server container.</p>
-              <p class="muted small"><code id="files-cache-path"></code></p>
-            </div>
+            <div class="files-layout">
+              <nav id="files-subtabs" class="subtab-list"></nav>
 
-            <div class="card">
-              <div class="main-header">
-                <h3>Installer cache</h3>
-                <div class="page-actions">
-                  <a id="download-cache-btn" class="ghost button-link" download>Download (.zip)</a>
-                  <button id="clear-game-cache-btn" class="danger" type="button">Clear cache</button>
+              <div class="files-content">
+                <div id="files-panel-library" class="card">
+                  <h3 id="files-panel-title">All files</h3>
+                  <p class="muted small"><code id="game-files-root"></code></p>
+                  <table id="game-files-table" class="data-table">
+                    <thead><tr><th>Path</th><th>Size</th></tr></thead>
+                    <tbody id="game-files-table-body"></tbody>
+                  </table>
+                  <p id="game-files-empty" class="muted" hidden>No files found on disk.</p>
+                </div>
+
+                <div id="files-panel-cache" class="card" hidden>
+                  <div class="main-header">
+                    <h3>Installer cache</h3>
+                    <div class="page-actions">
+                      <a id="download-cache-btn" class="ghost button-link" download>Download (.zip)</a>
+                      <button id="clear-game-cache-btn" class="danger" type="button">Clear cache</button>
+                    </div>
+                  </div>
+                  <p class="muted small">Inside the server container: <code id="files-cache-path"></code></p>
+                  <table id="files-table" class="data-table">
+                    <thead><tr><th>Path</th><th>Size</th><th>SHA1</th><th></th></tr></thead>
+                    <tbody id="files-table-body"></tbody>
+                  </table>
                 </div>
               </div>
-              <table id="files-table" class="data-table">
-                <thead><tr><th>Path</th><th>Size</th><th>SHA1</th><th></th></tr></thead>
-                <tbody id="files-table-body"></tbody>
-              </table>
-              <p id="files-empty" class="muted" hidden>No finished install yet - see the Install tab.</p>
             </div>
           </div>
         </section>
@@ -233,6 +245,7 @@
             <button class="tab-btn active" data-settings-tab="libraries">Libraries</button>
             <button class="tab-btn" data-settings-tab="install">Install defaults</button>
             <button class="tab-btn" data-settings-tab="cache">Install cache</button>
+            <button class="tab-btn" data-settings-tab="missing">Missing games</button>
             <button class="tab-btn" data-settings-tab="providers">Metadata providers</button>
             <button class="tab-btn" data-settings-tab="users">Users</button>
           </nav>
@@ -241,6 +254,13 @@
             <div class="card">
               <h3>Your libraries</h3>
               <ul id="settings-library-list" class="library-list"></ul>
+            </div>
+            <div class="card">
+              <h3>Display</h3>
+              <div class="toggle-row">
+                <div><strong>Group duplicate games</strong><p class="muted small">Games sharing the same IGDB match show as one entry with its versions (this browser only).</p></div>
+                <label class="switch"><input type="checkbox" id="setting-group-games" /><span class="slider"></span></label>
+              </div>
             </div>
             <div class="card">
               <h3>Add a library</h3>
@@ -301,6 +321,23 @@
               <table id="cache-table" class="data-table">
                 <thead><tr><th>Session</th><th>Game</th><th>State</th><th>Size</th><th></th></tr></thead>
                 <tbody id="cache-table-body"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div id="settings-tab-missing" class="tab-panel" hidden>
+            <div class="card">
+              <div class="main-header">
+                <h3>Missing games</h3>
+                <div class="page-actions">
+                  <button id="refresh-missing-btn" class="ghost" type="button">Refresh</button>
+                  <button id="clear-all-missing-btn" class="danger" type="button">Clear all</button>
+                </div>
+              </div>
+              <p class="muted small">Games a scan could no longer find on disk. Clearing removes them (and their install history) from MOG.</p>
+              <table id="missing-table" class="data-table">
+                <thead><tr><th>Game</th><th>Library</th><th>Path</th><th></th></tr></thead>
+                <tbody id="missing-table-body"></tbody>
               </table>
             </div>
           </div>

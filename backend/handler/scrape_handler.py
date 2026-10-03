@@ -50,7 +50,7 @@ def search_names(raw: str) -> list[str]:
     stripped = _SPACED_GROUP.sub("", _SCENE_GROUP.sub("", name)) if scene else _SPACED_GROUP.sub("", name)
     titles = [stripped or raw]
     if name != stripped and name:
-        titles.append(name.replace("-", " "))
+        titles.append(re.sub(r"\s+", " ", name.replace("-", " ")).strip())
     return titles
 
 

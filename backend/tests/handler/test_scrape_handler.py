@@ -1,6 +1,6 @@
 from unittest.mock import patch
 
-from handler.scrape_handler import scrape_game, search_name
+from handler.scrape_handler import search_names, scrape_game, search_name
 from models.game import Game
 
 
@@ -91,6 +91,20 @@ class TestSearchName:
 
     def test_scene_name_dots_and_group(self):
         assert search_name("FANTASY.LIFE.i.The.Girl.Who.Steals.Time-TENOKE") == "FANTASY LIFE i The Girl Who Steals Time"
+
+    def test_scene_group_with_mixed_case(self):
+        assert search_names("Broken.Reality-TiNYiSO") == ["Broken Reality", "Broken Reality TiNYiSO"]
+        assert search_name("Dark.Souls.III-CODEX") == "Dark Souls III"
+        assert search_name("Game.Name-razor1911") == "Game Name"
+
+    def test_release_tags_and_versions_are_dropped(self):
+        assert search_name("Some.Game.MULTi12.REPACK-GROUP") == "Some Game"
+        assert search_name("Game.Name.v1.2.3-RUNE") == "Game Name"
+        assert search_name("Game.Name.Build.12345-SKIDROW") == "Game Name"
+        assert search_name("Some Game - FLT") == "Some Game"
+
+    def test_the_stripped_group_is_kept_as_a_fallback_title(self):
+        assert search_names("Some Game - FLT") == ["Some Game", "Some Game FLT"]
 
     def test_hyphenated_title_survives(self):
         assert search_name("Half-Life") == "Half-Life"

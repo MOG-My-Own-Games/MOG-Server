@@ -1,0 +1,19 @@
+# Version = f(commit history, branch name). Conventional commits pick the bump:
+# feat -> minor, fix/perf -> patch, "!" or BREAKING CHANGE -> major.
+# main gives 0.12.321, other branches 0.12.321-<branch-name>.4
+mode: ContinuousDeployment
+next-version: 0.1.0
+tag-prefix: '[vV]?'
+commit-message-incrementing: Enabled
+major-version-bump-message: '^(\w+)(\([\w\s,/\\-]+\))?(!:|:.*\n\n((.+\n)+\n)?BREAKING CHANGE:\s.+)'
+minor-version-bump-message: '^feat(\([\w\s,/\\-]+\))?!?:'
+patch-version-bump-message: '^(fix|perf)(\([\w\s,/\\-]+\))?!?:'
+branches:
+  main:
+    label: ''
+    increment: Patch
+  feature:
+    regex: ^(?!main$).+
+    label: '{BranchName}'
+    increment: Inherit
+    source-branches: [main]

@@ -1158,11 +1158,17 @@ document.getElementById("edit-metadata-form").addEventListener("submit", async (
   }
 });
 
+// Searches use the name as currently typed in the edit form, not the saved one.
+function searchQuery() {
+  const typed = document.getElementById("edit-name").value.trim();
+  return typed ? `?${new URLSearchParams({ query: typed })}` : "";
+}
+
 document.getElementById("igdb-search-btn").addEventListener("click", async () => {
   const list = document.getElementById("igdb-results");
   list.innerHTML = "Searching...";
   try {
-    const results = await api(`/api/games/${activeGame.id}/metadata/igdb/search`);
+    const results = await api(`/api/games/${activeGame.id}/metadata/igdb/search${searchQuery()}`);
     if (results.length === 0) {
       list.innerHTML = '<li class="muted">No results (check the IGDB keys in Settings).</li>';
       return;
@@ -1197,7 +1203,7 @@ document.getElementById("sgdb-search-btn").addEventListener("click", async () =>
   const grid = document.getElementById("sgdb-results");
   grid.innerHTML = "Searching...";
   try {
-    const urls = await api(`/api/games/${activeGame.id}/metadata/sgdb/search`);
+    const urls = await api(`/api/games/${activeGame.id}/metadata/sgdb/search${searchQuery()}`);
     if (urls.length === 0) {
       grid.innerHTML = '<p class="muted">No results (check the SteamGridDB key in Settings).</p>';
       return;

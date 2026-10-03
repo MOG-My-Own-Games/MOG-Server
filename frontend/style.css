@@ -634,3 +634,15 @@ a.chip { color: inherit; text-decoration: none; }
 .form-actions { margin-top: 2.5em; padding-top: 1.25em; border-top: 1px solid var(--border); }
 .password-form { max-width: 360px; margin-top: 1.5em; }
 .password-form .field-label input { width: 100%; }
+
+.tag-list { display: flex; flex-wrap: wrap; gap: 0.4em; align-items: center; }
+.chip-removable { display: inline-flex; align-items: center; gap: 0.4em; padding-right: 0.4em; }
+.chip-x { cursor: pointer; color: var(--muted); font-size: 1.1em; line-height: 1; }
+.chip-x:hover { color: var(--danger); }
+.tag-add { position: relative; }
+.tag-plus { padding: 0.1em 0.65em; border-radius: 999px; font-size: 0.9em; line-height: 1.4; }
+.tag-plus:disabled { opacity: 0.4; cursor: default; }
+.tag-menu { top: calc(100% + 0.3em); left: 0; right: auto; z-index: 70; }
+
+.users-actions { display: flex; gap: 0.4em; flex-wrap: wrap; }
+.password-inline { display: flex; gap: 0.4em; align-items: center; }

@@ -475,6 +475,116 @@ async function refreshProviderValidityBadges() {
 
 // --- Users (Settings > Users, admin only) ---
 
+// An admin sets another user's password: the cell turns into a field with Save and Cancel.
+function showPasswordPrompt(cell, user) {
+  cell.innerHTML = "";
+  const row = document.createElement("div");
+  row.className = "password-inline";
+  const input = document.createElement("input");
+  input.type = "password";
+  input.placeholder = "New password (8+)";
+  input.autocomplete = "new-password";
+  input.minLength = 8;
+  const save = document.createElement("button");
+  save.textContent = "Save";
+  save.addEventListener("click", async () => {
+    if (input.value.length < 8) {
+      alert("The password must have at least 8 characters.");
+      return;
+    }
+    try {
+      await api(`/api/users/${user.id}`, { method: "PUT", body: JSON.stringify({ password: input.value }) });
+      if (user.id === currentUser?.id) {
+        creds = { user: creds.user, pass: input.value };
+        sessionStorage.setItem("mog_pass", input.value);
+      }
+      await refreshUsersTable();
+    } catch (err) {
+      alert(`Could not change the password: ${err.message}`);
+    }
+  });
+  const cancel = document.createElement("button");
+  cancel.className = "danger";
+  cancel.textContent = "Cancel";
+  cancel.addEventListener("click", refreshUsersTable);
+  row.append(input, save, cancel);
+  cell.appendChild(row);
+  input.focus();
+}
+
+// Hidden libraries of a user: removable tags and a + that lists the libraries still visible to them.
+function renderHiddenLibraries(td, user) {
+  let ids = [...(user.hidden_library_ids || [])];
+
+  async function save(next) {
+    try {
+      await api(`/api/users/${user.id}`, { method: "PUT", body: JSON.stringify({ hidden_library_ids: next }) });
+      ids = next;
+      draw();
+    } catch (err) {
+      alert(`Could not update: ${err.message}`);
+    }
+  }
+
+  function draw() {
+    td.innerHTML = "";
+    const row = document.createElement("div");
+    row.className = "tag-list";
+    for (const id of ids) {
+      const lib = libraries.find((l) => l.id === id);
+      const chip = document.createElement("span");
+      chip.className = "chip chip-removable";
+      chip.textContent = lib ? lib.name : `#${id}`;
+      const x = document.createElement("span");
+      x.className = "chip-x";
+      x.setAttribute("role", "button");
+      x.setAttribute("aria-label", `Show ${chip.textContent} again`);
+      x.textContent = "\u00d7";
+      x.addEventListener("click", () => save(ids.filter((i) => i !== id)));
+      chip.appendChild(x);
+      row.appendChild(chip);
+    }
+    const available = libraries.filter((l) => !ids.includes(l.id));
+    const wrap = document.createElement("span");
+    wrap.className = "tag-add";
+    const plus = document.createElement("button");
+    plus.type = "button";
+    plus.className = "tag-plus";
+    plus.textContent = "+";
+    plus.title = "Hide a library from this user";
+    plus.disabled = available.length === 0;
+    const menu = document.createElement("div");
+    menu.className = "dropdown-menu tag-menu";
+    menu.hidden = true;
+    for (const lib of available) {
+      const item = document.createElement("a");
+      item.className = "dropdown-item";
+      item.href = "#";
+      item.textContent = lib.name;
+      item.addEventListener("click", (e) => {
+        e.preventDefault();
+        save([...ids, lib.id]);
+      });
+      menu.appendChild(item);
+    }
+    plus.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const open = menu.hidden;
+      document.querySelectorAll(".tag-menu").forEach((m) => (m.hidden = true));
+      menu.hidden = !open;
+    });
+    wrap.append(plus, menu);
+    row.appendChild(wrap);
+    td.appendChild(row);
+  }
+
+  draw();
+}
+
+document.addEventListener("click", () => {
+  document.querySelectorAll(".tag-menu").forEach((m) => (m.hidden = true));
+});
+
 async function refreshUsersTable() {
   const body = document.getElementById("users-table-body");
   body.innerHTML = "<tr><td colspan='4' class='muted'>Loading...</td></tr>";
@@ -493,28 +603,15 @@ async function refreshUsersTable() {
       tr.appendChild(roleTd);
 
       const hiddenTd = document.createElement("td");
-      const select = document.createElement("select");
-      select.multiple = true;
-      select.size = Math.min(4, Math.max(2, libraries.length || 2));
-      for (const lib of libraries) {
-        const opt = document.createElement("option");
-        opt.value = lib.id;
-        opt.textContent = lib.name;
-        opt.selected = (u.hidden_library_ids || []).includes(lib.id);
-        select.appendChild(opt);
-      }
-      select.addEventListener("change", async () => {
-        const ids = Array.from(select.selectedOptions).map((o) => parseInt(o.value, 10));
-        try {
-          await api(`/api/users/${u.id}`, { method: "PUT", body: JSON.stringify({ hidden_library_ids: ids }) });
-        } catch (err) {
-          alert(`Could not update: ${err.message}`);
-        }
-      });
-      hiddenTd.appendChild(select);
+      renderHiddenLibraries(hiddenTd, u);
       tr.appendChild(hiddenTd);
 
       const actionTd = document.createElement("td");
+      actionTd.className = "users-actions";
+      const pwBtn = document.createElement("button");
+      pwBtn.textContent = "Change password";
+      pwBtn.addEventListener("click", () => showPasswordPrompt(actionTd, u));
+      actionTd.appendChild(pwBtn);
       const delBtn = document.createElement("button");
       delBtn.textContent = "Delete";
       delBtn.className = "danger";

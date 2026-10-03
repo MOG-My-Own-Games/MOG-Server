@@ -632,8 +632,6 @@ a.chip { color: inherit; text-decoration: none; }
 .toast strong { display: block; margin-bottom: 0.2em; }
 
 .form-actions { margin-top: 2.5em; padding-top: 1.25em; border-top: 1px solid var(--border); }
-.password-form { max-width: 360px; margin-top: 1.5em; }
-.password-form .field-label input { width: 100%; }
 
 .tag-list { display: flex; flex-wrap: wrap; gap: 0.4em; align-items: center; }
 .chip-removable { display: inline-flex; align-items: center; gap: 0.4em; padding-right: 0.4em; }
@@ -644,5 +642,7 @@ a.chip { color: inherit; text-decoration: none; }
 .tag-plus:disabled { opacity: 0.4; cursor: default; }
 .tag-menu { top: calc(100% + 0.3em); left: 0; right: auto; z-index: 70; }
 
+.password-form { max-width: 360px; margin-top: 1.5em; }
+.password-form .field-label input { width: 100%; }
 .users-actions { display: flex; gap: 0.4em; flex-wrap: wrap; }
 .password-inline { display: flex; gap: 0.4em; align-items: center; }

@@ -233,12 +233,22 @@ document.getElementById("notif-clear-btn").addEventListener("click", async () =>
   await loadNotifications();
 });
 
+function isAdmin() {
+  return currentUser?.role === "admin";
+}
+
+// Controls the server refuses to anyone but an admin stay out of a plain user's way.
+function applyRole() {
+  document.querySelectorAll(".admin-only").forEach((el) => (el.hidden = !isAdmin()));
+}
+
 async function tryLogin(user, pass) {
   creds = { user, pass };
   currentUser = await api("/api/users/me"); // throws on bad creds
   sessionStorage.setItem("mog_user", user);
   sessionStorage.setItem("mog_pass", pass);
   applyTopbarAvatar();
+  applyRole();
   showScreen("app-screen");
   startNotificationPolling();
   await refreshLibraries();
@@ -295,6 +305,9 @@ function router() {
   } else if (hash === "profile") {
     document.getElementById("view-profile").hidden = false;
     openProfilePage();
+  } else if (hash.startsWith("settings") && !isAdmin()) {
+    location.hash = "";
+    return;
   } else if (hash.startsWith("settings")) {
     document.getElementById("view-settings").hidden = false;
     const subTab = hash.includes("/") ? hash.slice("settings/".length) : null;
@@ -907,7 +920,7 @@ function renderLibraryList(containerId, { clickable, showScrape = false, allowDe
         scanBtn.textContent = "Scan";
       }
     });
-    actions.appendChild(scanBtn);
+    if (isAdmin()) actions.appendChild(scanBtn);
 
     if (showScrape) {
       const scrapeBtn = document.createElement("button");

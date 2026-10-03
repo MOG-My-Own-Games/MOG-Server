@@ -37,7 +37,7 @@
           <div id="user-menu-dropdown" class="dropdown-menu" hidden>
             <a href="#profile" class="dropdown-item">My profile</a>
             <a href="#notifications" class="dropdown-item">Notifications <span id="menu-notif-count" class="menu-count" hidden></span></a>
-            <a href="#settings" class="dropdown-item">Settings</a>
+            <a href="#settings" class="dropdown-item admin-only">Settings</a>
             <button id="logout-btn" class="dropdown-item dropdown-item-btn">Sign out</button>
           </div>
         </div>
@@ -57,7 +57,7 @@
           <h2>Libraries</h2>
           <ul id="library-list" class="library-list"></ul>
 
-          <a href="#settings/cache" class="cache-size-link">Install cache: <span id="total-cache-size">...</span></a>
+          <a href="#settings/cache" class="cache-size-link admin-only">Install cache: <span id="total-cache-size">...</span></a>
         </div>
       </aside>
       <button id="sidebar-toggle" class="sidebar-toggle" title="Collapse sidebar">&laquo;</button>
@@ -87,8 +87,8 @@
               <div id="game-versions" class="chip-row" hidden></div>
               <p class="muted small">Game ID: <code id="game-id-display"></code></p>
               <div class="page-actions">
-                <button id="scrape-btn" type="button">Scrape</button>
-                <button id="edit-metadata-btn" type="button">Edit metadata</button>
+                <button id="scrape-btn" type="button" class="admin-only">Scrape</button>
+                <button id="edit-metadata-btn" type="button" class="admin-only">Edit metadata</button>
               </div>
               <p id="scrape-status" class="muted small"></p>
             </div>

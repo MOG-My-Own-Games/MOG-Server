@@ -1,0 +1,11 @@
+# Local build instead of the registry image:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+services:
+  mog-server:
+    image: mog-server:dev
+    pull_policy: never
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      args:
+        MOG_VERSION: dev

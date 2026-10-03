@@ -130,5 +130,5 @@ python3 main.py
 pytest tests/
 ```
 
-Docker: `docker compose build && docker compose up -d` (see the Docker
+Docker (local build): `docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build` (see the Docker
 permission note above for using `flatpak-spawn` to run these yourself).

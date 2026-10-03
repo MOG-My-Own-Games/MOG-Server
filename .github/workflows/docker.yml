@@ -1,6 +1,6 @@
 name: Docker
 
-# Every push to main publishes the image tagged with the GitVersion version
+# Every push to main publishes the image tagged with the computed version
 # (e.g. 0.12.321) and "latest". Other branches only build, to catch breakage.
 on:
   push:
@@ -20,13 +20,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # GitVersion needs the full history
+          fetch-depth: 0 # version script needs the full history
 
-      - uses: gittools/actions/gitversion/setup@v3
-        with:
-          versionSpec: 6.x
-      - uses: gittools/actions/gitversion/execute@v3
-        id: gv
+      - id: gv
+        run: python3 scripts/version.py
 
       - uses: docker/setup-buildx-action@v3
 
@@ -42,7 +39,7 @@ jobs:
         with:
           images: ${{ env.IMAGE }}
           tags: |
-            type=raw,value=${{ steps.gv.outputs.semVer }}
+            type=raw,value=${{ steps.gv.outputs.version }}
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
       - uses: docker/build-push-action@v6
@@ -52,6 +49,6 @@ jobs:
           push: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: MOG_VERSION=${{ steps.gv.outputs.semVer }}
+          build-args: MOG_VERSION=${{ steps.gv.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

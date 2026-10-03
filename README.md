@@ -31,11 +31,16 @@ One container does everything: there's no separate worker process to deploy.
 
 ```bash
 cp env.template .env   # fill in MOG_ADMIN_PASSWORD at least
-docker compose build
-docker compose up -d
+docker compose up -d   # pulls xargonwan/mog-server:latest
 ```
 
-Mount your game folders under `./data/library` (see `docker-compose.yml`),
+To build from source instead:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+```
+
+Mount your game folders under `./data/library` (see `docker-compose.yml`; it is mounted read-only),
 then open **http://localhost:5000**, sign in, and add a Library pointing at
 it from Settings (or via `curl`, same effect):
 

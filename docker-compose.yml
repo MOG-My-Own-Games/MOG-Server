@@ -1,8 +1,6 @@
 services:
   mog-server:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
+    image: xargonwan/mog-server:latest
     container_name: mog-server
     restart: unless-stopped
     # bubblewrap needs to create a nested user+mount namespace to sandbox the
@@ -18,7 +16,8 @@ services:
       - "${MOG_PORT:-5000}:5000"
     volumes:
       - ./data/mog:/mog
-      - ./data/library:/library
+      # Read-only: MOG only scans and reads the library, it never writes to it.
+      - ./data/library:/library:ro
       # Proton builds are downloaded on first use; keep them across rebuilds.
       - ./data/proton:/opt/proton
   # Example library mount; add one volume line per folder you want scanned

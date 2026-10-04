@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from decorators.database import begin_session
 from models.game import Game
+from models.save_version import SaveVersion
 
 from .base_handler import DBBaseHandler
 
@@ -46,7 +47,10 @@ class DBGamesHandler(DBBaseHandler):
 
     @begin_session
     def delete_missing_games(self, library_id: int | None = None, session: Session = None) -> int:  # type: ignore
-        query = delete(Game).where(Game.missing_from_fs.is_(True))
+        # A game with saves is kept: those are only reachable through it.
+        query = delete(Game).where(
+            Game.missing_from_fs.is_(True), Game.id.not_in(select(SaveVersion.game_id).distinct())
+        )
         if library_id is not None:
             query = query.where(Game.library_id == library_id)
         return session.execute(query).rowcount

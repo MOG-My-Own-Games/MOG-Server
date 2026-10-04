@@ -420,6 +420,14 @@ async def download_install_stream_file(
         return Response(status_code=status.HTTP_416_RANGE_NOT_SATISFIABLE, headers={"Retry-After": "1"})
 
     file_on_disk = cache_dir / entry.path
+    try:
+        # The live manifest is a snapshot: the file may be gone or shorter than it says by now.
+        on_disk = file_on_disk.stat().st_size
+    except OSError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND) from None
+    end = min(end, on_disk - 1)
+    if start > end:
+        return Response(status_code=status.HTTP_416_RANGE_NOT_SATISFIABLE, headers={"Retry-After": "1"})
     content_length = end - start + 1
 
     async def body_stream():

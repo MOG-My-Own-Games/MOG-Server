@@ -35,7 +35,6 @@ class InstallSessionSchema(BaseModel):
     phase_detail: str | None
     auto_mode: bool
     manual_mode: bool
-    download_workers: int = 4
     auto_status: str | None
     auto_detail: str | None
     vnc_url: str | None
@@ -123,3 +122,4 @@ class InstallDefaultsSchema(BaseModel):
 
     auto_mode: bool
     manual_mode: bool
+    download_workers: int

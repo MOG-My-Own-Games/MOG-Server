@@ -22,6 +22,8 @@ class GameSchema(BaseModel):
     missing_from_fs: bool = False
     # Gone from disk, but some user still has saves of it, so it is kept (not "missing").
     saves_only: bool = False
+    # The folder holds add-ons (mods, DLC, ...) and nothing that installs the base game.
+    addons_only: bool = False
     media: dict[str, Any] | None = None
     # This user has a finished install whose cache is still on disk.
     installed: bool = False

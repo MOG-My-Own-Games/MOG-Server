@@ -44,6 +44,9 @@ class Game(BaseModel):
 
     # Set by a scan when the file/directory is gone from disk; cleared if it reappears.
     missing_from_fs: Mapped[bool] = mapped_column(Boolean(), default=False, server_default="0")
+    # Set by a scan when the folder holds add-on folders (mods, DLC, ...) and nothing that installs
+    # the base game (see installer_detection.only_addons).
+    addons_only: Mapped[bool] = mapped_column(Boolean(), default=False, server_default="0")
 
     # Plain lazy loading for Phase 1 simplicity (RomM uses lazy="raise" + explicit
     # eager-loading everywhere to catch N+1s; worth adopting once this grows).

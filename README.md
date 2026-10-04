@@ -19,6 +19,14 @@ copy of.
   the defaults and never undo a pick.
 - Metadata comes from a one-click "Scrape" per game or per library, or a search-and-apply by hand
   (genres, screenshots, age ratings, DLC/expansions/remakes all come along with a match).
+- Keeps each machine's save files per game (the client uploads them): the last three versions of
+  every device are kept, listed under the game's Files > Saves tab, and a version can be downloaded
+  or a zip uploaded by hand. Machines are named after their hostname, asking when a name is already
+  taken (a reinstall, or a second system on the same computer). A game that is gone from disk but
+  still has saves is not "missing": it stays, marked "Saves only" (amber corner with a floppy disk),
+  and clearing the missing games leaves it alone; deleting it asks whether to keep the saves (the default, the game then stays listed) or delete
+  both, and deleting a user asks first and says how many saved games would be lost. A folder with only mods or DLC and nothing that installs the game
+  is marked "Add-ons only" (violet corner with a puzzle piece).
 - Runs an installer for a Game inside a sandboxed Wine/Proton environment
   (bubblewrap + Xvfb + VNC, viewable live in the web UI), with an
   experimental OCR-driven "auto mode" (on by default; if it gets stuck or the

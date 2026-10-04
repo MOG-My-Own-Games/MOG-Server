@@ -38,6 +38,9 @@ class Game(BaseModel):
     igdb_metadata: Mapped[dict[str, Any] | None] = mapped_column(CustomJSON(), default=dict)
     sgdb_id: Mapped[int | None] = mapped_column(Integer(), default=None)
     cover_path: Mapped[str | None] = mapped_column(String(length=1000), default=None)
+    # The artwork chosen for each kind (see handler/media.py): {kind: {"url": ..., "source": ...}}.
+    # cover_path mirrors media["cover"] for what reads it directly.
+    media: Mapped[dict[str, Any] | None] = mapped_column(CustomJSON(), default=dict)
 
     # Set by a scan when the file/directory is gone from disk; cleared if it reappears.
     missing_from_fs: Mapped[bool] = mapped_column(Boolean(), default=False, server_default="0")

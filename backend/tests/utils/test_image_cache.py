@@ -39,3 +39,14 @@ def test_non_http_urls_and_failures_give_none(monkeypatch, tmp_path):
 
     monkeypatch.setattr(image_cache.httpx, "get", boom)
     assert image_cache.cached_image("https://cdn.example/x.png") is None
+
+
+def test_webp_is_stored_as_png(monkeypatch, tmp_path):
+    monkeypatch.setattr(image_cache, "CACHE_DIR", tmp_path)
+    out = io.BytesIO()
+    Image.new("RGBA", (6, 6), (255, 0, 0, 128)).save(out, "WEBP")
+    monkeypatch.setattr(image_cache.httpx, "get", lambda url, **kw: _Response(out.getvalue()))
+
+    path = image_cache.cached_image("https://cdn2.steamgriddb.com/hero.webp")
+
+    assert path.suffix == ".png" and Image.open(path).format == "PNG"

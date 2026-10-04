@@ -9,14 +9,22 @@ from handler.auth import AdminUser, CurrentUser
 from handler.database import db_game_handler, db_install_session_handler
 from handler.filesystem import fs_game_handler
 from handler.filesystem.installer_detection import category_for_path
+from handler import media as media_handler
 from handler.metadata import igdb_handler, sgdb_handler
 from handler.scrape_handler import refresh_game, search_name
 from models.install_session import InstallSessionState
 from starlette.concurrency import run_in_threadpool
-from utils.image_cache import COVER_MAX_HEIGHT, cached_image
+from utils.image_cache import COVER_MAX_HEIGHT, cached_image, media_type
 from utils.install_cache import session_cache_dir
 
-from endpoints.responses.game import GameFileSchema, GameFilesSchema, GameSchema, GameSizeSchema, GameUpdateForm
+from endpoints.responses.game import (
+    GameFileSchema,
+    GameFilesSchema,
+    GameSchema,
+    GameSizeSchema,
+    GameUpdateForm,
+    MediaSelectionForm,
+)
 
 router = APIRouter(prefix="/games", tags=["games"])
 
@@ -77,7 +85,7 @@ def _serve_image(url: str | None, max_height: int | None = None) -> FileResponse
     path = cached_image(url, max_height) if url else None
     if path is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
+    return FileResponse(path, media_type=media_type(path), headers={"Cache-Control": "private, max-age=86400"})
 
 
 @router.get("/{id}/cover")
@@ -88,6 +96,60 @@ async def get_game_cover(user: CurrentUser, id: Annotated[int, Path(ge=1)]) -> F
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     url = game.cover_path or ((game.igdb_metadata or {}).get("cover") or {}).get("url")
     return await run_in_threadpool(_serve_image, url, COVER_MAX_HEIGHT)
+
+
+def _chosen_url(game, kind: str) -> str | None:
+    url = ((game.media or {}).get(kind) or {}).get("url")
+    if url is None and kind == "cover":
+        url = game.cover_path or ((game.igdb_metadata or {}).get("cover") or {}).get("url")
+    return url
+
+
+@router.get("/{id}/media/candidates")
+async def get_media_candidates(user: AdminUser, id: Annotated[int, Path(ge=1)]) -> dict:
+    """Every artwork the providers offer for this game, by kind, with the current choice and the
+    providers' own default for each: what the scrape dialog shows."""
+    game = db_game_handler.get_game(id)
+    if game is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    found = await run_in_threadpool(media_handler.candidates, game)
+    return {"candidates": found, "defaults": media_handler.defaults(found), "selected": game.media or {}}
+
+
+@router.put("/{id}/media")
+async def choose_media(user: AdminUser, id: Annotated[int, Path(ge=1)], data: MediaSelectionForm) -> GameSchema:
+    """Set the artwork used for each kind named in the body (null clears it). Only images from
+    the providers' own hosts are accepted."""
+    game = db_game_handler.get_game(id)
+    if game is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    media = dict(game.media or {})
+    update: dict = {}
+    for kind, url in data.model_dump(exclude_unset=True).items():
+        if url is None:
+            media.pop(kind, None)
+            if kind == "cover":
+                update["cover_path"] = None
+            continue
+        chosen = media_handler.selection(url)
+        if chosen is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{kind}: not an image from a known provider")
+        media[kind] = chosen
+        if kind == "cover":
+            update["cover_path"] = url
+    updated = db_game_handler.update_game(id, {**update, "media": media})
+    return GameSchema.model_validate(updated)
+
+
+@router.get("/{id}/media/{kind}")
+async def get_game_media(user: CurrentUser, id: Annotated[int, Path(ge=1)], kind: str) -> FileResponse:
+    """One kind of the game's artwork through this server (cached), for clients building their own entries."""
+    if kind not in media_handler.KINDS:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    game = db_game_handler.get_game(id)
+    if game is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    return await run_in_threadpool(_serve_image, _chosen_url(game, kind), COVER_MAX_HEIGHT if kind == "cover" else None)
 
 
 @router.get("/{id}/screenshots/{index}")
@@ -212,7 +274,12 @@ async def search_sgdb(
 
 @router.post("/{id}/metadata/sgdb")
 async def apply_sgdb_cover(user: AdminUser, id: Annotated[int, Path(ge=1)], cover_path: str) -> GameSchema:
-    game = db_game_handler.update_game(id, {"cover_path": cover_path})
-    if game is None:
+    current = db_game_handler.get_game(id)
+    if current is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    update: dict = {"cover_path": cover_path}
+    chosen = media_handler.selection(cover_path)
+    if chosen is not None:  # the cover picked here is the game's chosen cover
+        update["media"] = {**(current.media or {}), "cover": chosen}
+    game = db_game_handler.update_game(id, update)
     return GameSchema.model_validate(game)

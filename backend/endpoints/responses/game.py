@@ -20,6 +20,7 @@ class GameSchema(BaseModel):
     sgdb_id: int | None
     cover_path: str | None
     missing_from_fs: bool = False
+    media: dict[str, Any] | None = None
     # This user has a finished install whose cache is still on disk.
     installed: bool = False
 
@@ -43,6 +44,16 @@ class GameSizeSchema(BaseModel):
 class GameFilesSchema(BaseModel):
     root_path: str
     files: list[GameFileSchema]
+
+
+class MediaSelectionForm(BaseModel):
+    """Artwork URLs by kind; a kind left out is untouched, null clears it."""
+
+    cover: str | None = None
+    banner: str | None = None
+    hero: str | None = None
+    logo: str | None = None
+    icon: str | None = None
 
 
 class GameUpdateForm(BaseModel):

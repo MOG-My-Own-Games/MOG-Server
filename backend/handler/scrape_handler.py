@@ -12,6 +12,7 @@ import threading
 from dataclasses import dataclass
 
 from handler.database import db_game_handler
+from handler import media as media_handler
 from handler.metadata import igdb_handler, sgdb_handler
 from logger.logger import log
 from handler.name_matching import best_match, query_variants
@@ -103,6 +104,28 @@ def _apply_igdb(game: Game, igdb_id: int) -> bool:
     return True
 
 
+def _store_media(game: Game, sgdb_id: int | None, replace: bool, keep: set[str] | frozenset[str] = frozenset()) -> bool:
+    """Give the game the providers' own pick for each kind of artwork. With `replace` every kind
+    not in `keep` is overwritten (a scrape the person asked for); without, only the kinds the game
+    has no choice for yet (the automatic pass, which must not undo anyone's picks). cover_path
+    follows the cover. Returns True if anything was chosen."""
+    fresh = db_game_handler.get_game(game.id) or game
+    chosen = media_handler.defaults(media_handler.candidates(fresh, sgdb_id=sgdb_id))
+    if not chosen:
+        return False
+    current = dict(fresh.media or {})
+    merged = {**current, **{k: v for k, v in chosen.items() if k not in keep}} if replace else {**chosen, **current}
+    update: dict = {}
+    if merged != current:
+        update["media"] = merged
+    cover = merged.get("cover")
+    if cover and cover["url"] != fresh.cover_path and (replace or not fresh.cover_path) and "cover" not in keep:
+        update["cover_path"] = cover["url"]
+    if update:
+        db_game_handler.update_game(game.id, update)
+    return True
+
+
 def scrape_game(game: Game) -> bool:
     """Fill in whatever metadata this game is still missing. A manually set
     igdb_id / sgdb_id is used directly instead of searching by name. Returns
@@ -129,15 +152,14 @@ def scrape_game(game: Game) -> bool:
                 )
             applied = True
 
-    if not game.cover_path:
+    if not game.cover_path or not game.media:
         sgdb_match = None if game.sgdb_id else _find_sgdb(game)
         sgdb_id = game.sgdb_id or (sgdb_match["id"] if sgdb_match else None)
-        grids = sgdb_handler.get_grids(sgdb_id) if sgdb_id else []
-        if grids:
-            update = {"cover_path": grids[0], "sgdb_id": sgdb_id}
+        if sgdb_match:
+            update = {"sgdb_id": sgdb_id}
             update.update(_sgdb_name(game, sgdb_match, igdb_matched=applied))
             db_game_handler.update_game(game.id, update)
-            applied = True
+        applied |= _store_media(game, sgdb_id, replace=False)
 
     return applied
 
@@ -168,14 +190,11 @@ def refresh_game(game: Game, keep: frozenset[str] = frozenset(), rematch_cover: 
 
     sgdb_match = _find_sgdb(game) if rematch_cover or not game.sgdb_id else None
     sgdb_id = (sgdb_match["id"] if sgdb_match else None) or game.sgdb_id
-    grids = sgdb_handler.get_grids(sgdb_id) if sgdb_id else []
-    if grids:
+    if sgdb_match:
         update = {"sgdb_id": sgdb_id}
         update.update(_sgdb_name(game, sgdb_match, igdb_matched=full is not None, keep=keep))
-        if "cover_path" not in keep:
-            update["cover_path"] = grids[0]
         db_game_handler.update_game(game.id, update)
-        applied = True
+    applied |= _store_media(game, sgdb_id, replace=True, keep={"cover"} if "cover_path" in keep else set())
 
     return applied
 
@@ -187,7 +206,7 @@ class ScrapeResult:
 
 
 def needs_scrape(game: Game) -> bool:
-    return not game.missing_from_fs and (not game.igdb_id or not game.cover_path)
+    return not game.missing_from_fs and (not game.igdb_id or not game.cover_path or not game.media)
 
 
 def scrape_library(library_id: int, refresh: bool = False) -> ScrapeResult:

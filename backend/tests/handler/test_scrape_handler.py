@@ -13,7 +13,7 @@ class TestScrapeGame:
     @patch("handler.scrape_handler.db_game_handler")
     @patch("handler.scrape_handler.sgdb_handler")
     @patch("handler.scrape_handler.igdb_handler")
-    def test_applies_top_igdb_result_and_top_cover(self, igdb, sgdb, db):
+    def test_applies_top_igdb_result_and_hands_the_artwork_to_the_media_step(self, igdb, sgdb, db):
         # search_games's own result is deliberately sparse (no genres/etc.)
         # to prove get_game_by_id's richer result is what actually gets
         # stored - see scrape_game's own comment on why that re-fetch exists.
@@ -25,17 +25,17 @@ class TestScrapeGame:
             "genres": [{"name": "Adventure"}],
         }
         sgdb.search_games.return_value = [{"id": 7, "name": "Some Game"}]
-        sgdb.get_grids.return_value = ["https://example.com/cover.png"]
 
-        applied = scrape_game(_game())
+        with patch("handler.scrape_handler._store_media", return_value=True) as store:
+            applied = scrape_game(_game())
 
         assert applied is True
+        assert store.call_args.args[1] == 7 and store.call_args.kwargs == {"replace": False}
         igdb.get_game_by_id.assert_called_once_with(42)
         igdb_call = db.update_game.call_args_list[0]
         assert igdb_call.args[1]["igdb_id"] == 42
         assert igdb_call.args[1]["igdb_metadata"]["genres"] == [{"name": "Adventure"}]
-        cover_call = db.update_game.call_args_list[1]
-        assert cover_call.args[1]["cover_path"] == "https://example.com/cover.png"
+        assert db.update_game.call_args_list[1].args[1] == {"sgdb_id": 7}
 
     @patch("handler.scrape_handler.db_game_handler")
     @patch("handler.scrape_handler.sgdb_handler")
@@ -45,7 +45,9 @@ class TestScrapeGame:
         sgdb.search_games.return_value = []
         sgdb.get_grids.return_value = []
 
-        applied = scrape_game(_game(igdb_id=99, igdb_metadata={"id": 99}, cover_path="already-set.png"))
+        applied = scrape_game(
+            _game(igdb_id=99, igdb_metadata={"id": 99}, cover_path="x", media={"cover": {"url": "x", "source": "steamgriddb"}})
+        )
 
         assert applied is False
         igdb.search_games.assert_not_called()
@@ -71,16 +73,15 @@ class TestManualIds:
     @patch("handler.scrape_handler.igdb_handler")
     def test_manual_ids_are_fetched_directly(self, igdb, sgdb, db):
         igdb.get_game_by_id.return_value = {"id": 99, "name": "Real Name", "summary": "S"}
-        sgdb.get_grids.return_value = ["https://example.com/g.png"]
 
-        applied = scrape_game(_game(igdb_id=99, sgdb_id=5))
+        with patch("handler.scrape_handler._store_media", return_value=True) as store:
+            applied = scrape_game(_game(igdb_id=99, sgdb_id=5))
 
         assert applied is True
         igdb.search_games.assert_not_called()
         sgdb.search_games.assert_not_called()
         igdb.get_game_by_id.assert_called_once_with(99)
-        sgdb.get_grids.assert_called_once_with(5)
-        assert db.update_game.call_args_list[1].args[1] == {"cover_path": "https://example.com/g.png", "sgdb_id": 5}
+        assert store.call_args.args[1] == 5
 
 
 class TestSearchName:
@@ -122,15 +123,15 @@ class TestRefreshGame:
         from handler.scrape_handler import refresh_game
 
         igdb.get_game_by_id.return_value = {"id": 9, "name": "New", "summary": "S", "genres": [{"name": "RPG"}]}
-        sgdb.get_grids.return_value = ["https://example.com/new.png"]
 
-        assert refresh_game(_game(igdb_id=9, sgdb_id=5, cover_path="old.png"))
+        with patch("handler.scrape_handler._store_media", return_value=True) as store:
+            assert refresh_game(_game(igdb_id=9, sgdb_id=5, cover_path="old.png"))
 
         igdb.search_games.assert_not_called()
         sgdb.search_games.assert_not_called()
         updates = [c.args[1] for c in db.update_game.call_args_list]
         assert {"igdb_id": 9, "igdb_metadata": igdb.get_game_by_id.return_value, "summary": "S", "name": "New"} in updates
-        assert {"sgdb_id": 5, "cover_path": "https://example.com/new.png"} in updates
+        assert store.call_args.args[1] == 5 and store.call_args.kwargs["replace"] is True
 
     @patch("handler.scrape_handler.db_game_handler")
     @patch("handler.scrape_handler.sgdb_handler")
@@ -210,9 +211,11 @@ class TestScrapeLibrary:
     def test_needs_scrape_only_for_present_games_missing_a_match_or_cover(self):
         from handler.scrape_handler import needs_scrape
 
+        picked = {"cover": {"url": "c.png", "source": "steamgriddb"}}
         assert needs_scrape(_game())
         assert needs_scrape(_game(igdb_id=1))
-        assert not needs_scrape(_game(igdb_id=1, cover_path="c.png"))
+        assert needs_scrape(_game(igdb_id=1, cover_path="c.png"))  # covered, but no artwork chosen yet
+        assert not needs_scrape(_game(igdb_id=1, cover_path="c.png", media=picked))
         assert not needs_scrape(_game(missing_from_fs=True))
 
 
@@ -239,23 +242,23 @@ class TestRematchCover:
 
         igdb.get_game_by_id.return_value = {"id": 9, "name": "Right Game"}
         sgdb.search_games.return_value = [{"id": 8, "name": "Right Game"}]
-        sgdb.get_grids.side_effect = lambda sid: [f"https://example.com/{sid}.png"]
-        refresh_game(_game(name="Right Game", igdb_id=9, sgdb_id=5), rematch_cover=rematch)
-        return [c.args[1] for c in db.update_game.call_args_list]
+        with patch("handler.scrape_handler._store_media", return_value=True) as store:
+            refresh_game(_game(name="Right Game", igdb_id=9, sgdb_id=5), rematch_cover=rematch)
+        return store.call_args.args[1], [c.args[1] for c in db.update_game.call_args_list]
 
     @patch("handler.scrape_handler.db_game_handler")
     @patch("handler.scrape_handler.sgdb_handler")
     @patch("handler.scrape_handler.igdb_handler")
     def test_rematch_replaces_a_cover_matched_to_the_wrong_game(self, igdb, sgdb, db):
-        updates = self._run(igdb, sgdb, db, rematch=True)
-        assert {"sgdb_id": 8, "cover_path": "https://example.com/8.png"} in updates
+        used, updates = self._run(igdb, sgdb, db, rematch=True)
+        assert used == 8 and {"sgdb_id": 8} in updates
 
     @patch("handler.scrape_handler.db_game_handler")
     @patch("handler.scrape_handler.sgdb_handler")
     @patch("handler.scrape_handler.igdb_handler")
     def test_without_rematch_the_stored_sgdb_id_is_trusted(self, igdb, sgdb, db):
-        updates = self._run(igdb, sgdb, db, rematch=False)
-        assert {"sgdb_id": 5, "cover_path": "https://example.com/5.png"} in updates
+        used, _ = self._run(igdb, sgdb, db, rematch=False)
+        assert used == 5
         sgdb.search_games.assert_not_called()
 
 
@@ -279,10 +282,9 @@ class TestNameFromTheMatch:
 
         igdb.search_games.return_value = []
         sgdb.search_games.return_value = [{"id": 4, "name": "Some Game"}]
-        sgdb.get_grids.return_value = ["https://example.com/c.png"]
         refresh_game(_game(name="some.game", fs_name="some.game"))
         updates = [c.args[1] for c in db.update_game.call_args_list]
-        assert {"sgdb_id": 4, "name": "Some Game", "cover_path": "https://example.com/c.png"} in updates
+        assert {"sgdb_id": 4, "name": "Some Game"} in updates
 
     @patch("handler.scrape_handler.db_game_handler")
     @patch("handler.scrape_handler.sgdb_handler")
@@ -292,6 +294,5 @@ class TestNameFromTheMatch:
 
         igdb.search_games.return_value = []
         sgdb.search_games.return_value = [{"id": 4, "name": "Provider Name"}]
-        sgdb.get_grids.return_value = ["https://example.com/c.png"]
         refresh_game(_game(name="My Name", fs_name="raw-folder"), rematch_cover=True)
         assert all("name" not in c.args[1] for c in db.update_game.call_args_list)

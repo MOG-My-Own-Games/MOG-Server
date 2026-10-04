@@ -12,9 +12,13 @@ copy of.
 ## What it does
 
 - Scans one or more library folders; each top-level entry becomes a Game.
-- Matches metadata via IGDB and SteamGridDB - a one-click "Scrape" per game
-  or per library, or search-and-apply by hand (genres, screenshots, age
-  ratings, DLC/expansions/remakes all come along with a match).
+- Matches metadata via IGDB and SteamGridDB, and chooses the artwork for each game (cover, banner,
+  hero, title logo, icon: SteamGridDB first, IGDB as the fallback). The server downloads and serves
+  the chosen images, so clients build their Steam shortcuts from it. "Scrape" per game opens a dialog
+  that applies the providers' defaults and lets you pick any other artwork; automatic scrapes keep to
+  the defaults and never undo a pick.
+- Metadata comes from a one-click "Scrape" per game or per library, or a search-and-apply by hand
+  (genres, screenshots, age ratings, DLC/expansions/remakes all come along with a match).
 - Runs an installer for a Game inside a sandboxed Wine/Proton environment
   (bubblewrap + Xvfb + VNC, viewable live in the web UI), with an
   experimental OCR-driven "auto mode" (on by default; if it gets stuck or the

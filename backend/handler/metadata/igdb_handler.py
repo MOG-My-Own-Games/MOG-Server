@@ -30,6 +30,7 @@ _GAME_FIELDS = (
     "id,name,summary,storyline,cover.url,first_release_date,"
     "genres.name,"
     "screenshots.url,"
+    "artworks.url,"
     "age_ratings.organization.name,age_ratings.rating_category.rating,"
     "age_ratings.rating,age_ratings.category,"
     "player_perspectives.name,"
@@ -148,6 +149,8 @@ def _resolve_media(game: dict[str, Any]) -> dict[str, Any]:
         game["cover"]["url"] = cover_url(game["cover"].get("url"), "cover_big")
     for shot in game.get("screenshots") or []:
         shot["url"] = cover_url(shot.get("url"), "screenshot_big")
+    for art in game.get("artworks") or []:
+        art["url"] = cover_url(art.get("url"), "1080p")
     for key in ("dlcs", "expansions", "remakes", "remasters"):
         for item in game.get(key) or []:
             if item.get("cover"):

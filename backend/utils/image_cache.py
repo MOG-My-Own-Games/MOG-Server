@@ -38,22 +38,52 @@ def _shrink(data: bytes, max_height: int) -> bytes:
         return data
 
 
+_SIGNATURES = ((b"\x89PNG", ".png", "image/png"), (b"\xff\xd8", ".jpg", "image/jpeg"), (b"GIF8", ".gif", "image/gif"), (b"RIFF", ".webp", "image/webp"))
+
+
+def _kind_of(data: bytes) -> tuple[str, str]:
+    """File suffix and media type from the image's own first bytes (a logo is a PNG with transparency)."""
+    for signature, suffix, media_type in _SIGNATURES:
+        if data.startswith(signature):
+            return suffix, media_type
+    return ".bin", "application/octet-stream"
+
+
+def _usable_everywhere(data: bytes) -> bytes:
+    """WebP and GIF become PNG, so every client (Steam's own library included) can show the image."""
+    if _kind_of(data)[0] in (".webp", ".gif"):
+        try:
+            out = io.BytesIO()
+            Image.open(io.BytesIO(data)).convert("RGBA").save(out, "PNG")
+            return out.getvalue()
+        except Exception as e:  # noqa: BLE001 - keep the original if it will not convert
+            log.warning(f"Could not convert a cached image to PNG: {e}")
+    return data
+
+
+def media_type(path: Path) -> str:
+    return next((m for _, suffix, m in _SIGNATURES if suffix == path.suffix), "application/octet-stream")
+
+
 def cached_image(url: str, max_height: int | None = None) -> Path | None:
-    """Local file for `url`, downloading it on first use. None if it cannot be fetched."""
+    """Local file for `url`, downloading it on first use. None if it cannot be fetched.
+    With `max_height` the image is shrunk to a JPEG of that height (covers); otherwise it is kept
+    exactly as the provider sent it."""
     if not url.startswith(("http://", "https://")):
         return None
     key = hashlib.sha1(f"{url}|{max_height}".encode()).hexdigest()
-    path = CACHE_DIR / f"{key}.jpg"
-    if path.is_file():
-        return path
+    hit = next(iter(CACHE_DIR.glob(f"{key}.*")), None) if CACHE_DIR.is_dir() else None
+    if hit is not None and hit.suffix != ".tmp":
+        return hit
     try:
         response = httpx.get(url, timeout=FETCH_TIMEOUT, follow_redirects=True)
         response.raise_for_status()
     except httpx.HTTPError as e:
         log.warning(f"Could not fetch image {url}: {e}")
         return None
-    data = _shrink(response.content, max_height) if max_height else response.content
+    data = _shrink(response.content, max_height) if max_height else _usable_everywhere(response.content)
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    path = CACHE_DIR / f"{key}{_kind_of(data)[0]}"
     tmp = path.with_suffix(".tmp")
     tmp.write_bytes(data)
     tmp.replace(path)

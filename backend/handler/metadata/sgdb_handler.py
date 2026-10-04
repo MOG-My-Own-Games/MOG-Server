@@ -76,6 +76,39 @@ def get_grids(sgdb_id: int, limit: int = 10) -> list[str]:
         return []
 
 
+# SteamGridDB endpoint and filter behind each kind of artwork. Covers are the portrait grids,
+# banners the wide ones; heroes, logos (the game's title) and icons have their own endpoints.
+_MEDIA = {
+    "cover": ("grids", {"dimensions": "600x900,342x482"}),
+    "banner": ("grids", {"dimensions": "920x430,460x215"}),
+    "hero": ("heroes", {}),
+    "logo": ("logos", {}),
+    "icon": ("icons", {}),
+}
+
+
+def get_media(sgdb_id: int, per_kind: int = 12) -> dict[str, list[dict]]:
+    """Artwork candidates for a known SteamGridDB game, by kind: {kind: [{url, thumb, width, height}]}.
+    A kind the service fails to answer for is simply left out."""
+    api_key = _api_key()
+    if not api_key:
+        return {}
+    found: dict[str, list[dict]] = {}
+    for kind, (endpoint, params) in _MEDIA.items():
+        query = "&".join(f"{k}={quote(v, safe=',')}" for k, v in params.items())
+        try:
+            items = _get(f"{endpoint}/game/{sgdb_id}" + (f"?{query}" if query else ""), api_key)
+        except httpx.HTTPError as e:
+            log.warning(f"SteamGridDB {kind} for id {sgdb_id} failed: {e}")
+            continue
+        found[kind] = [
+            {"url": i["url"], "thumb": i.get("thumb") or i["url"], "width": i.get("width"), "height": i.get("height")}
+            for i in items[:per_kind]
+            if i.get("url")
+        ]
+    return found
+
+
 def search_grids(name: str, limit: int = 10) -> list[str]:
     """Search SteamGridDB by name and return grid image URLs for the first
     matching game."""

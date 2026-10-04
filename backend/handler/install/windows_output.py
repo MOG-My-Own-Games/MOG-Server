@@ -58,6 +58,11 @@ BLACKLIST_PATTERNS: tuple[tuple[str, ...], ...] = (
     ("programdata",),
     ("proton_shortcuts",),
     ("users", "*", "appdata", "local", "temp"),
+    # Shortcuts an installer drops at the end: useless on Linux, and the one file in a second
+    # top-level folder is enough to move the manifest root from the game's folder up to drive_c,
+    # which changes every path the client already started downloading while the install ran.
+    ("users", "*", "desktop"),
+    ("users", "*", "start menu"),
 )
 
 # Top-level drive_c folders known to be an installer's own generic target

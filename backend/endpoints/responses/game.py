@@ -20,6 +20,8 @@ class GameSchema(BaseModel):
     sgdb_id: int | None
     cover_path: str | None
     missing_from_fs: bool = False
+    # Gone from disk, but some user still has saves of it, so it is kept (not "missing").
+    saves_only: bool = False
     media: dict[str, Any] | None = None
     # This user has a finished install whose cache is still on disk.
     installed: bool = False

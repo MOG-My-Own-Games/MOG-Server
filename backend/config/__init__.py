@@ -38,6 +38,17 @@ RESOURCES_BASE_PATH: Final[str] = f"{MOG_BASE_PATH}/resources"
 
 SQLITE_PATH: Final[str] = _get_env("SQLITE_PATH") or f"{MOG_BASE_PATH}/mog.db"
 
+# --- Save sync ---
+
+# Next to the database, in the persistent data volume. Never under RESOURCES_BASE_PATH: that
+# directory is served without authentication.
+SAVES_BASE_PATH: Final[str] = f"{MOG_BASE_PATH}/saves"
+
+# Versions kept per (user, game, device); the oldest are dropped on upload.
+SAVES_KEEP_VERSIONS: Final[int] = min(20, max(1, safe_int(_get_env("SAVES_KEEP_VERSIONS"), 3)))
+
+MAX_SAVE_UPLOAD_BYTES: Final[int] = max(1, safe_int(_get_env("MAX_SAVE_UPLOAD_BYTES"), 512 * 1024 * 1024))
+
 AUTH_SECRET_KEY: Final[str] = _get_env("AUTH_SECRET_KEY") or "dev-insecure-secret-key"
 
 # --- Install sandbox ---

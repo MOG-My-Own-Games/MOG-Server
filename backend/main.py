@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from config import DEV_MODE, MOG_VERSION, RESOURCES_BASE_PATH
-from endpoints import games, install, libraries, notifications, settings, users
+from endpoints import devices, games, install, libraries, notifications, saves, settings, users
 from logger.logger import log
 from startup import run_startup_tasks
 
@@ -23,10 +23,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="MOG Server", version=MOG_VERSION, lifespan=lifespan)
 
+app.include_router(devices.router, prefix="/api")
 app.include_router(libraries.router, prefix="/api")
 app.include_router(games.router, prefix="/api")
 app.include_router(install.router, prefix="/api")
 app.include_router(notifications.router, prefix="/api")
+app.include_router(saves.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")
 app.include_router(users.router, prefix="/api")
 

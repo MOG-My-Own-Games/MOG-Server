@@ -4,7 +4,13 @@ import os
 import subprocess
 from pathlib import Path
 
-from config import INSTALL_CACHE_PATH, MOG_BASE_PATH, PROTON_INSTALL_ROOT, RESOURCES_BASE_PATH
+from config import (
+    INSTALL_CACHE_PATH,
+    MOG_BASE_PATH,
+    PROTON_INSTALL_ROOT,
+    RESOURCES_BASE_PATH,
+    SAVES_BASE_PATH,
+)
 from handler.auth import hash_password, verify_password
 from handler.database import db_install_session_handler, db_user_handler
 from logger.logger import log
@@ -13,7 +19,13 @@ from models.user import Role, User
 
 
 def _ensure_dirs() -> None:
-    for path in (MOG_BASE_PATH, RESOURCES_BASE_PATH, INSTALL_CACHE_PATH, PROTON_INSTALL_ROOT):
+    for path in (
+        MOG_BASE_PATH,
+        RESOURCES_BASE_PATH,
+        SAVES_BASE_PATH,
+        INSTALL_CACHE_PATH,
+        PROTON_INSTALL_ROOT,
+    ):
         try:
             Path(path).mkdir(parents=True, exist_ok=True)
         except OSError as e:

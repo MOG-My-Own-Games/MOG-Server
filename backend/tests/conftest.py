@@ -9,3 +9,22 @@ def _no_provider_calls_from_scrapes(monkeypatch, request):
     if request.node.get_closest_marker("real_media"):
         return
     monkeypatch.setattr(scrape_handler, "_store_media", lambda *args, **kwargs: False)
+
+
+@pytest.fixture
+def db(monkeypatch, tmp_path):
+    """The real handlers on a throwaway SQLite file with the whole schema created."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    import decorators.database
+    from models import load_all_models
+    from models.base import BaseModel
+
+    load_all_models()
+    engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}", connect_args={"check_same_thread": False})
+    BaseModel.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+    monkeypatch.setattr(decorators.database, "sync_session", session_factory)
+    yield engine
+    engine.dispose()

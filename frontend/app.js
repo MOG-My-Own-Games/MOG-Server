@@ -58,7 +58,10 @@ async function api(path, opts = {}) {
     } catch (_) {
       // body wasn't JSON - keep statusText
     }
-    throw new Error(`${resp.status} ${detail}`);
+    const error = new Error(`${resp.status} ${typeof detail === "string" ? detail : detail.code || JSON.stringify(detail)}`);
+    error.status = resp.status;
+    error.detail = detail;
+    throw error;
   }
   if (resp.status === 204) return null;
   return resp.json();
@@ -335,6 +338,8 @@ async function openProfilePage() {
   document.getElementById("avatar-upload-input").value = "";
   document.getElementById("password-form").reset();
   document.getElementById("password-status").textContent = "";
+  document.getElementById("devices-status").textContent = "";
+  loadDevicesTable();
   applyRole();
 }
 
@@ -618,7 +623,12 @@ async function refreshUsersTable() {
       delBtn.addEventListener("click", async () => {
         if (!confirm(`Delete user "${u.username}"?`)) return;
         try {
-          await api(`/api/users/${u.id}`, { method: "DELETE" });
+          const done = await deleteWarningAboutSaves(
+            `/api/users/${u.id}`,
+            `User "${u.username}"`,
+            "Deleting the user deletes their saved games with them, from every device."
+          );
+          if (!done) return;
           await refreshUsersTable();
         } catch (err) {
           alert(`Could not delete: ${err.message}`);
@@ -851,6 +861,60 @@ document.getElementById("clear-all-cache-btn").addEventListener("click", async (
   }
 });
 
+// A dialog that cannot be mistaken for the usual confirm(): deleting something that cannot be recovered.
+function confirmDanger({ title, lines, confirmLabel, cancelLabel = "Cancel" }) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "modal";
+    overlay.innerHTML = `
+      <div class="modal-panel danger-panel" role="alertdialog" aria-modal="true">
+        <h3 class="danger-title">&#9888; ${escapeHtml(title)}</h3>
+        <ul>${lines.map((l) => `<li>${escapeHtml(l)}</li>`).join("")}</ul>
+        <div class="modal-footer">
+          <button type="button" data-answer="no">${escapeHtml(cancelLabel)}</button>
+          <button type="button" class="danger" data-answer="yes">${escapeHtml(confirmLabel)}</button>
+        </div>
+      </div>`;
+    const finish = (answer) => {
+      overlay.remove();
+      resolve(answer);
+    };
+    overlay.addEventListener("click", (e) => {
+      const answer = e.target.closest("button[data-answer]");
+      if (answer) finish(answer.dataset.answer === "yes");
+      else if (e.target === overlay) finish(false);
+    });
+    document.body.appendChild(overlay);
+    overlay.querySelector('[data-answer="no"]').focus();
+  });
+}
+
+// DELETE `url`; when the server says it would lose saved games (409 has_saves), say how many and
+// delete them too only if confirmed. With `keepLabel`, declining means keeping them (the game stays
+// listed as "Saves only"); that is the default answer. Returns whether anything was deleted.
+async function deleteWarningAboutSaves(url, what, consequence, keepLabel = "Cancel") {
+  try {
+    await api(url, { method: "DELETE" });
+    return true;
+  } catch (err) {
+    const found = err.status === 409 && err.detail && err.detail.code === "has_saves" ? err.detail : null;
+    if (!found) throw err;
+    const sure = await confirmDanger({
+      title: keepLabel === "Cancel" ? "Saved games will be permanently deleted" : "This game still has saved games",
+      lines: [
+        `${what} has ${found.versions} saved version${found.versions === 1 ? "" : "s"} on this server (${fmtBytes(found.size_bytes)}).`,
+        consequence,
+        "This cannot be undone and there is no way to get them back.",
+      ],
+      confirmLabel: `Delete ${found.versions} save${found.versions === 1 ? "" : "s"} too`,
+      cancelLabel: keepLabel,
+    });
+    if (!sure) return false;
+    await api(`${url}?delete_saves=true`, { method: "DELETE" });
+    return true;
+  }
+}
+
 // --- Missing games (files a scan could no longer find) ---
 
 async function refreshMissingTable() {
@@ -867,7 +931,7 @@ async function refreshMissingTable() {
       const tr = document.createElement("tr");
       const libName = (libraries.find((l) => l.id === game.library_id) || {}).name || "";
       tr.innerHTML = `
-        <td>${escapeHtml(game.name)}</td>
+        <td>${escapeHtml(game.name)}${game.saves_only ? ' <span class="chip chip-saves" title="Its saves are kept">Saves only</span>' : ""}</td>
         <td>${escapeHtml(libName)}</td>
         <td>${escapeHtml(game.fs_name)}</td>
       `;
@@ -877,7 +941,16 @@ async function refreshMissingTable() {
       delBtn.className = "danger";
       delBtn.addEventListener("click", async () => {
         try {
-          await api(`/api/games/${game.id}`, { method: "DELETE" });
+          const done = await deleteWarningAboutSaves(
+            `/api/games/${game.id}`,
+            `"${game.name}"`,
+            "Without the game entry the saves could no longer be listed, downloaded or restored.",
+            "Keep the saves (the game stays listed as Saves only)"
+          );
+          if (!done) {
+            alert("Nothing was removed: the game stays listed as Saves only.");
+            return;
+          }
           await refreshMissingTable();
           await refreshGames();
         } catch (err) {
@@ -896,10 +969,11 @@ async function refreshMissingTable() {
 document.getElementById("refresh-missing-btn").addEventListener("click", refreshMissingTable);
 
 document.getElementById("clear-all-missing-btn").addEventListener("click", async () => {
-  if (!confirm("Remove every missing game from MOG?")) return;
+  if (!confirm("Remove every missing game from MOG? Games that still have saved games are kept.")) return;
   try {
     const result = await api("/api/games/missing", { method: "DELETE" });
-    alert(`Cleared ${result.cleared} game(s).`);
+    const kept = result.kept_with_saves ? ` ${result.kept_with_saves} kept because they still have saves: clear them one by one.` : "";
+    alert(`Cleared ${result.cleared} game(s).${kept}`);
     await refreshMissingTable();
     await refreshGames();
   } catch (err) {
@@ -1090,6 +1164,14 @@ const INSTALLED_BADGE =
 const MISSING_BADGE =
   '<span class="missing-badge" title="Missing from disk"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5l9 9M14 5l-9 9" /></svg></span>';
 
+// Corner badge (top left): the game is gone from disk, but its saves are kept.
+const SAVES_BADGE =
+  '<span class="saves-badge" title="Saves only: the game is gone from disk, its saves are kept"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h11l3 3v15H5z" /><path d="M8 3v5h7V3" /><path d="M8 21v-6h8v6" /></svg></span>';
+
+// Corner badge (bottom left): the folder has mods or DLC but nothing that installs the game itself.
+const ADDONS_BADGE =
+  '<span class="addons-badge" title="Add-ons only: no installer for the game itself"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5C13 2.12 11.88 1 10.5 1S8 2.12 8 3.5V5H4c-1.1 0-2 .9-2 2v3.8h1.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7s2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5c1.38 0 2.5-1.12 2.5-2.5S21.88 11 20.5 11z" /></svg></span>';
+
 // Games sharing an IGDB id are versions of one title; the grid shows one
 // representative (preferring one that is still on disk) per group.
 function groupGames(list) {
@@ -1135,7 +1217,7 @@ function renderGameGrid(filterText) {
     card.className = "game-card";
     card.title = game.name;
     card.innerHTML = `
-      <div class="cover${game.cover_path ? "" : " no-cover"}">${game.cover_path ? `<img src="${escapeHtml(game.cover_path)}" />` : "\u{1F3AE}"}${game.installed ? INSTALLED_BADGE : ""}${game.missing_from_fs ? MISSING_BADGE : ""}${versions > 1 ? `<span class="sibling-badge" title="${versions} versions">${versions}</span>` : ""}</div>
+      <div class="cover${game.cover_path ? "" : " no-cover"}">${game.cover_path ? `<img src="${escapeHtml(game.cover_path)}" />` : "\u{1F3AE}"}${game.installed ? INSTALLED_BADGE : ""}${game.saves_only ? SAVES_BADGE : game.missing_from_fs ? MISSING_BADGE : ""}${game.addons_only && !game.missing_from_fs ? ADDONS_BADGE : ""}${versions > 1 ? `<span class="sibling-badge" title="${versions} versions">${versions}</span>` : ""}</div>
       <div class="name">${escapeHtml(game.name)}</div>
     `;
     card.addEventListener("click", () => {
@@ -1207,6 +1289,7 @@ async function openGamePage(id) {
   renderVersions(game);
   renderOverview(game);
   loadGameFiles(game.id);
+  loadSaves(game.id);
 
   document.getElementById("scrape-status").textContent = "";
   document.getElementById("igdb-results").innerHTML = "";
@@ -1221,6 +1304,8 @@ async function openGamePage(id) {
   document.getElementById("start-install-btn").hidden = false;
   libFiles = null;
   cacheFiles = null;
+  gameSaves = null;
+  document.getElementById("saves-status").textContent = "";
   filesSubtab = "all";
   renderFilesTab();
 
@@ -1279,7 +1364,14 @@ function renderOverview(game) {
 
   const genresEl = document.getElementById("game-genres");
   genresEl.innerHTML =
-    (game.missing_from_fs ? '<span class="chip chip-missing">Missing</span>' : "") +
+    (game.saves_only
+      ? '<span class="chip chip-saves" title="The game is gone from disk, its saves are kept">Saves only</span>'
+      : game.missing_from_fs
+        ? '<span class="chip chip-missing">Missing</span>'
+        : "") +
+    (game.addons_only && !game.missing_from_fs
+      ? '<span class="chip chip-addons" title="No installer for the game itself">Add-ons only</span>'
+      : "") +
     (game.fs_tags || []).map((t) => `<span class="chip chip-tag">${escapeHtml(t)}</span>`).join("") +
     (meta.genres || []).map((g) => `<span class="chip">${escapeHtml(g.name)}</span>`).join("");
 
@@ -1823,10 +1915,13 @@ function renderInstallState(session) {
 // in the game directory) on the left, the selected subtab's files on the right.
 let libFiles = null; // { root_path, files } from /api/games/{id}/files
 let cacheFiles = null; // { gameId, cachePath, files } of a finished install
+let gameSaves = null; // { devices, keep_versions } from /api/games/{id}/saves
+let userDevices = []; // the signed-in user's devices, for the upload picker
 let filesSubtab = "all";
 
 const ROOT_SUBTAB = "__root__";
 const CACHE_SUBTAB = "__cache__";
+const SAVES_SUBTAB = "__saves__";
 
 function topFolder(path) {
   const slash = path.indexOf("/");
@@ -1851,6 +1946,7 @@ function filesSubtabs() {
   if (cacheFiles && cacheFiles.files.length > 0) {
     tabs.push({ id: CACHE_SUBTAB, label: "Installer cache", count: cacheFiles.files.length });
   }
+  tabs.push({ id: SAVES_SUBTAB, label: "Saves", count: savesCount() });
   const folders = [...byFolder.keys()]
     .filter((k) => k !== ROOT_SUBTAB)
     .map((k) => ({ id: k, label: folderSubtabLabel(k, byFolder.get(k)), count: byFolder.get(k).length }))
@@ -1877,10 +1973,16 @@ function renderFilesTab() {
   }
 
   const showCache = filesSubtab === CACHE_SUBTAB;
+  const showSaves = filesSubtab === SAVES_SUBTAB;
   document.getElementById("files-panel-cache").hidden = !showCache;
-  document.getElementById("files-panel-library").hidden = showCache;
+  document.getElementById("files-panel-saves").hidden = !showSaves;
+  document.getElementById("files-panel-library").hidden = showCache || showSaves;
   if (showCache) {
     renderCachePanel();
+    return;
+  }
+  if (showSaves) {
+    renderSavesPanel();
     return;
   }
 
@@ -1934,6 +2036,243 @@ function renderCachePanel() {
     body.appendChild(tr);
   }
 }
+
+// --- Saves ---
+
+function parseDetail(detail) {
+  return typeof detail === "string" ? detail : (detail && detail.code) || JSON.stringify(detail);
+}
+
+async function errorMessage(resp) {
+  try {
+    return parseDetail((await resp.json()).detail) || resp.statusText;
+  } catch (_) {
+    return resp.statusText;
+  }
+}
+
+// A plain <a href> would not carry the Basic credentials, so the file is fetched with them.
+async function downloadWithAuth(url, fallbackName) {
+  const resp = await fetch(url, { headers: { Authorization: authHeader() } });
+  if (!resp.ok) throw new Error(await errorMessage(resp));
+  const blob = await resp.blob();
+  const match = /filename\*=utf-8''([^;]+)/i.exec(resp.headers.get("Content-Disposition") || "");
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = match ? decodeURIComponent(match[1]) : fallbackName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(link.href), 10000);
+}
+
+function savesCount() {
+  return gameSaves ? gameSaves.devices.reduce((n, d) => n + d.versions.length, 0) : 0;
+}
+
+async function loadSaves(gameId) {
+  try {
+    const [saves, devices] = await Promise.all([api(`/api/games/${gameId}/saves`), api("/api/devices")]);
+    if (!activeGame || activeGame.id !== gameId) return;
+    gameSaves = saves;
+    userDevices = devices;
+  } catch (_) {
+    if (!activeGame || activeGame.id !== gameId) return;
+    gameSaves = null;
+  }
+  renderFilesTab();
+}
+
+function fmtWhen(iso) {
+  return iso ? new Date(iso).toLocaleString() : "never";
+}
+
+function renderSavesPanel() {
+  document.getElementById("saves-keep").textContent = gameSaves ? gameSaves.keep_versions : 3;
+  const devices = gameSaves ? gameSaves.devices : [];
+  document.getElementById("saves-empty").hidden = devices.length > 0;
+  document.getElementById("saves-devices").innerHTML = devices
+    .map(({ device, versions }) => {
+      const platform = device.platform ? ` <span class="chip">${escapeHtml(device.platform)}</span>` : "";
+      const rows = versions
+        .map(
+          (v) => `
+        <tr>
+          <td>${escapeHtml(fmtWhen(v.created_at))}</td>
+          <td><span class="chip chip-tag">${escapeHtml(v.trigger)}</span></td>
+          <td>
+            <details data-version="${v.id}">
+              <summary>${v.file_count} file${v.file_count === 1 ? "" : "s"}</summary>
+              <ul class="saves-files"><li class="muted">Loading...</li></ul>
+            </details>
+          </td>
+          <td>${fmtBytes(v.size_bytes)}</td>
+          <td>
+            <button type="button" data-action="download" data-version="${v.id}">Download</button>
+            <button type="button" class="danger" data-action="delete" data-version="${v.id}">Delete</button>
+          </td>
+        </tr>`
+        )
+        .join("");
+      return `
+        <div class="saves-device">
+          <div class="main-header">
+            <h4>${escapeHtml(device.name)}${platform}</h4>
+            <button type="button" data-action="download" data-version="${versions[0].id}">Download latest</button>
+          </div>
+          <p class="muted small">${escapeHtml(device.hostname || "")} - last seen ${escapeHtml(fmtWhen(device.last_seen))}</p>
+          <table class="data-table">
+            <thead><tr><th>Saved</th><th>Trigger</th><th>Files</th><th>Size</th><th></th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>`;
+    })
+    .join("");
+
+  const picker = document.getElementById("saves-upload-device");
+  const previous = picker.value;
+  picker.innerHTML =
+    userDevices.map((d) => `<option value="${d.id}">${escapeHtml(d.name)}</option>`).join("") +
+    '<option value="web">This browser</option>';
+  if ([...picker.options].some((o) => o.value === previous)) picker.value = previous;
+}
+
+function setSavesStatus(text) {
+  document.getElementById("saves-status").textContent = text;
+}
+
+document.getElementById("saves-devices").addEventListener("click", async (e) => {
+  const button = e.target.closest("button[data-action]");
+  if (!button || !activeGame) return;
+  const id = button.dataset.version;
+  try {
+    if (button.dataset.action === "download") {
+      await downloadWithAuth(`/api/saves/${id}/download`, "save.zip");
+    } else if (button.dataset.action === "delete") {
+      if (!confirm("Delete this saved version from the server?")) return;
+      await api(`/api/saves/${id}`, { method: "DELETE" });
+      setSavesStatus("Deleted.");
+      await loadSaves(activeGame.id);
+    }
+  } catch (err) {
+    setSavesStatus(`Failed: ${err.message}`);
+  }
+});
+
+// The file list of a version is fetched the first time it is opened ("toggle" does not bubble).
+document.getElementById("saves-devices").addEventListener(
+  "toggle",
+  async (e) => {
+    const details = e.target;
+    if (!details.open || details.dataset.loaded || !details.dataset.version) return;
+    details.dataset.loaded = "1";
+    const list = details.querySelector(".saves-files");
+    try {
+      const version = await api(`/api/saves/${details.dataset.version}`);
+      const more = version.file_count - version.manifest.length;
+      list.innerHTML =
+        version.manifest
+          .map((f) => `<li>${escapeHtml(f.path)} <span class="muted">${fmtBytes(f.size)}</span></li>`)
+          .join("") + (more > 0 ? `<li class="muted">and ${more} more</li>` : "");
+    } catch (err) {
+      details.dataset.loaded = "";
+      list.innerHTML = `<li class="muted">${escapeHtml(err.message)}</li>`;
+    }
+  },
+  true
+);
+
+// Uploads from the browser are attributed to one device of its own, created on first use.
+async function webDevice() {
+  let uid = localStorage.getItem("mog_web_device_uid");
+  if (!uid) {
+    uid = `web-${crypto.randomUUID()}`;
+    localStorage.setItem("mog_web_device_uid", uid);
+  }
+  const register = (extra) =>
+    fetch("/api/devices/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: authHeader() },
+      body: JSON.stringify({ client_uid: uid, hostname: "Web upload", platform: "web", ...extra }),
+    });
+  let resp = await register({});
+  if (resp.status === 409) {
+    // This browser's uid was lost (cleared storage): take the earlier web device over.
+    const detail = (await resp.json()).detail;
+    const previous = detail && (detail.devices || []).find((d) => d.platform === "web");
+    if (previous) resp = await register({ adopt_device_id: previous.id });
+  }
+  if (!resp.ok) throw new Error(await errorMessage(resp));
+  return resp.json();
+}
+
+document.getElementById("saves-upload-input").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file || !activeGame) return;
+  setSavesStatus("Uploading...");
+  try {
+    let deviceId = document.getElementById("saves-upload-device").value;
+    if (deviceId === "web") deviceId = (await webDevice()).id;
+    const form = new FormData();
+    form.append("file", file);
+    const resp = await fetch(`/api/games/${activeGame.id}/saves?device_id=${deviceId}&trigger=manual`, {
+      method: "POST",
+      headers: { Authorization: authHeader() },
+      body: form,
+    });
+    if (!resp.ok) throw new Error(await errorMessage(resp));
+    const result = await resp.json();
+    setSavesStatus(result.created ? "Uploaded." : "Identical to the newest version, nothing new stored.");
+    await loadSaves(activeGame.id);
+  } catch (err) {
+    setSavesStatus(`Upload failed: ${err.message}`);
+  }
+});
+
+// --- Devices (profile page) ---
+
+async function loadDevicesTable() {
+  let devices = [];
+  try {
+    devices = await api("/api/devices");
+  } catch (_) {
+    // leave the table empty
+  }
+  document.getElementById("devices-empty").hidden = devices.length > 0;
+  document.getElementById("devices-table-body").innerHTML = devices
+    .map(
+      (d) => `
+      <tr>
+        <td>${escapeHtml(d.name)}</td>
+        <td>${escapeHtml(d.hostname || "")}</td>
+        <td>${escapeHtml(d.platform || "")}</td>
+        <td>${escapeHtml(fmtWhen(d.last_seen))}</td>
+        <td><button type="button" data-device="${d.id}" data-name="${escapeHtml(d.name)}">Rename</button></td>
+      </tr>`
+    )
+    .join("");
+}
+
+document.getElementById("devices-table-body").addEventListener("click", async (e) => {
+  const button = e.target.closest("button[data-device]");
+  if (!button) return;
+  const name = prompt("New name for this device", button.dataset.name);
+  if (!name || !name.trim() || name.trim() === button.dataset.name) return;
+  const status = document.getElementById("devices-status");
+  try {
+    await api(`/api/devices/${button.dataset.device}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name: name.trim() }),
+    });
+    status.textContent = "Renamed.";
+    loadDevicesTable();
+  } catch (err) {
+    status.textContent = /^409/.test(err.message)
+      ? "Another of your devices already has that name."
+      : `Could not rename: ${err.message}`;
+  }
+});
 
 // --- Boot ---
 

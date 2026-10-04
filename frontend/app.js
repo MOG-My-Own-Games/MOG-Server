@@ -1370,28 +1370,128 @@ document.addEventListener("keydown", (e) => {
 
 // --- Metadata (IGDB / SteamGridDB) ---
 
-document.getElementById("scrape-btn").addEventListener("click", async () => {
-  const statusEl = document.getElementById("scrape-status");
-  statusEl.textContent = "Searching...";
+// --- Scrape dialog: the providers' defaults are applied, then every artwork on offer can be picked ---
+
+const MEDIA_KINDS = [
+  ["cover", "Cover", "portrait"],
+  ["banner", "Banner", "wide"],
+  ["hero", "Hero", "hero"],
+  ["logo", "Title (logo)", "logo"],
+  ["icon", "Icon", "icon"],
+];
+
+function showCover(game) {
+  const coverImg = document.getElementById("game-cover-img");
+  const coverPlaceholder = document.getElementById("game-cover-placeholder");
+  if (game.cover_path) {
+    coverImg.src = game.cover_path;
+    coverImg.hidden = false;
+    coverPlaceholder.hidden = true;
+  }
+}
+
+function renderMediaChoices(data, game) {
+  const root = document.getElementById("scrape-modal-media");
+  root.innerHTML = "";
+  for (const [kind, label, shape] of MEDIA_KINDS) {
+    const section = document.createElement("section");
+    section.className = "media-section";
+    section.innerHTML = `<h4>${label}</h4>`;
+    const row = document.createElement("div");
+    row.className = `media-row media-${shape}`;
+    const options = data.candidates[kind] || [];
+    const chosen = () => ((game.media || {})[kind] || {}).url || null;
+
+    const pick = async (url, tile) => {
+      try {
+        const updated = await api(`/api/games/${game.id}/media`, { method: "PUT", body: JSON.stringify({ [kind]: url }) });
+        game.media = updated.media;
+        game.cover_path = updated.cover_path;
+        activeGame = { ...activeGame, media: updated.media, cover_path: updated.cover_path };
+        row.querySelectorAll(".media-choice").forEach((el) => el.classList.toggle("selected", el === tile));
+        if (kind === "cover") showCover(updated);
+      } catch (err) {
+        document.getElementById("scrape-modal-status").textContent = `Could not save: ${err.message}`;
+      }
+    };
+
+    const none = document.createElement("button");
+    none.type = "button";
+    none.className = "media-choice media-none";
+    none.textContent = "None";
+    none.classList.toggle("selected", chosen() === null);
+    none.addEventListener("click", () => pick(null, none));
+    row.appendChild(none);
+
+    for (const option of options) {
+      const tile = document.createElement("button");
+      tile.type = "button";
+      tile.className = "media-choice";
+      tile.title = `${option.source === "igdb" ? "IGDB" : "SteamGridDB"}${option.width ? `, ${option.width}x${option.height}` : ""}`;
+      tile.classList.toggle("selected", option.url === chosen());
+      const img = document.createElement("img");
+      img.src = option.thumb || option.url;
+      img.loading = "lazy";
+      img.alt = "";
+      tile.appendChild(img);
+      const source = document.createElement("span");
+      source.className = "media-source";
+      source.textContent = option.source === "igdb" ? "IGDB" : "SGDB";
+      tile.appendChild(source);
+      tile.addEventListener("click", () => pick(option.url, tile));
+      row.appendChild(tile);
+    }
+    if (options.length === 0) {
+      const empty = document.createElement("span");
+      empty.className = "muted small";
+      empty.textContent = "Nothing on offer from the providers.";
+      row.appendChild(empty);
+    }
+    section.appendChild(row);
+    root.appendChild(section);
+  }
+}
+
+async function openScrapeModal() {
+  const modal = document.getElementById("scrape-modal");
+  const status = document.getElementById("scrape-modal-status");
+  document.getElementById("scrape-modal-title").textContent = `Scrape: ${activeGame.name}`;
+  document.getElementById("scrape-modal-media").innerHTML = "";
+  document.getElementById("scrape-modal-done").disabled = true;
+  status.textContent = "Fetching metadata and artwork...";
+  modal.hidden = false;
+  let game = activeGame;
   try {
-    const previousCover = activeGame.cover_path;
-    const game = await api(`/api/games/${activeGame.id}/scrape`, { method: "POST" });
+    game = await api(`/api/games/${activeGame.id}/scrape`, { method: "POST" });
     activeGame = game;
     document.getElementById("game-title").textContent = game.name;
     renderOverview(game);
-    const coverImg = document.getElementById("game-cover-img");
-    const coverPlaceholder = document.getElementById("game-cover-placeholder");
-    if (game.cover_path) {
-      coverImg.src = game.cover_path;
-      coverImg.hidden = false;
-      coverPlaceholder.hidden = true;
-    }
-    const cover = game.cover_path === previousCover ? "cover unchanged (still SteamGridDB's first result)" : "cover replaced";
-    const igdb = game.igdb_id ? "" : "; no IGDB match (check the IGDB keys in Settings)";
-    statusEl.textContent = `Matched: ${game.name}, ${cover}${igdb}`;
-    await refreshGames();
+    showCover(game);
+    const igdb = game.igdb_id ? "" : " No IGDB match (check the IGDB keys in Settings).";
+    status.textContent = `Matched: ${game.name}. The providers' defaults are applied; pick any other artwork below if you want.${igdb}`;
   } catch (err) {
-    statusEl.textContent = `Failed: ${err.message}`;
+    status.textContent = `The scrape failed: ${err.message}. You can still pick artwork below.`;
+  }
+  try {
+    const data = await api(`/api/games/${game.id}/media/candidates`);
+    renderMediaChoices(data, { ...game, media: data.selected });
+  } catch (err) {
+    status.textContent += ` Could not list the artwork: ${err.message}`;
+  }
+  document.getElementById("scrape-modal-done").disabled = false;
+}
+
+async function closeScrapeModal() {
+  document.getElementById("scrape-modal").hidden = true;
+  document.getElementById("scrape-status").textContent = "";
+  await refreshGames();
+}
+
+document.getElementById("scrape-btn").addEventListener("click", openScrapeModal);
+document.getElementById("scrape-modal-done").addEventListener("click", closeScrapeModal);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !document.getElementById("scrape-modal").hidden && !document.getElementById("scrape-modal-done").disabled) {
+    closeScrapeModal();
   }
 });
 

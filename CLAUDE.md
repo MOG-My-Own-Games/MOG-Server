@@ -34,7 +34,7 @@ containers or hosts.
 backend/
   main.py, startup.py        FastAPI app, migrations-on-boot, first-run admin
   config/                    Env-var loading (bootstrap-only fallback, see below)
-  models/                    SQLAlchemy models: user, library, game, install_session, settings
+  models/                    SQLAlchemy models: user, library, game, install_session, settings, notification, device, save_version
   handler/
     auth.py                  HTTP Basic against the users table (see docs/TODO.md)
     database/                Per-entity CRUD handlers (db_*_handler), engine/session

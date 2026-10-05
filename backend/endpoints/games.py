@@ -6,11 +6,12 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Path, Query, status
 from fastapi.responses import FileResponse
 from handler.auth import AdminUser, CurrentUser
-from handler.database import db_game_handler, db_install_session_handler
+from handler.database import db_game_handler, db_install_session_handler, db_saves_handler
 from handler.filesystem import fs_game_handler
 from handler.filesystem.installer_detection import category_for_path
 from handler import media as media_handler
 from handler.metadata import igdb_handler, sgdb_handler
+from handler.saves import purge_game
 from handler.scrape_handler import refresh_game, search_name
 from models.install_session import InstallSessionState
 from starlette.concurrency import run_in_threadpool
@@ -48,27 +49,52 @@ async def list_games(user: CurrentUser, library_id: int | None = None) -> list[G
         if not user.is_admin and user.hidden_library_ids:
             games = [g for g in games if g.library_id not in user.hidden_library_ids]
     installed = _installed_game_ids(user.id)
-    return [GameSchema.model_validate(g).model_copy(update={"installed": g.id in installed}) for g in games]
+    with_saves = db_saves_handler.game_ids_with_saves()
+    return [
+        GameSchema.model_validate(g).model_copy(
+            update={"installed": g.id in installed, "saves_only": g.missing_from_fs and g.id in with_saves}
+        )
+        for g in games
+    ]
 
 
 @router.get("/missing")
 async def list_missing_games(user: AdminUser) -> list[GameSchema]:
-    return [GameSchema.model_validate(g) for g in db_game_handler.get_missing_games()]
+    """Games a scan could not find, the ones that still have saves flagged `saves_only`."""
+    with_saves = db_saves_handler.game_ids_with_saves()
+    return [
+        GameSchema.model_validate(g).model_copy(update={"saves_only": g.id in with_saves})
+        for g in db_game_handler.get_missing_games()
+    ]
 
 
 @router.delete("/missing")
 async def clear_missing_games(user: AdminUser) -> dict:
-    return {"cleared": db_game_handler.delete_missing_games()}
+    """Forget the missing games; those that still have saves stay (delete one to remove its saves too)."""
+    kept = len(db_saves_handler.game_ids_with_saves() & {g.id for g in db_game_handler.get_missing_games()})
+    return {"cleared": db_game_handler.delete_missing_games(), "kept_with_saves": kept}
 
 
 @router.delete("/{id}")
-async def delete_missing_game(user: AdminUser, id: Annotated[int, Path(ge=1)]) -> None:
-    """Only for games a scan flagged as missing: a present game would just be re-added."""
+async def delete_missing_game(
+    user: AdminUser, id: Annotated[int, Path(ge=1)], delete_saves: bool = False
+) -> None:
+    """Only for games a scan flagged as missing: a present game would just be re-added.
+
+    A game that still has saves is refused with 409 `has_saves` (and what would be lost) unless
+    `delete_saves` says to delete those too."""
     game = db_game_handler.get_game(id)
     if game is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     if not game.missing_from_fs:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Game is not missing from disk")
+    versions, size_bytes = db_saves_handler.summary(game_id=id)
+    if versions and not delete_saves:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "has_saves", "versions": versions, "size_bytes": size_bytes},
+        )
+    await run_in_threadpool(purge_game, id)
     db_game_handler.delete_game(id)
 
 
@@ -78,7 +104,8 @@ async def get_game(user: CurrentUser, id: Annotated[int, Path(ge=1)]) -> GameSch
     if game is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     installed = game.id in _installed_game_ids(user.id)
-    return GameSchema.model_validate(game).model_copy(update={"installed": installed})
+    saves_only = game.missing_from_fs and game.id in db_saves_handler.game_ids_with_saves()
+    return GameSchema.model_validate(game).model_copy(update={"installed": installed, "saves_only": saves_only})
 
 
 def _serve_image(url: str | None, max_height: int | None = None) -> FileResponse:

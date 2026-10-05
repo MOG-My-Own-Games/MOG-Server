@@ -5,7 +5,7 @@ Walks every non-merge commit oldest to newest, starting from 0.0.0:
   breaking change ("type!:" or a BREAKING CHANGE footer) -> major, minor/patch reset
   feat                                                    -> minor, patch reset
   anything else (fix, chore, docs, ...)                   -> patch
-Branches other than main get a suffix: 0.3.1-my-branch.4 (4 = commits ahead of main).
+Branches other than main get the branch name as a suffix: 0.3.1-my-branch.
 
 Prints the version; under GitHub Actions it also writes `version=` to $GITHUB_OUTPUT.
 """
@@ -43,12 +43,8 @@ def compute() -> str:
 
     branch = branch_name()
     if branch not in MAIN_BRANCHES:
-        try:
-            ahead = git("rev-list", "--count", "--no-merges", "origin/main..HEAD").strip()
-        except subprocess.CalledProcessError:
-            ahead = "0"
         slug = re.sub(r"[^a-z0-9-]+", "-", branch.lower()).strip("-")
-        version += f"-{slug}.{ahead}"
+        version += f"-{slug}"
     return version
 
 

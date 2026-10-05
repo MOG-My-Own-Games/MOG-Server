@@ -220,6 +220,24 @@
                     <tbody id="files-table-body"></tbody>
                   </table>
                 </div>
+
+                <div id="files-panel-saves" class="card" hidden>
+                  <div class="main-header">
+                    <h3>Saves</h3>
+                    <div class="page-actions">
+                      <select id="saves-upload-device" aria-label="Device the zip belongs to"></select>
+                      <label class="button-link" for="saves-upload-input">Upload zip</label>
+                      <input type="file" id="saves-upload-input" accept=".zip,application/zip" hidden />
+                    </div>
+                  </div>
+                  <p class="muted small">
+                    Each machine keeps its own copies, so one never overwrites another's. The newest
+                    <span id="saves-keep">3</span> of each are kept.
+                  </p>
+                  <p id="saves-status" class="muted small"></p>
+                  <div id="saves-devices"></div>
+                  <p id="saves-empty" class="muted" hidden>No saves uploaded for this game yet.</p>
+                </div>
               </div>
             </div>
           </div>
@@ -262,6 +280,17 @@
             <button type="submit">Change password</button>
             <p id="password-status" class="muted small"></p>
           </form>
+
+          <div class="card">
+            <h3>My devices</h3>
+            <p class="muted small">Machines running the MOG client. Each one's saves are kept separately.</p>
+            <table class="data-table">
+              <thead><tr><th>Name</th><th>Hostname</th><th>Platform</th><th>Last seen</th><th></th></tr></thead>
+              <tbody id="devices-table-body"></tbody>
+            </table>
+            <p id="devices-empty" class="muted" hidden>No device has connected yet.</p>
+            <p id="devices-status" class="muted small"></p>
+          </div>
         </section>
 
         <!-- Settings view -->

@@ -130,6 +130,17 @@ def category_for_path(posix: PurePosixPath) -> str:
     return _CATEGORY_BY_FOLDER.get(posix.parts[0].lower(), GAME_CATEGORY)
 
 
+def is_addon_folder(name: str) -> bool:
+    """Whether a top-level folder name marks add-on content (mods, DLC, patches, ...)."""
+    return _CATEGORY_BY_FOLDER.get(name.lower()) in ADDON_CATEGORIES
+
+
+def is_base_installer(path: str) -> bool:
+    """Whether a game-relative file would be offered as an installer of the base game."""
+    candidate = _classify(DetectedFile(path=path, size_bytes=0))
+    return candidate is not None and candidate.category == GAME_CATEGORY
+
+
 def _matches_known_installer(name_lower: str) -> bool:
     return any(fnmatch.fnmatch(name_lower, pat) for pat in KNOWN_INSTALLER_PATTERNS)
 

@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from handler.database import db_game_handler
+from handler.filesystem.installer_detection import is_addon_folder, is_base_installer
 from models.game import Game
 from models.library import Library
 
@@ -31,6 +32,28 @@ def has_files(path: Path) -> bool:
     return any(files for _, _, files in os.walk(path))
 
 
+def only_addons(path: Path) -> bool:
+    """A folder with add-on folders (mods, DLC, ...) and nothing that installs the base game.
+
+    Stops at the first installer of the base game, so an ordinary game costs a glance. The add-on
+    folders themselves are not searched: an installer inside one is not the base game's."""
+    if not path.is_dir():
+        return False
+    try:
+        if not any(is_addon_folder(e.name) for e in path.iterdir() if e.is_dir()):
+            return False
+    except OSError:
+        return False
+    for dirpath, dirnames, filenames in os.walk(path):
+        here = Path(dirpath)
+        if here == path:
+            dirnames[:] = [d for d in dirnames if not is_addon_folder(d)]
+        rel = here.relative_to(path)
+        if any(is_base_installer(PurePosixPath(*rel.parts, name).as_posix()) for name in filenames):
+            return False
+    return True
+
+
 def scan_library(library: Library) -> ScanResult:
     root = Path(library.root_path)
     on_disk = {p.name for p in root.iterdir() if has_files(p)} if root.is_dir() else set()
@@ -39,7 +62,9 @@ def scan_library(library: Library) -> ScanResult:
 
     added = 0
     for fs_name in sorted(on_disk - existing.keys()):
-        db_game_handler.add_game(Game(library_id=library.id, fs_name=fs_name, name=fs_name))
+        db_game_handler.add_game(
+            Game(library_id=library.id, fs_name=fs_name, name=fs_name, addons_only=only_addons(root / fs_name))
+        )
         added += 1
 
     # Vanished games are only flagged, never deleted, so their metadata and
@@ -47,8 +72,14 @@ def scan_library(library: Library) -> ScanResult:
     missing = 0
     for fs_name, game in existing.items():
         is_missing = fs_name not in on_disk
+        changes = {}
         if is_missing != game.missing_from_fs:
-            db_game_handler.update_game(game.id, {"missing_from_fs": is_missing})
+            changes["missing_from_fs"] = is_missing
+        addons = not is_missing and only_addons(root / fs_name)
+        if addons != bool(game.addons_only):
+            changes["addons_only"] = addons
+        if changes:
+            db_game_handler.update_game(game.id, changes)
         missing += is_missing
 
     return ScanResult(added=added, missing=missing, total=len(on_disk))

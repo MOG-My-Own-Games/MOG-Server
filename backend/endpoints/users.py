@@ -4,11 +4,13 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Path as PathVar, UploadFile, status
+from starlette.concurrency import run_in_threadpool
 
 from config import RESOURCES_BASE_PATH
 from endpoints.responses.user import PasswordChangeForm, UserCreateForm, UserSchema, UserUpdateForm
 from handler.auth import AdminUser, CurrentUser, hash_password, verify_password
-from handler.database import db_user_handler
+from handler.database import db_saves_handler, db_user_handler
+from handler.saves import purge_user
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -61,9 +63,18 @@ async def update_user(user: AdminUser, id: Annotated[int, PathVar(ge=1)], data: 
 
 
 @router.delete("/{id}")
-async def delete_user(user: AdminUser, id: Annotated[int, PathVar(ge=1)]) -> None:
+async def delete_user(user: AdminUser, id: Annotated[int, PathVar(ge=1)], delete_saves: bool = False) -> None:
+    """Delete a user and, with them, their devices and saved game files. A user who has saves is
+    refused with 409 `has_saves` (and what would be lost) unless `delete_saves` says to go on."""
     if id == user.id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot delete your own account")
+    versions, size_bytes = db_saves_handler.summary(user_id=id)
+    if versions and not delete_saves:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "has_saves", "versions": versions, "size_bytes": size_bytes},
+        )
+    await run_in_threadpool(purge_user, id)
     db_user_handler.delete_user(id)
 
 

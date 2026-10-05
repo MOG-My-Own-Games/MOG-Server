@@ -10,6 +10,7 @@ from handler.database import db_game_handler, db_install_session_handler, db_sav
 from handler.filesystem import fs_game_handler
 from handler.filesystem.installer_detection import category_for_path
 from handler import media as media_handler
+from handler import video_handler
 from handler.metadata import igdb_handler, sgdb_handler
 from handler.saves import purge_game
 from handler.scrape_handler import refresh_game, search_name
@@ -177,6 +178,19 @@ async def get_game_media(user: CurrentUser, id: Annotated[int, Path(ge=1)], kind
     if game is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     return await run_in_threadpool(_serve_image, _chosen_url(game, kind), COVER_MAX_HEIGHT if kind == "cover" else None)
+
+
+@router.get("/{id}/videos")
+async def get_game_videos(user: CurrentUser, id: Annotated[int, Path(ge=1)]) -> dict:
+    """The game's intro and gameplay videos (YouTube ids, to be embedded), in the order to show them: from
+    IGDB when it lists them, else searched for. A search that fails just leaves that video out."""
+    game = db_game_handler.get_game(id)
+    if game is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    videos = await run_in_threadpool(
+        video_handler.find_videos, game.id, game.name, (game.igdb_metadata or {}).get("videos")
+    )
+    return {"videos": videos}
 
 
 @router.get("/{id}/screenshots/{index}")

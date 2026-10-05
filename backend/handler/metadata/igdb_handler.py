@@ -30,6 +30,7 @@ _GAME_FIELDS = (
     "id,name,summary,storyline,cover.url,first_release_date,"
     "genres.name,"
     "screenshots.url,"
+    "videos.name,videos.video_id,"
     "artworks.url,"
     "age_ratings.organization.name,age_ratings.rating_category.rating,"
     "age_ratings.rating,age_ratings.category,"

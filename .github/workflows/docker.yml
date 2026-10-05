@@ -2,7 +2,7 @@ name: Docker
 
 # Every push publishes the image tagged with the computed version. On main that is the plain
 # version (e.g. 0.12.321) plus "latest"; on any other branch it carries the branch name
-# (e.g. 0.12.321-feat-save-sync.4) and never "latest", so a branch can be tried without
+# (e.g. 0.12.321-feat-save-sync) and never "latest", so a branch can be tried without
 # touching what main users pull. Pull requests only build, to catch breakage.
 on:
   push:

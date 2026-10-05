@@ -129,6 +129,11 @@ class InstallSession(BaseModel):
     manual_mode: Mapped[bool] = mapped_column(
         Boolean(), default=False, server_default=sa_false(), nullable=False
     )
+    # The source archive holds a game that needs no installer: its contents are extracted as they are into
+    # the install cache and become the install's output, nothing is run.
+    extract_only: Mapped[bool] = mapped_column(
+        Boolean(), default=False, server_default=sa_false(), nullable=False
+    )
     # What auto mode is doing ("running" / "needs_manual", see
     # handler.install.auto_mode.driver) and its last action. NULL when off.
     auto_status: Mapped[str | None] = mapped_column(String(32), default=None)

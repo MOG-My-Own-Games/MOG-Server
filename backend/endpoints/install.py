@@ -48,7 +48,7 @@ from handler.filesystem import fs_game_handler
 from handler.filesystem.installer_detection import ARCHIVE_SOURCE_KINDS, pick_default_installer
 from handler.install import bandwidth
 from handler.install.defaults import default_auto_mode, default_download_workers, default_manual_mode
-from handler.install.archive_prescan import is_archive_candidate, list_source_candidates
+from handler.install.archive_prescan import extract_suggested, is_archive_candidate, list_source_candidates
 from handler.install.manifest import (
     find_manifest_entry,
     live_view_of_final_manifest,
@@ -159,6 +159,7 @@ async def get_install_candidates(
             for c in candidates
         ],
         needs_manual_pick=len(candidates) == 0,
+        extract_suggested=source is not None and extract_suggested(candidates),
     )
 
 
@@ -198,7 +199,22 @@ async def start_install_session(
                 source_path = default.path
             else:
                 installer_path = default.path
-    needs_manual_pick = manual_mode or (not installer_path and not source_path)
+    extract_only = bool(data.extract_only)
+    if extract_only:
+        # Only an archive can be extracted as it is: the one named, or the default pick when it is one.
+        if source_path is None and installer_path is not None:
+            try:
+                probe = Path(fs_game_handler.resolve_installer_abs_path(game, installer_path))
+            except (ValueError, FileNotFoundError) as e:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+            if is_archive_candidate(probe):
+                source_path, installer_path = installer_path, None
+        if source_path is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Extracting as it is needs an archive or disc image"
+            )
+        installer_path = None
+    needs_manual_pick = (manual_mode and not extract_only) or (not installer_path and not source_path)
 
     initial_state = InstallSessionState.AWAITING_INSTALLER if needs_manual_pick else InstallSessionState.DETECTING
     previous_state = existing.state if existing else None
@@ -216,6 +232,7 @@ async def start_install_session(
                 "proton_build": data.proton_build,
                 "auto_mode": auto_mode,
                 "manual_mode": manual_mode,
+                "extract_only": extract_only,
                 "auto_status": None,
                 "auto_detail": None,
                 "state": initial_state,
@@ -237,6 +254,7 @@ async def start_install_session(
                 proton_build=data.proton_build,
                 auto_mode=auto_mode,
                 manual_mode=manual_mode,
+                extract_only=extract_only,
                 expires_at=resolve_expires_at(data.ttl_seconds),
             )
         )

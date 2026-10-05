@@ -41,9 +41,12 @@ from config import (
 from handler.database import db_game_handler, db_install_session_handler
 from handler.filesystem import fs_game_handler
 from handler.install.archive_prescan import extract_and_rescan, is_archive_candidate, source_phase
+from utils.archives import extract_archive
 from handler.install.auto_mode.runtime import start_auto_mode
 from handler.notifications import notify_auto_mode_failed
 from handler.install.manifest import (
+    LIVE_MANIFEST_FILENAME,
+    MANIFEST_FILENAME,
     LiveManifestEntry,
     delete_live_manifest,
     hash_files,
@@ -437,6 +440,10 @@ def _run_install(install_session_id: int) -> None:
         if is_archive_candidate(Path(probe)):
             source_rel, inner_installer = inner_installer, None
 
+    if session.extract_only:
+        _run_extract_only(install_session_id, game, source_rel)
+        return
+
     extract_temp_dir: TemporaryDirectory[str] | None = None
     try:
         if source_rel is None:
@@ -449,7 +456,11 @@ def _run_install(install_session_id: int) -> None:
             )
             result = extract_and_rescan(source_abs, inner_installer)
             if result is None:
-                _fail(install_session_id, f"Nothing recognizable as an installer inside {source_abs.name}")
+                _fail(
+                    install_session_id,
+                    f"Nothing recognizable as an installer inside {source_abs.name}. Start the install again "
+                    "and choose to extract its contents as they are.",
+                )
                 return
             extract_temp_dir, extract_root, chosen = result
             installer_abs = str(extract_root / chosen.path)
@@ -771,6 +782,69 @@ def _live_manifest_loop(
             log.warning(f"Live manifest scan failed, will retry: {e}")
         if stop.wait(LIVE_MANIFEST_INTERVAL):
             return
+
+
+def _run_extract_only(install_session_id: int, game, source_rel: str | None) -> None:
+    """Install a game that needs no installer: unpack its archive straight into the install cache and
+    take the result as the install's output, as `_finalize_install` does for what an installer wrote.
+    Nothing is run, so there is no sandbox, display or Wine prefix."""
+    if source_rel is None:
+        _fail(install_session_id, "Extracting as it is needs an archive or disc image")
+        return
+    try:
+        source_abs = Path(fs_game_handler.resolve_installer_abs_path(game, source_rel))
+    except (ValueError, FileNotFoundError) as e:
+        _fail(install_session_id, str(e))
+        return
+
+    work_dir = ensure_session_cache_dir(install_session_id)
+    db_install_session_handler.update_session(
+        install_session_id,
+        {
+            "state": InstallSessionState.INSTALLING,
+            "cache_path": str(work_dir),
+            "phase": source_phase(source_abs).value,
+            "phase_detail": source_abs.name,
+        },
+    )
+    log.info(f"Extracting {hl(source_abs.name)} as it is for session {hl(str(install_session_id))}")
+    try:
+        problem = extract_archive(source_abs, work_dir)
+        if problem:
+            _fail(install_session_id, f"Could not extract {source_abs.name}: {problem}")
+            return
+        current = db_install_session_handler.get_session(install_session_id)
+        if current is None or current.state != InstallSessionState.INSTALLING:
+            return  # cancelled while it was being unpacked: the cache was cleared, leave it so
+        files: list[Path] = []
+        for path in sorted(work_dir.rglob("*")):
+            if path.is_symlink():
+                path.unlink()  # a link in an archive could point outside the cache
+            elif path.is_file() and path.name not in (MANIFEST_FILENAME, LIVE_MANIFEST_FILENAME):
+                files.append(path)
+        if not files:
+            _fail(install_session_id, f"{source_abs.name} holds no files")
+            return
+        db_install_session_handler.update_session(
+            install_session_id, {"state": InstallSessionState.STREAMING, "phase": None, "phase_detail": None}
+        )
+        report = ThrottledProgress(
+            lambda hashed: db_install_session_handler.update_session(install_session_id, {"bytes_written": hashed})
+        )
+        entries = hash_files(files, root=work_dir, on_progress=report)
+        report.finish(manifest_total_bytes(entries))
+        write_manifest(work_dir, entries)
+        db_install_session_handler.update_session(
+            install_session_id,
+            {
+                "state": InstallSessionState.DONE,
+                "bytes_written": manifest_total_bytes(entries),
+                "bytes_total": manifest_total_bytes(entries),
+            },
+        )
+    except Exception as e:  # noqa: BLE001 - surface any failure to the UI
+        log.error(f"Extracting {source_abs.name} failed: {e}")
+        _fail(install_session_id, f"Could not extract {source_abs.name}: {e}")
 
 
 def _enter_streaming(install_session_id: int, vnc: VncSession) -> None:

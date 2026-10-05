@@ -19,6 +19,9 @@ class InstallCandidatesSchema(BaseModel):
     game_id: int
     candidates: list[InstallCandidateSchema]
     needs_manual_pick: bool
+    # For a listing of what is inside an archive (`source`): nothing in it looks like an installer, so the
+    # archive is most likely a game that needs none, and extracting it as it is would be the way to install it.
+    extract_suggested: bool = False
 
 
 class InstallSessionSchema(BaseModel):
@@ -35,6 +38,7 @@ class InstallSessionSchema(BaseModel):
     phase_detail: str | None
     auto_mode: bool
     manual_mode: bool
+    extract_only: bool
     auto_status: str | None
     auto_detail: str | None
     vnc_url: str | None
@@ -55,6 +59,8 @@ class InstallStartForm(BaseModel):
     ttl_seconds: int | None = None
     auto_mode: bool | None = None
     manual_mode: bool | None = None
+    # Extract the source archive as it is into the install cache instead of running an installer from it.
+    extract_only: bool | None = None
 
 
 class InstallAutoModeForm(BaseModel):

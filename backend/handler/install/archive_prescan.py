@@ -67,6 +67,13 @@ def list_source_candidates(source: Path) -> list[InstallerCandidate]:
     return executables or [c for c in candidates if c.rank in _NESTED_RANKS]
 
 
+def extract_suggested(candidates: list[InstallerCandidate]) -> bool:
+    """Whether what a listing of an archive found says the game inside needs no installer: nothing that looks
+    like one (a known installer name, or an executable at the top level) and no archive or disc image to unpack
+    further, only executables buried in folders (the game itself, its tools) or nothing runnable at all."""
+    return all(c.rank >= RANK_NESTED_EXECUTABLE and c.rank not in _NESTED_RANKS for c in candidates)
+
+
 def _list_files_flat(root: Path) -> list[DetectedFile]:
     detected: list[DetectedFile] = []
     for p in root.rglob("*"):

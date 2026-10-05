@@ -703,3 +703,7 @@ a.chip { color: inherit; text-decoration: none; }
 .danger-panel { width: min(520px, 94vw); border-color: var(--danger); }
 .danger-panel ul { margin: 0.6em 0; padding-left: 1.2em; }
 .danger-panel .modal-footer { position: static; gap: var(--space-sm); padding-top: var(--space-md); }
+
+.saves-status { margin: 0.4em 0 0.8em; min-height: 1.3em; font-size: 0.95em; color: var(--muted); }
+.saves-status.success { color: var(--success); }
+.saves-status.error { color: var(--danger); font-weight: 600; }

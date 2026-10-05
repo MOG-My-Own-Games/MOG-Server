@@ -1305,7 +1305,7 @@ async function openGamePage(id) {
   libFiles = null;
   cacheFiles = null;
   gameSaves = null;
-  document.getElementById("saves-status").textContent = "";
+  setSavesStatus("");
   filesSubtab = "all";
   renderFilesTab();
 
@@ -2137,8 +2137,12 @@ function renderSavesPanel() {
   if ([...picker.options].some((o) => o.value === previous)) picker.value = previous;
 }
 
-function setSavesStatus(text) {
-  document.getElementById("saves-status").textContent = text;
+// The outcome of the last action in the Saves panel, where it cannot be missed: green when it worked,
+// red when it did not, plain for the rest (uploading, nothing new to store).
+function setSavesStatus(text, kind = "") {
+  const el = document.getElementById("saves-status");
+  el.textContent = text;
+  el.className = `saves-status ${kind}`.trim();
 }
 
 document.getElementById("saves-devices").addEventListener("click", async (e) => {
@@ -2151,11 +2155,11 @@ document.getElementById("saves-devices").addEventListener("click", async (e) => 
     } else if (button.dataset.action === "delete") {
       if (!confirm("Delete this saved version from the server?")) return;
       await api(`/api/saves/${id}`, { method: "DELETE" });
-      setSavesStatus("Deleted.");
+      setSavesStatus("Deleted.", "success");
       await loadSaves(activeGame.id);
     }
   } catch (err) {
-    setSavesStatus(`Failed: ${err.message}`);
+    setSavesStatus(`Failed: ${err.message}`, "error");
   }
 });
 
@@ -2223,10 +2227,15 @@ document.getElementById("saves-upload-input").addEventListener("change", async (
     });
     if (!resp.ok) throw new Error(await errorMessage(resp));
     const result = await resp.json();
-    setSavesStatus(result.created ? "Uploaded." : "Identical to the newest version, nothing new stored.");
+    setSavesStatus(
+      result.created
+        ? `Uploaded ${file.name} (${result.version.file_count} file${result.version.file_count === 1 ? "" : "s"}).`
+        : `${file.name} has the same files as the newest version of this device, so nothing new was stored.`,
+      result.created ? "success" : ""
+    );
     await loadSaves(activeGame.id);
   } catch (err) {
-    setSavesStatus(`Upload failed: ${err.message}`);
+    setSavesStatus(`Upload failed: ${err.message}`, "error");
   }
 });
 

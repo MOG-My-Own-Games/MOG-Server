@@ -35,8 +35,10 @@ from tempfile import TemporaryDirectory
 
 from config import (
     INSTALL_MAX_CONCURRENCY,
+    INSTALL_NATIVE_VNC_RESOLUTION,
     INSTALL_SANDBOX_ENABLED,
     INSTALL_TIMEOUT,
+    INSTALL_VNC_RESOLUTION,
 )
 from handler.database import db_game_handler, db_install_session_handler
 from handler.filesystem import fs_game_handler
@@ -67,6 +69,7 @@ from handler.install.sandbox import SandboxSpec, build_bwrap_command
 from handler.install.streaming_mode import stream_uncompleted_files_enabled
 from handler.install.vnc import VncSession, start_vnc_session
 from handler.install.windows_output import (
+    KNOWN_VENDOR_DIR_NAMES,
     collect_extra_work_dir_files,
     collect_windows_install_files,
     load_baseline,
@@ -506,35 +509,46 @@ def _run_install(install_session_id: int) -> None:
     disc_source: Path | None = extract_root if extract_temp_dir is not None else None
 
     work_dir = ensure_session_cache_dir(install_session_id)
-    prefix_dir = _proton_prefix_dir(work_dir)
-    wanted_build = session.proton_build or default_build_id()
-    if wanted_build and resolve_proton_path(wanted_build) is None:
-        _set_phase(
-            install_session_id,
-            InstallPhase.DOWNLOADING,
-            f"Downloading Proton {wanted_build} (first run only, can take a few minutes)",
-        )
-    proton_or_wine = _wine_or_proton(session.proton_build)
-    _set_phase(install_session_id, None, None)
-    is_proton = _is_proton(proton_or_wine)
-
+    # A native installer (.sh/.run, GOG's MojoSetup among them) runs as it is: no Proton, no Wine prefix. Its
+    # HOME and temporary files go inside the session's cache, the one place it may write.
+    native = not _uses_wine(installer_abs)
+    prefix_dir: Path | None = None
+    proton_or_wine = ""
+    is_proton = False
     extra_env: tuple[tuple[str, str], ...] = ()
-    if is_proton:
-        # Proton computes its own real Wine prefix from
-        # STEAM_COMPAT_DATA_PATH (as "<that>/pfx", not WINEPREFIX directly)
-        # and needs STEAM_COMPAT_CLIENT_INSTALL_PATH to exist, even though
-        # nothing here is a real Steam install - a session-local, already-
-        # bound-in directory satisfies it.
-        steam_client_dir = work_dir / "steam-client"
-        steam_client_dir.mkdir(parents=True, exist_ok=True)
-        extra_env = (
-            ("STEAM_COMPAT_DATA_PATH", str(prefix_dir)),
-            ("STEAM_COMPAT_CLIENT_INSTALL_PATH", str(steam_client_dir)),
-        )
+    if native:
+        extra_env = _native_env(work_dir)
+    else:
+        prefix_dir = _proton_prefix_dir(work_dir)
+        wanted_build = session.proton_build or default_build_id()
+        if wanted_build and resolve_proton_path(wanted_build) is None:
+            _set_phase(
+                install_session_id,
+                InstallPhase.DOWNLOADING,
+                f"Downloading Proton {wanted_build} (first run only, can take a few minutes)",
+            )
+        proton_or_wine = _wine_or_proton(session.proton_build)
+        _set_phase(install_session_id, None, None)
+        is_proton = _is_proton(proton_or_wine)
+
+        if is_proton:
+            # Proton computes its own real Wine prefix from
+            # STEAM_COMPAT_DATA_PATH (as "<that>/pfx", not WINEPREFIX directly)
+            # and needs STEAM_COMPAT_CLIENT_INSTALL_PATH to exist, even though
+            # nothing here is a real Steam install - a session-local, already-
+            # bound-in directory satisfies it.
+            steam_client_dir = work_dir / "steam-client"
+            steam_client_dir.mkdir(parents=True, exist_ok=True)
+            extra_env = (
+                ("STEAM_COMPAT_DATA_PATH", str(prefix_dir)),
+                ("STEAM_COMPAT_CLIENT_INSTALL_PATH", str(steam_client_dir)),
+            )
 
     vnc: VncSession | None = None
     try:
-        vnc = start_vnc_session(install_session_id, NOVNC_WEB_ROOT)
+        vnc = start_vnc_session(
+            install_session_id, NOVNC_WEB_ROOT, INSTALL_NATIVE_VNC_RESOLUTION if native else INSTALL_VNC_RESOLUTION
+        )
         db_install_session_handler.update_session(
             install_session_id,
             {
@@ -594,7 +608,7 @@ def _run_install(install_session_id: int) -> None:
             inner,
             installer_abs=installer_abs,
             work_dir=str(work_dir),
-            proton_prefix=str(prefix_dir),
+            proton_prefix=str(prefix_dir) if prefix_dir is not None else None,
             display=vnc.display,
             proton_or_wine=proton_or_wine,
             extra_env=extra_env,
@@ -647,7 +661,12 @@ def _run_install(install_session_id: int) -> None:
         # doesn't try to stop it again.
         _enter_streaming(install_session_id, vnc)
         vnc = None
-        _finalize_install(install_session_id, _wine_drive_c_root(prefix_dir, proton_or_wine), work_dir, windows_baseline)
+        if native:
+            _finalize_native_install(install_session_id, work_dir)
+        else:
+            _finalize_install(
+                install_session_id, _wine_drive_c_root(prefix_dir, proton_or_wine), work_dir, windows_baseline
+            )
     except Exception as e:  # noqa: BLE001 - surface any runner failure to the UI
         log.error(f"Install session {install_session_id} failed: {e}")
         _fail(install_session_id, str(e))
@@ -660,6 +679,72 @@ def _run_install(install_session_id: int) -> None:
         delete_live_manifest(work_dir)
         if extract_temp_dir is not None:
             extract_temp_dir.cleanup()
+
+
+NATIVE_HOME = "home"
+NATIVE_TMP = "tmp"
+
+
+def _native_env(work_dir: Path) -> tuple[tuple[str, str], ...]:
+    """The environment of a native installer: HOME and TMPDIR inside the session's cache. Its own extraction
+    (a makeself archive unpacks itself into TMPDIR, hundreds of MB) must not fill the sandbox's tmpfs, and
+    the game goes where HOME says ("~/GOG Games/<game>")."""
+    home, tmp = work_dir / NATIVE_HOME, work_dir / NATIVE_TMP
+    home.mkdir(parents=True, exist_ok=True)
+    tmp.mkdir(parents=True, exist_ok=True)
+    return (("HOME", str(home)), ("TMPDIR", str(tmp)))
+
+
+def _is_user_noise(relative: Path) -> bool:
+    """What a native installer leaves in HOME that is not the game: hidden folders (.config, .local, .cache),
+    and the desktop shortcuts."""
+    first = relative.parts[0]
+    return first.startswith(".") or first == "Desktop"
+
+
+def _is_installer_leftover(path: Path) -> bool:
+    """MojoSetup's own bookkeeping inside the game's folder: the `.mojosetup` folder (its copy of the installer,
+    manifests and menu entries) and the `uninstall-<game>.sh` beside it that runs it. They exist to uninstall
+    and to add menu entries, which MOG does itself, so they are not part of the game. Everything else a GOG
+    install holds stays: `start.sh` reads `support/gog_com.shlib` and `gameinfo`."""
+    if ".mojosetup" in path.parts:
+        return True
+    return path.name.startswith("uninstall-") and path.suffix == ".sh" and (path.parent / ".mojosetup").is_dir()
+
+
+def _finalize_native_install(install_session_id: int, work_dir: Path) -> None:
+    """Take what a native installer wrote under its HOME as the install: the game's folder (below "GOG Games"
+    when that is where it all went) is moved up to the top of the cache, as for a Windows install, hashed and
+    listed. Raises when there is nothing, so the caller marks the session failed."""
+    home = work_dir / NATIVE_HOME
+    files = [
+        p
+        for p in sorted(home.rglob("*"))
+        if p.is_file() and not p.is_symlink() and not _is_user_noise(p.relative_to(home))
+    ]
+    if not files:
+        raise RuntimeError("Installer finished but wrote no files under its home folder (installed elsewhere?)")
+    top = {f.relative_to(home).parts[0] for f in files}
+    root = home / next(iter(top)) if len(top) == 1 and next(iter(top)) in KNOWN_VENDOR_DIR_NAMES else home
+    files = _relocate_under([f for f in files if not _is_installer_leftover(f)], root, work_dir)
+    for leftover in (home, work_dir / NATIVE_TMP):
+        shutil.rmtree(leftover, ignore_errors=True)  # its config, shortcuts and temporary extraction
+
+    def save_progress(hashed: int) -> None:
+        db_install_session_handler.update_session(install_session_id, {"bytes_written": hashed})
+
+    report = ThrottledProgress(save_progress)
+    entries = hash_files(files, root=work_dir, on_progress=report)
+    report.finish(manifest_total_bytes(entries))
+    write_manifest(work_dir, entries)
+    db_install_session_handler.update_session(
+        install_session_id,
+        {
+            "state": InstallSessionState.DONE,
+            "bytes_written": manifest_total_bytes(entries),
+            "bytes_total": manifest_total_bytes(entries),
+        },
+    )
 
 
 def _files_under(files: list[Path], root: Path) -> list[Path]:
@@ -906,7 +991,7 @@ def _wrap_for_sandbox(
     *,
     installer_abs: str,
     work_dir: str,
-    proton_prefix: str,
+    proton_prefix: str | None,
     display: str,
     proton_or_wine: str,
     extra_env: tuple[tuple[str, str], ...] = (),

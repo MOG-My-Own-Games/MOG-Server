@@ -19,7 +19,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from config import INSTALL_VNC_PORT_MAX, INSTALL_VNC_PORT_MIN
+from config import INSTALL_VNC_PORT_MAX, INSTALL_VNC_PORT_MIN, INSTALL_VNC_RESOLUTION
 from logger.formatter import highlight as hl
 from logger.logger import log
 
@@ -34,8 +34,8 @@ VNC_PASSWORD_BYTES = 18
 # dialog-sized windows, not full desktops, and a fixed server-side
 # resolution is simpler than resizing the real X server on the fly. noVNC
 # scales this visually to fit its container (see _build_public_url's
-# "resize=scale"), so the page itself still reads responsive.
-INSTALL_VNC_RESOLUTION = "800x600x24"
+# "resize=scale"), so the page itself still reads responsive. The size comes from config
+# (INSTALL_VNC_RESOLUTION, and INSTALL_NATIVE_VNC_RESOLUTION for a native installer).
 # Xvfb starts asynchronously; give its socket this long to appear before
 # giving up (x11vnc and the installer both need DISPLAY ready before they run).
 XVFB_READY_TIMEOUT = 5.0
@@ -189,8 +189,11 @@ def _build_public_url(web_port: int, password: str, token: str) -> str:
     )
 
 
-def start_vnc_session(session_id: int, novnc_web_root: str) -> VncSession:
-    """Start Xvfb + x11vnc + websockify for a session and return its handles."""
+def start_vnc_session(
+    session_id: int, novnc_web_root: str, resolution: str = INSTALL_VNC_RESOLUTION
+) -> VncSession:
+    """Start Xvfb + x11vnc + websockify for a session and return its handles. `resolution` is the screen
+    ("<width>x<height>x<depth>"); a native installer asks for a taller one than a Windows wizard needs."""
     web_port = _lease_free_port(INSTALL_VNC_PORT_MIN)
     vnc_port = _lease_free_port(max(INSTALL_VNC_PORT_MIN, web_port + 1))
     display = _display_number(web_port)
@@ -209,7 +212,7 @@ def start_vnc_session(session_id: int, novnc_web_root: str) -> VncSession:
                 display,
                 "-screen",
                 "0",
-                INSTALL_VNC_RESOLUTION,
+                resolution,
                 "-nolisten",
                 "tcp",
                 # Explicit, not assumed default: content that isn't

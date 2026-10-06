@@ -20,8 +20,9 @@ class SandboxSpec:
     installer_path: str
     # Absolute working directory the installer may write to (the session cache).
     work_dir: str
-    # Absolute Proton/Wine prefix directory (writable, per-session).
-    proton_prefix: str
+    # Absolute Proton/Wine prefix directory (writable, per-session). None for a native installer, which has
+    # no prefix.
+    proton_prefix: str | None
     # Display number for the virtual X server (e.g. ":99").
     display: str
     # Read-only paths the sandbox additionally needs (e.g. the Proton runtime).
@@ -129,13 +130,15 @@ def build_bwrap_command(
 
     # Writable, isolated per-session paths.
     args += ["--bind", spec.work_dir, spec.work_dir]
-    args += ["--bind", spec.proton_prefix, spec.proton_prefix]
+    if spec.proton_prefix is not None:
+        args += ["--bind", spec.proton_prefix, spec.proton_prefix]
     if spec.games_fallback_dir is not None:
         args += ["--bind", spec.games_fallback_dir, "/Games"]
 
     # Point Wine/Proton and X clients at the sandboxed prefix and virtual display.
     args += ["--setenv", "DISPLAY", spec.display]
-    args += ["--setenv", "WINEPREFIX", spec.proton_prefix]
+    if spec.proton_prefix is not None:
+        args += ["--setenv", "WINEPREFIX", spec.proton_prefix]
     for key, value in spec.extra_env:
         args += ["--setenv", key, value]
     args += ["--chdir", spec.work_dir]

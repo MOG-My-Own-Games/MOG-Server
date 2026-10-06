@@ -65,6 +65,25 @@ INSTALL_MAX_CONCURRENCY: Final[int] = max(
 
 INSTALL_TIMEOUT: Final[int] = safe_int(_get_env("INSTALL_TIMEOUT"), 3600)  # 1 hour
 
+# How often (seconds) the library folders are looked at for games added, removed or renamed on disk, which
+# triggers a scan. 0 turns the watching off.
+LIBRARY_WATCH_INTERVAL: Final[int] = max(0, safe_int(_get_env("LIBRARY_WATCH_INTERVAL"), 30))
+
+def _resolution(key: str, default: str) -> str:
+    """A screen size "<width>x<height>x<depth>" from the environment, or the default when it is not sound."""
+    value = (_get_env(key) or default).strip()
+    parts = value.split("x")
+    if len(parts) != 3 or not all(p.isdigit() for p in parts):
+        return default
+    width, height, depth = (int(p) for p in parts)
+    return value if 320 <= width <= 4096 and 240 <= height <= 4096 and depth in (16, 24, 32) else default
+
+
+# The installer display. Windows installers are dialog-sized; a native GOG installer (MojoSetup) draws a tall
+# window, which does not fit 800x600 and would leave its buttons off the screen.
+INSTALL_VNC_RESOLUTION: Final[str] = _resolution("INSTALL_VNC_RESOLUTION", "800x600x24")
+INSTALL_NATIVE_VNC_RESOLUTION: Final[str] = _resolution("INSTALL_NATIVE_VNC_RESOLUTION", "1024x1000x24")
+
 INSTALL_SANDBOX_ENABLED: Final[bool] = safe_str_to_bool(
     _get_env("INSTALL_SANDBOX_ENABLED") or "true"
 )

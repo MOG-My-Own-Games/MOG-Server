@@ -19,6 +19,8 @@ from handler.name_matching import best_match, query_variants
 from models.game import Game
 
 _BRACKETED = re.compile(r"[\[(\{][^\])}]*[\])}]")
+# A year in parentheses, "(1997)": kept as written, since it tells apart games that share a name (two Dooms).
+_YEAR_TAG = re.compile(r"\(\s*(19\d{2}|20[0-2]\d)\s*\)")
 _VERSION = re.compile(r"[\s_.-]+v?\d+(\.\d+)+\b.*$", re.IGNORECASE)
 # Release/packaging words that start the noise after the title; everything after one is dropped.
 _TAGS = re.compile(
@@ -26,11 +28,35 @@ _TAGS = re.compile(
     r"dvd\d*|x64|x86|win(32|64)|rip|cracked|incl|(build|update|patch|hotfix)[\s_.-]*v?\d+)\b.*$",
     re.IGNORECASE,
 )
-_ARCHIVE_EXT = re.compile(r"\.(exe|iso|zip|rar|7z|tar|gz)$", re.IGNORECASE)
+_ARCHIVE_EXT = re.compile(
+    r"\.(exe|iso|zip|rar|7z|tar|gz|sh|run|bin|msi|appimage|pkg|deb|dmg|cue|img|mdf|nrg|chd)$", re.IGNORECASE
+)
+# "setup_game_name_2.0_(12345).exe": the installer's own word in front of the title.
+_LEADING_SETUP = re.compile(r"^(setup|install(er)?)[\s_.-]+(?=\S)", re.IGNORECASE)
+# A piece of a version or build number left behind: "1", "0", "9a", "v2", "48364".
+_VERSION_PART = re.compile(r"^v?\d+[a-z]?$", re.IGNORECASE)
+# What marks such a trailing run as a version and not part of the title ("Cyberpunk 2077", "Jazz Jackrabbit 2"
+# keep their number): three parts or more ("1 0 9a"), or one that is a build id (five digits or more).
+_VERSION_RUN_LENGTH = 3
+_BUILD_ID_DIGITS = 5
 # A scene release group: the last hyphen-joined token, shaped like a tag rather than a word
 # (all caps, several capitals as in "TiNYiSO", or letters mixed with digits as in "razor1911").
 _SCENE_GROUP = re.compile(r"(?<=\S)-((?=[A-Za-z0-9]*([A-Z].*[A-Z]|\d))[A-Za-z0-9]{2,})$")
 _SPACED_GROUP = re.compile(r"\s+-\s+[A-Z0-9]{3,}$")
+
+
+def _drop_version_tail(name: str) -> str:
+    """The title without the version and build numbers a release name ends with ("lost ruins 1 0 9a 48364" is
+    "lost ruins"). A single trailing number stays: it is usually a sequel or a year in the title."""
+    words = name.split()
+    start = len(words)
+    while start > 1 and _VERSION_PART.match(words[start - 1]):
+        start -= 1
+    run = words[start:]
+    has_build_id = any(w.isdigit() and len(w) >= _BUILD_ID_DIGITS for w in run)
+    if run and (len(run) >= _VERSION_RUN_LENGTH or has_build_id):
+        return " ".join(words[:start])
+    return name
 
 
 def search_names(raw: str) -> list[str]:
@@ -40,18 +66,23 @@ def search_names(raw: str) -> list[str]:
     title; when one was removed, a second title keeps it as a word, in case the
     hyphen was part of the real name."""
     name = _ARCHIVE_EXT.sub("", raw)
-    name = _BRACKETED.sub(" ", name)
+    # Underscores read as spaces from the start: to the patterns below an underscore is part of a word, so
+    # "_goty_" or "_setup_" would not be seen as a tag.
+    scene = " " not in name.strip() and len(re.findall(r"[._]", name)) >= 1
+    name = _LEADING_SETUP.sub("", re.sub(r"_+", " ", name))
+    year = (_YEAR_TAG.findall(name) or [""])[0]
+    name = _BRACKETED.sub(" ", _YEAR_TAG.sub(" ", name))
     name = _VERSION.sub("", name)
     name = _TAGS.sub("", name)
-    scene = " " not in name.strip() and len(re.findall(r"[._]", name)) >= 1
-    name = re.sub(r"[_]+", " ", name)
     if " " not in name.strip() or scene:
         name = re.sub(r"[.]+", " ", name)
     name = re.sub(r"\s+", " ", name).strip()
     stripped = _SPACED_GROUP.sub("", _SCENE_GROUP.sub("", name)) if scene else _SPACED_GROUP.sub("", name)
-    titles = [stripped or raw]
+    titles = [_drop_version_tail(stripped) if stripped else raw]
     if name != stripped and name:
-        titles.append(re.sub(r"\s+", " ", name.replace("-", " ")).strip())
+        titles.append(_drop_version_tail(re.sub(r"\s+", " ", name.replace("-", " ")).strip()))
+    if year:  # after the version tail went, or it would take the year with it
+        titles = [title if f"({year})" in title else f"{title} ({year})" for title in titles]
     return titles
 
 

@@ -114,6 +114,67 @@ class TestSearchName:
     def test_plain_name_untouched(self):
         assert search_name("Some Game") == "Some Game"
 
+    def test_a_gog_linux_installer_name_is_cut_down_to_the_title(self):
+        assert search_name("lost_ruins_1_0_9a_48364.sh") == "lost ruins"
+        assert search_name("stardew_valley_1_5_6_54317.sh") == "stardew valley"
+        assert search_name("the_witcher_3_wild_hunt_goty_1_32_52_0_2023_04_14_48093.sh") == "the witcher 3 wild hunt"
+
+    def test_a_gog_windows_installer_name_loses_its_setup_word_and_build(self):
+        assert search_name("setup_jazz_jackrabbit_collection_2.0_csv2_patch_2_gus_(77533).exe") == "jazz jackrabbit collection"
+        assert search_name("setup_tyrian_2000_2.1.0.4.exe") == "tyrian 2000"
+
+    def test_the_other_installer_extensions_are_dropped(self):
+        for ext in (".sh", ".run", ".bin", ".msi", ".AppImage", ".iso"):
+            assert search_name(f"cool_game{ext}") == "cool game"
+
+    def test_a_number_that_belongs_to_the_title_stays(self):
+        assert search_name("Cyberpunk 2077") == "Cyberpunk 2077"
+        assert search_name("jazz_jackrabbit_2") == "jazz jackrabbit 2"
+        assert search_name("Doom 3 2004") == "Doom 3 2004"
+        assert search_name("half_life_2") == "half life 2"
+        assert search_name("Left 4 Dead 2") == "Left 4 Dead 2"
+
+    def test_a_long_run_of_version_parts_goes_even_without_a_build_id(self):
+        assert search_name("some_game_1_2_3") == "some game"
+        assert search_name("some_game_2_0") == "some game 2 0"  # two parts could be a sequel and a version
+
+    def test_a_build_id_alone_goes(self):
+        assert search_name("some_game_48364") == "some game"
+        assert search_name("some_game_2_48364") == "some game"
+
+    def test_the_name_is_never_emptied(self):
+        assert search_name("48364") == "48364"
+        assert search_name("setup.exe") == "setup"
+
+    def test_a_year_in_parentheses_is_kept_as_written(self):
+        assert search_name("Doom (1993)") == "Doom (1993)"
+        assert search_name("Doom (2016) [GOG]") == "Doom (2016)"
+        assert search_name("Half-Life 2 (2004).iso") == "Half-Life 2 (2004)"
+        assert search_name("Doom_(1993).exe") == "Doom (1993)"
+
+    def test_the_year_survives_a_version_run_that_is_cut(self):
+        assert search_name("lost_ruins_1_0_9a_(2019).sh") == "lost ruins (2019)"
+        assert search_name("Lost Ruins 1.0.9a (2019)") == "Lost Ruins (2019)"
+
+    def test_brackets_that_are_not_a_year_in_parentheses_still_go(self):
+        assert search_name("Game (1234)") == "Game"  # not a plausible year
+        assert search_name("Game (2077)") == "Game"  # nor is this
+        assert search_name("Game (77533)") == "Game"  # a build id
+        assert search_name("Game (12)") == "Game"
+        assert search_name("Game [1998]") == "Game"  # only parentheses mark a year
+        assert search_name("Game [v26.06.2021]") == "Game"
+        assert search_name("setup_game_name_2.0_(77533).exe") == "game name"
+
+    def test_a_year_already_in_the_title_is_not_added_twice(self):
+        assert search_name("Cyberpunk 2077 (2077)") == "Cyberpunk 2077"
+        assert search_name("Doom (1993) (1993)") == "Doom (1993)"
+
+    def test_a_year_comes_with_the_fallback_title_too(self):
+        assert search_names("Some Game (1999) - FLT") == ["Some Game (1999)", "Some Game FLT (1999)"]
+
+    def test_a_scene_name_with_a_version_run(self):
+        assert search_name("Lost.Ruins.1.0.9a.48364-GROUP") == "Lost Ruins"
+
 
 class TestRefreshGame:
     @patch("handler.scrape_handler.db_game_handler")

@@ -16,8 +16,11 @@
 #     Windows installers
 #   - tesseract-ocr + xdotool: the experimental auto mode reads installer
 #     dialogs and presses their buttons
-#   - p7zip-full: archive/disc-image listing and extraction (see
-#     backend/utils/archives.py)
+#   - GTK 2: GOG's Linux installers (.sh, MojoSetup) draw their window with it
+#   - 7-Zip: archive/disc-image listing and extraction (see backend/utils/archives.py).
+#     Debian's 7zip package is built without the unRAR code, so it lists a RAR but
+#     cannot unpack it ("Unsupported Method"): the official build goes ahead of it
+#     on PATH.
 
 ARG PYTHON_VERSION=3.12
 
@@ -56,7 +59,24 @@ RUN dpkg --add-architecture i386 && \
     mesa-vulkan-drivers \
     p7zip-full \
     libarchive-tools \
+    xz-utils \
+    libgtk2.0-0t64 \
+    gtk2-engines-pixbuf \
+    gtk2-engines-murrine \
     && rm -rf /var/lib/apt/lists/*
+
+# The official 7-Zip (it has the unRAR code Debian's lacks), checked against its known hash. Only the amd64
+# build is pinned; other architectures keep Debian's 7z, which cannot unpack RAR archives.
+ARG SEVENZIP_VERSION=2501
+ARG SEVENZIP_AMD64_SHA256=4ca3b7c6f2f67866b92622818b58233dc70367be2f36b498eb0bdeaaa44b53f4
+RUN if [ "$(dpkg --print-architecture)" = "amd64" ]; then \
+    curl -fsSL -o /tmp/7zip.tar.xz "https://www.7-zip.org/a/7z${SEVENZIP_VERSION}-linux-x64.tar.xz" && \
+    echo "${SEVENZIP_AMD64_SHA256}  /tmp/7zip.tar.xz" | sha256sum -c - && \
+    tar -xJf /tmp/7zip.tar.xz -C /tmp 7zz && \
+    install -m 755 /tmp/7zz /usr/local/bin/7z && \
+    rm -f /tmp/7zip.tar.xz /tmp/7zz; \
+    else echo "warning: no official 7-Zip pinned for $(dpkg --print-architecture); RAR archives cannot be unpacked"; \
+    fi
 
 # Xvfb (run as the unprivileged mog user, never root) refuses to start unless
 # /tmp/.X11-unix is owned by root with the sticky bit set.

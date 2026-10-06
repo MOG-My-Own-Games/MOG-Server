@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 from config import DEV_MODE, MOG_VERSION, RESOURCES_BASE_PATH
 from endpoints import devices, games, install, libraries, notifications, saves, settings, users
+from handler import library_watcher
 from logger.logger import log
 from startup import run_startup_tasks
 
@@ -17,8 +18,11 @@ FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     run_startup_tasks()
+    stop_watching = library_watcher.start()
     log.info("MOG Server started")
     yield
+    if stop_watching is not None:
+        stop_watching.set()
 
 
 app = FastAPI(title="MOG Server", version=MOG_VERSION, lifespan=lifespan)

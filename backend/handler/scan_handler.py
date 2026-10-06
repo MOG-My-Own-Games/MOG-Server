@@ -9,6 +9,7 @@ separately, not as part of scanning (see docs/TODO.md for auto-matching).
 from __future__ import annotations
 
 import os
+import threading
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -54,7 +55,16 @@ def only_addons(path: Path) -> bool:
     return True
 
 
+# A scan by hand and one the watcher starts must not run side by side: both add the games they find.
+_scan_lock = threading.Lock()
+
+
 def scan_library(library: Library) -> ScanResult:
+    with _scan_lock:
+        return _scan_library(library)
+
+
+def _scan_library(library: Library) -> ScanResult:
     root = Path(library.root_path)
     on_disk = {p.name for p in root.iterdir() if has_files(p)} if root.is_dir() else set()
 

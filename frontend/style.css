@@ -7,10 +7,10 @@
   --border: #2a2e38;
   --text: #e6e8ec;
   --muted: #8b909c;
-  --accent: #5b8def;
-  --accent-hover: #4878d6;
+  --accent: #2859f9;
+  --accent-hover: #1f47d1;
   /* The highlight color is always this gradient, never the flat --accent. */
-  --accent-gradient: linear-gradient(135deg, #7fa8ff, var(--accent) 55%, #3c64c4);
+  --accent-gradient: linear-gradient(90deg, #9e3bf7, var(--accent));
   --danger: #e2574c;
   --danger-hover: #c94439;
   --success: #3fb97a;
@@ -26,6 +26,27 @@
 }
 
 * { box-sizing: border-box; }
+
+/* Scrollbars, as in RomM (slim, round, a transparent track) but in our colors: the violet to blue gradient,
+   half see-through until hovered. The client's QSS (gui/widgets.py scrollbar_qss) draws the same.
+   Chromium and Safari take the ::-webkit-scrollbar rules; Firefox only knows the flat standard properties,
+   and Chromium would ignore the rules below if it saw those, hence the @supports. */
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background-image: linear-gradient(180deg, rgba(158, 59, 247, 0.55), rgba(40, 89, 249, 0.55));
+  background-clip: padding-box;
+  border: 2px solid transparent;
+  border-radius: 12px;
+  min-height: 32px;
+  min-width: 32px;
+}
+::-webkit-scrollbar-thumb:horizontal { background-image: linear-gradient(90deg, rgba(158, 59, 247, 0.55), rgba(40, 89, 249, 0.55)); }
+::-webkit-scrollbar-thumb:hover { background-image: linear-gradient(180deg, #9e3bf7, #2859f9); }
+::-webkit-scrollbar-thumb:horizontal:hover { background-image: linear-gradient(90deg, #9e3bf7, #2859f9); }
+@supports not selector(::-webkit-scrollbar) {
+  * { scrollbar-width: thin; scrollbar-color: rgba(100, 74, 248, 0.7) transparent; }
+}
 
 /* Any element-specific `display` rule below (flex, grid, ...) would otherwise
    beat the browser's own `[hidden] { display: none }` default whenever its
@@ -263,8 +284,9 @@ code {
 .game-card { cursor: pointer; }
 .game-card .cover {
   width: 100%;
-  aspect-ratio: 3 / 4;
+  aspect-ratio: 2 / 3;
   border-radius: var(--radius);
+  background: var(--bg-elevated);
   margin-bottom: 0.5em;
   display: flex;
   align-items: center;
@@ -336,7 +358,8 @@ code {
 }
 .saves-badge svg { top: 0.35rem; fill: none; stroke: #fff; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 .addons-badge svg { bottom: 0.35rem; fill: #fff; }
-.game-card .cover img { width: 100%; height: 100%; object-fit: cover; border-radius: var(--radius); }
+/* Shown whole by default; fitCover() (app.js) lets a cover that is nearly the box's shape fill it. */
+.game-card .cover img { width: 100%; height: 100%; object-fit: contain; border-radius: var(--radius); }
 /* A game with no cover yet still needs *some* visible footprint, just not
    a heavy box - a thin outline instead of a filled gray fill. */
 .game-card .cover.no-cover { border: 1px dashed var(--border); }
@@ -344,10 +367,10 @@ code {
 .game-card .name {
   font-weight: 500;
   font-size: 0.95em;
+  line-height: 1.3;
   text-align: center;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  padding: 0 0.2em;
 }
 
 /* Pages (game detail, settings) */
@@ -359,11 +382,49 @@ code {
 }
 .back-link:hover { color: var(--text); }
 
-.game-header { display: flex; gap: 1.5em; align-items: flex-start; margin-bottom: 1em; }
-.game-header h2 { margin: 0 0 0.2em; }
+.game-header {
+  position: relative;
+  display: flex;
+  gap: 1.75em;
+  align-items: flex-end;
+  margin-bottom: 1.25em;
+  padding: 2em 1.5em 1.5em;
+  min-height: 220px;
+}
+.game-header > * { position: relative; z-index: 1; }
+/* The artwork is not boxed: it fades into the page on every side, a shade on the left keeping the text readable. */
+.game-header .game-header-art {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background-image: linear-gradient(90deg, rgba(21, 23, 28, 0.88) 0%, rgba(21, 23, 28, 0.55) 45%, rgba(21, 23, 28, 0.05) 100%), var(--art, none);
+  background-size: cover;
+  background-position: center 25%;
+  opacity: 0;
+  transition: opacity 0.25s;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 12%, #000 88%, transparent 100%), linear-gradient(180deg, transparent 0%, #000 18%, #000 68%, transparent 100%);
+  mask-image: linear-gradient(90deg, transparent 0%, #000 12%, #000 88%, transparent 100%), linear-gradient(180deg, transparent 0%, #000 18%, #000 68%, transparent 100%);
+  -webkit-mask-composite: source-in;
+  mask-composite: intersect;
+}
+.game-header.has-art .game-header-art { opacity: 1; }
+.game-header-info { min-width: 0; }
+.game-title-row { display: flex; align-items: center; gap: 0.9em; margin-bottom: 0.3em; }
+.game-header h2 { margin: 0; }
+.game-icon { width: 52px; height: 52px; border-radius: 12px; object-fit: cover; flex-shrink: 0; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5); }
+.game-logo { display: block; max-width: min(100%, 440px); max-height: 120px; object-fit: contain; filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.65)); }
+/* The logo stands in for the title; the title stays for screen readers and when the logo is missing. */
+.game-header.has-logo h2 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.game-header.has-art .muted { color: #c3c8d2; text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
+.game-header.has-art h2 { text-shadow: 0 2px 10px rgba(0, 0, 0, 0.8); }
+@media (max-width: 700px) {
+  .game-header { flex-direction: column; align-items: flex-start; }
+}
 .game-header-cover {
-  width: 140px;
-  aspect-ratio: 3 / 4;
+  width: 160px;
+  aspect-ratio: 2 / 3;
+  background: var(--bg-elevated);
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.55);
   flex-shrink: 0;
   border-radius: var(--radius);
   display: flex;
@@ -371,7 +432,7 @@ code {
   justify-content: center;
   overflow: hidden;
 }
-.game-header-cover img { width: 100%; height: 100%; object-fit: cover; border-radius: var(--radius); }
+.game-header-cover img { width: 100%; height: 100%; object-fit: contain; border-radius: var(--radius); }
 .cover-placeholder {
   font-size: 2.5em;
   color: var(--muted);
@@ -445,6 +506,51 @@ a.chip { color: inherit; text-decoration: none; }
 
 .screenshot-row { display: flex; gap: 0.5em; overflow-x: auto; margin: 1em 0; }
 .screenshot-row img { height: 220px; border-radius: var(--radius-sm); flex-shrink: 0; cursor: zoom-in; }
+.video-tile {
+  position: relative;
+  flex-shrink: 0;
+  height: 220px;
+  aspect-ratio: 16 / 9;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: #000;
+  cursor: pointer;
+}
+.video-tile img { width: 100%; height: 100%; object-fit: cover; cursor: pointer; transition: transform 0.2s, opacity 0.2s; opacity: 0.85; }
+.video-tile:hover img { transform: scale(1.04); opacity: 1; }
+.video-play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 56px;
+  height: 56px;
+  margin: -28px 0 0 -28px;
+  border-radius: 50%;
+  background: var(--accent-gradient);
+  box-shadow: 0 2px 14px rgba(0, 0, 0, 0.6);
+}
+.video-play::after {
+  content: "";
+  position: absolute;
+  top: 17px;
+  left: 22px;
+  border-left: 18px solid #fff;
+  border-top: 11px solid transparent;
+  border-bottom: 11px solid transparent;
+}
+.video-label {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  padding: 0.15em 0.6em;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  font-size: 0.8em;
+  font-weight: 600;
+}
 .gallery { position: fixed; inset: 0; z-index: 1000; background: rgba(0, 0, 0, 0.88); display: flex; align-items: center; justify-content: center; }
 .gallery[hidden] { display: none; }
 .gallery img { max-width: 90vw; max-height: 88vh; border-radius: var(--radius-sm); }
@@ -453,6 +559,11 @@ a.chip { color: inherit; text-decoration: none; }
 .gallery-next { right: 1rem; top: 50%; }
 .gallery-close { right: 1rem; top: 1rem; }
 .gallery-count { position: absolute; bottom: 1rem; color: #fff; }
+.gallery-caption { position: absolute; top: 1.4rem; left: 1.2rem; max-width: calc(100vw - 8rem); color: #cfd3db; font-size: 0.95em; }
+.gallery-video { width: min(88vw, 1280px); aspect-ratio: 16 / 9; max-height: 84vh; background: #000; border-radius: var(--radius-sm); overflow: hidden; }
+.gallery-video[hidden] { display: none; }
+.gallery-video iframe { width: 100%; height: 100%; border: 0; }
+.gallery img[hidden] { display: none; }
 
 .relation-group { margin-top: 0.75em; }
 .relation-grid { display: flex; flex-wrap: wrap; gap: 0.75em; margin-top: 0.4em; }
@@ -483,6 +594,8 @@ a.chip { color: inherit; text-decoration: none; }
   border-radius: var(--radius);
   background: black;
 }
+/* A native installer's display is tall (see INSTALL_NATIVE_VNC_RESOLUTION): give it the height of the window. */
+.vnc-frame.vnc-tall { height: clamp(520px, 80vh, 900px); }
 
 .match-results { list-style: none; padding: 0; max-height: 300px; overflow-y: auto; }
 .match-results li {
@@ -594,7 +707,7 @@ a.chip { color: inherit; text-decoration: none; }
 .subtab-btn.active { background: var(--bg-elevated); color: var(--text); border-left-color: var(--accent); }
 .subtab-count { font-size: 0.8em; color: var(--muted); }
 @media (max-width: 900px) { .files-layout { flex-direction: column; } .subtab-list { flex-basis: auto; width: 100%; } }
-.files-content .card { overflow-x: auto; }
+.files-content .card { overflow-x: auto; max-width: none; }
 .files-content .data-table { max-width: none; }
 .files-content .data-table td:first-child { word-break: break-all; }
 .files-content .data-table td:not(:first-child) { white-space: nowrap; }
@@ -616,12 +729,19 @@ a.chip { color: inherit; text-decoration: none; }
   text-align: center;
 }
 .menu-count {
-  margin-left: 0.4em;
-  padding: 0 0.5em;
+  display: inline-block;
+  margin-left: 0.5em;
+  min-width: 1.6em;
+  height: 1.6em;
+  padding: 0 0.4em;
   border-radius: 999px;
   background: var(--danger);
   color: #fff;
-  font-size: 0.8em;
+  font-size: 0.75em;
+  font-weight: 700;
+  line-height: 1.6em;
+  text-align: center;
+  vertical-align: middle;
 }
 
 .notification-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.6em; }
@@ -692,9 +812,21 @@ a.chip { color: inherit; text-decoration: none; }
 .saves-device { margin-top: var(--space-lg); }
 .saves-device .main-header { margin-bottom: 0; }
 .saves-device h4 { margin: 0; display: flex; align-items: center; gap: var(--space-sm); }
-.saves-device details summary { cursor: pointer; color: var(--muted); }
-.saves-files { margin: var(--space-xs) 0 0; padding-left: 1.2em; max-height: 14em; overflow-y: auto; font-size: 0.85em; white-space: normal; word-break: break-all; }
-.saves-files .muted { list-style: none; margin-left: -1.2em; }
+.saves-device .data-table { max-width: none; }
+.saves-device .data-table td { vertical-align: middle; white-space: nowrap; }
+.saves-device .data-table td:first-child { white-space: normal; word-break: normal; }
+.saves-device .data-table td.saves-actions { text-align: right; }
+.saves-device .data-table td.saves-actions button + button { margin-left: var(--space-xs); }
+.link-button { background: none; border: 0; padding: 0; color: var(--muted); cursor: pointer; font: inherit; display: inline-flex; align-items: center; gap: 0.5em; }
+.link-button:hover { color: var(--text); background: none; }
+.link-button .caret { width: 0; height: 0; border-left: 5px solid currentColor; border-top: 4px solid transparent; border-bottom: 4px solid transparent; transition: transform 0.12s; }
+.link-button[aria-expanded="true"] .caret { transform: rotate(90deg); }
+.saves-device .data-table tr.saves-files-row td { padding: 0 0.6em 0.8em; white-space: normal; border-bottom: 1px solid var(--border); }
+.saves-files-row[hidden] { display: none; }
+.saves-files { margin: 0; padding: 0.4em 0.8em; list-style: none; max-height: 16em; overflow-y: auto; font-size: 0.85em; background: var(--bg-elevated, rgba(255, 255, 255, 0.03)); border: 1px solid var(--border); border-radius: 6px; }
+.saves-files li { display: flex; justify-content: space-between; gap: var(--space-md); padding: 0.15em 0; }
+.saves-files .saves-path { min-width: 0; overflow-wrap: anywhere; }
+.saves-files .saves-size { flex: none; color: var(--muted); }
 #saves-upload-device { max-width: 14em; }
 .device-name-input { width: 12em; }
 
@@ -707,3 +839,13 @@ a.chip { color: inherit; text-decoration: none; }
 .saves-status { margin: 0.4em 0 0.8em; min-height: 1.3em; font-size: 0.95em; color: var(--muted); }
 .saves-status.success { color: var(--success); }
 .saves-status.error { color: var(--danger); font-weight: 600; }
+
+/* Install with the MOG client */
+.client-panel { width: min(560px, 94vw); }
+.client-release { margin: 1em 0; padding: 0.8em 1em; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.client-release p { margin: 0.4em 0; }
+.client-release a:not(.button-link) { color: #9db6ff; }
+.client-release a:not(.button-link):hover { color: #fff; }
+.client-panel .modal-footer { position: static; gap: var(--space-sm); padding-top: var(--space-md); }
+.button-secondary { background: var(--bg-elevated-2); border: 1px solid var(--border); }
+.button-secondary:hover { filter: brightness(1.2); }

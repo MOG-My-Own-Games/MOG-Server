@@ -152,7 +152,7 @@ function renderNotificationCounts() {
   badge.textContent = unread > 99 ? "99+" : String(unread);
   badge.hidden = unread === 0;
   const menuCount = document.getElementById("menu-notif-count");
-  menuCount.textContent = String(unread);
+  menuCount.textContent = unread > 99 ? "99+" : String(unread);
   menuCount.hidden = unread === 0;
 }
 
@@ -1286,12 +1286,14 @@ async function openGamePage(id) {
     coverPlaceholder.hidden = false;
   }
 
+  renderHeaderArt(game);
   renderVersions(game);
   renderOverview(game);
   loadGameFiles(game.id);
   loadSaves(game.id);
 
   document.getElementById("scrape-status").textContent = "";
+  document.getElementById("client-install-status").textContent = "";
   document.getElementById("igdb-results").innerHTML = "";
   document.getElementById("sgdb-results").innerHTML = "";
   document.getElementById("edit-metadata-form").hidden = true;
@@ -1356,9 +1358,11 @@ function renderOverview(game) {
   const meta = game.igdb_metadata || {};
 
   const yearEl = document.getElementById("game-year");
-  const year = meta.first_release_date ? new Date(meta.first_release_date * 1000).getUTCFullYear() : null;
-  yearEl.textContent = year ? `Released ${year}` : "";
-  yearEl.hidden = !year;
+  const released = meta.first_release_date
+    ? new Date(meta.first_release_date * 1000).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" })
+    : null;
+  yearEl.textContent = released ? `Released ${released}` : "";
+  yearEl.hidden = !released;
 
   document.getElementById("game-summary").textContent = meta.summary || game.summary || meta.storyline || "";
 
@@ -1400,9 +1404,18 @@ function renderOverview(game) {
     .map((s, i) => `<img src="${escapeHtml(s.url)}" loading="lazy" data-index="${i}" />`)
     .join("");
   shotsEl.onclick = (e) => {
-    const idx = e.target.dataset?.index;
-    if (idx !== undefined) openGallery((meta.screenshots || []).map((s) => s.url), Number(idx));
+    const target = e.target.closest?.(".video-tile, img[data-index]");
+    if (!target) return;
+    // The videos and the screenshots are one gallery, in the order they sit in the row.
+    const entries = Array.from(shotsEl.children).filter((el) => el.matches(".video-tile, img[data-index]"));
+    const items = entries.map((el) =>
+      el.matches(".video-tile")
+        ? { type: "video", id: el.dataset.video, title: el.dataset.title, label: el.dataset.label }
+        : { type: "image", url: (meta.screenshots || [])[Number(el.dataset.index)].url }
+    );
+    openGallery(items, entries.indexOf(target));
   };
+  loadVideos(game, shotsEl);
 
   const relEl = document.getElementById("game-relations");
   const sections = [
@@ -1418,46 +1431,126 @@ function renderOverview(game) {
 
   const hasAnything =
     (meta.summary || game.summary || meta.storyline) ||
-    year ||
+    released ||
     (meta.genres || []).length ||
     (meta.screenshots || []).length ||
     (meta.age_ratings || []).length;
   document.getElementById("overview-empty").hidden = !!hasAnything;
 }
 
-// --- Screenshot gallery ---
+// --- Covers: shown whole, filling the box only when they are about its shape ---
 
-let galleryUrls = [];
-let galleryIndex = 0;
+const COVER_FILL_RANGE = [0.62, 0.72]; // width / height; the boxes are 2:3 (0.667), SteamGridDB's own shape
 
-function showGallery() {
-  document.getElementById("gallery-img").src = galleryUrls[galleryIndex];
-  document.getElementById("gallery-count").textContent = `${galleryIndex + 1} / ${galleryUrls.length}`;
+function fitCover(img) {
+  if (!img.naturalWidth || !img.naturalHeight) return;
+  const ratio = img.naturalWidth / img.naturalHeight;
+  img.style.objectFit = ratio >= COVER_FILL_RANGE[0] && ratio <= COVER_FILL_RANGE[1] ? "cover" : "contain";
 }
 
-function openGallery(urls, index) {
-  galleryUrls = urls.map((u) => u.replace("t_screenshot_big", "t_1080p"));
+// "load" does not bubble, so one listener in the capture phase sees every cover as it arrives.
+document.addEventListener(
+  "load",
+  (e) => {
+    if (e.target.matches && e.target.matches(".game-card .cover img, .game-header-cover img")) fitCover(e.target);
+  },
+  true
+);
+
+// --- Videos: the intro, then the gameplay, ahead of the screenshots ---
+
+const VIDEO_LABELS = { intro: "Intro", gameplay: "Gameplay" };
+
+// The server gives IGDB's videos, or finds them on YouTube; the tiles go in front of the screenshots, and a
+// page left for another game meanwhile ignores the answer.
+async function loadVideos(game, row) {
+  row.querySelectorAll(".video-tile").forEach((el) => el.remove());
+  let videos = [];
+  try {
+    videos = (await api(`/api/games/${game.id}/videos`)).videos || [];
+  } catch (_) {
+    return; // no videos is not an error worth showing
+  }
+  if (!activeGame || activeGame.id !== game.id) return;
+  row.querySelectorAll(".video-tile").forEach((el) => el.remove());
+  const tiles = videos.map((v) => {
+    const tile = document.createElement("button");
+    tile.type = "button";
+    tile.className = "video-tile";
+    tile.dataset.video = v.video_id;
+    tile.dataset.label = VIDEO_LABELS[v.kind] || "Video";
+    tile.dataset.title = v.title || tile.dataset.label;
+    tile.title = `${VIDEO_LABELS[v.kind] || "Video"}: ${tile.dataset.title}`;
+    tile.innerHTML =
+      `<img src="https://i.ytimg.com/vi/${encodeURIComponent(v.video_id)}/hqdefault.jpg" loading="lazy" alt="" />` +
+      `<span class="video-play" aria-hidden="true"></span>` +
+      `<span class="video-label">${escapeHtml(VIDEO_LABELS[v.kind] || "Video")}</span>`;
+    return tile;
+  });
+  row.prepend(...tiles);
+  const hasAnything = document.getElementById("overview-empty");
+  if (tiles.length) hasAnything.hidden = true;
+}
+
+// --- Screenshot gallery ---
+
+let galleryItems = []; // { type: "image", url } or { type: "video", id, title, label }
+let galleryIndex = 0;
+
+// A video's player is only built when it comes up, so a page of games loads nothing from YouTube, and
+// replacing it is what stops the one that was playing.
+function showGallery() {
+  const item = galleryItems[galleryIndex];
+  const img = document.getElementById("gallery-img");
+  const slot = document.getElementById("gallery-video");
+  slot.replaceChildren();
+  if (item.type === "video") {
+    img.hidden = true;
+    img.removeAttribute("src");
+    const frame = document.createElement("iframe");
+    frame.src = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(item.id)}?autoplay=1&rel=0`;
+    frame.allow = "autoplay; encrypted-media; picture-in-picture; fullscreen";
+    frame.allowFullscreen = true;
+    frame.title = item.title || "Video";
+    slot.append(frame);
+    slot.hidden = false;
+  } else {
+    slot.hidden = true;
+    img.hidden = false;
+    img.src = item.url.replace("t_screenshot_big", "t_1080p");
+  }
+  document.getElementById("gallery-caption").textContent = item.type === "video" ? `${item.label}: ${item.title}` : "";
+  document.getElementById("gallery-count").textContent = `${galleryIndex + 1} / ${galleryItems.length}`;
+}
+
+function openGallery(items, index) {
+  galleryItems = items;
   galleryIndex = index;
   showGallery();
   document.getElementById("gallery").hidden = false;
 }
 
+function closeGallery() {
+  document.getElementById("gallery-video").replaceChildren();
+  document.getElementById("gallery").hidden = true;
+}
+
 function stepGallery(delta) {
-  galleryIndex = (galleryIndex + delta + galleryUrls.length) % galleryUrls.length;
+  galleryIndex = (galleryIndex + delta + galleryItems.length) % galleryItems.length;
   showGallery();
 }
 
 document.getElementById("gallery-prev").addEventListener("click", () => stepGallery(-1));
 document.getElementById("gallery-next").addEventListener("click", () => stepGallery(1));
-document.getElementById("gallery-close").addEventListener("click", () => (document.getElementById("gallery").hidden = true));
+document.getElementById("gallery-close").addEventListener("click", closeGallery);
 document.getElementById("gallery").addEventListener("click", (e) => {
-  if (e.target.id === "gallery") e.target.hidden = true;
+  if (e.target.id === "gallery") closeGallery();
 });
 document.addEventListener("keydown", (e) => {
   if (document.getElementById("gallery").hidden) return;
   if (e.key === "ArrowLeft") stepGallery(-1);
   else if (e.key === "ArrowRight") stepGallery(1);
-  else if (e.key === "Escape") document.getElementById("gallery").hidden = true;
+  else if (e.key === "Escape") closeGallery();
 });
 
 // --- Metadata (IGDB / SteamGridDB) ---
@@ -1471,6 +1564,35 @@ const MEDIA_KINDS = [
   ["logo", "Title (logo)", "logo"],
   ["icon", "Icon", "icon"],
 ];
+
+// The game's artwork around its header: the hero (else the banner) behind it, the logo in place of the
+// title text and the icon beside it. Each is optional, and one that fails to load falls back quietly.
+function renderHeaderArt(game) {
+  const media = game.media || {};
+  const url = (kind) => (media[kind] || {}).url || null;
+  const header = document.getElementById("game-header");
+  const art = document.getElementById("game-header-art");
+  const background = url("hero") || url("banner");
+  if (background) art.style.setProperty("--art", `url("${background.replace(/"/g, "%22")}")`);
+  else art.style.removeProperty("--art");
+  header.classList.toggle("has-art", Boolean(background));
+
+  const show = (id, src, onBroken) => {
+    const img = document.getElementById(id);
+    img.onerror = () => {
+      img.hidden = true;
+      if (onBroken) onBroken();
+    };
+    img.hidden = !src;
+    if (src) img.src = src;
+    else img.removeAttribute("src");
+    return img;
+  };
+  const logo = show("game-logo", url("logo"), () => header.classList.remove("has-logo"));
+  logo.alt = game.name;
+  header.classList.toggle("has-logo", Boolean(url("logo")));
+  show("game-icon", url("icon"));
+}
 
 function showCover(game) {
   const coverImg = document.getElementById("game-cover-img");
@@ -1502,6 +1624,7 @@ function renderMediaChoices(data, game) {
         activeGame = { ...activeGame, media: updated.media, cover_path: updated.cover_path };
         row.querySelectorAll(".media-choice").forEach((el) => el.classList.toggle("selected", el === tile));
         if (kind === "cover") showCover(updated);
+        renderHeaderArt(activeGame);
       } catch (err) {
         document.getElementById("scrape-modal-status").textContent = `Could not save: ${err.message}`;
       }
@@ -1765,9 +1888,232 @@ async function loadProtonBuilds() {
   }
 }
 
+// --- Install with the MOG client ---
+
+const CLIENT_REPO = "MOG-My-Own-Games/MOG-Client";
+const CLIENT_RELEASES_URL = `https://github.com/${CLIENT_REPO}/releases`;
+const CLIENT_ANSWER_WAIT_MS = 2500;
+let clientRelease = null; // the latest release, once looked up
+
+function clientLink(gameId) {
+  return `mog://install/${gameId}?server=${encodeURIComponent(location.origin)}`;
+}
+
+// A page cannot ask whether a program handles a link. When one does, opening it takes the focus from the page
+// (or shows a prompt that does), so the page losing it within a moment is the answer. Resolves true then, and
+// false when nothing happened. It has to be called from the click itself: browsers only open programs from one.
+function openClient(url) {
+  return new Promise((resolve) => {
+    const frame = document.createElement("iframe"); // a frame keeps an unhandled link from replacing this page
+    let timer = null;
+    const finish = (answered) => {
+      clearTimeout(timer);
+      window.removeEventListener("blur", onLeave);
+      window.removeEventListener("pagehide", onLeave);
+      document.removeEventListener("visibilitychange", onHidden);
+      setTimeout(() => frame.remove(), 1000);
+      resolve(answered);
+    };
+    const onLeave = () => finish(true);
+    const onHidden = () => {
+      if (document.hidden) finish(true);
+    };
+    window.addEventListener("blur", onLeave);
+    window.addEventListener("pagehide", onLeave);
+    document.addEventListener("visibilitychange", onHidden);
+    timer = setTimeout(() => finish(false), CLIENT_ANSWER_WAIT_MS);
+    frame.hidden = true;
+    frame.src = url;
+    document.body.appendChild(frame);
+  });
+}
+
+// The installer starts on the server meanwhile, without leaving the page. The server returns the running one
+// if there is one, so the client asking for the same install finds it.
+async function startInstallInBackground(game) {
+  // A game that is an archive with no installer needs a decision, and the client asks it better: the server
+  // starts nothing for it here.
+  const archive = await archiveWithoutInstaller(game.id, null);
+  if (archive) return { askedByClient: archive.file_name || archive.path };
+  await api(`/api/games/${game.id}/install`, { method: "POST", body: JSON.stringify({}) });
+  return {};
+}
+
+async function installWithClient() {
+  if (!activeGame) return;
+  const game = activeGame;
+  const status = document.getElementById("client-install-status");
+  status.textContent = "Opening the MOG client...";
+  const opened = openClient(clientLink(game.id));
+  let serverError = null;
+  let outcome = {};
+  const started = startInstallInBackground(game)
+    .then((result) => {
+      outcome = result;
+    })
+    .catch((err) => {
+      serverError = err.message;
+    });
+  const answered = await opened;
+  await started;
+  const server = serverError
+    ? ` The server could not start the installer: ${serverError}`
+    : outcome.askedByClient
+      ? ` ${outcome.askedByClient} has no installer in it, so MOG will ask whether to extract it as it is.`
+      : " The installer is running on the server.";
+  if (answered) {
+    status.textContent = `MOG is installing ${game.name}.${server}`;
+  } else {
+    status.textContent = `The MOG client did not answer.${server}`;
+    showClientModal(serverError || outcome.askedByClient ? "" : "The installer is already running on the server and will wait for the client.");
+  }
+}
+
+function formatClientSize(bytes) {
+  return bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MiB` : `${Math.max(1, Math.round(bytes / 1024))} KiB`;
+}
+
+// The release's file for this computer first, then the rest; macOS has no build.
+function renderClientRelease(release) {
+  const platform = /Windows/i.test(navigator.userAgent) ? "windows" : /Linux|X11/i.test(navigator.userAgent) ? "linux" : null;
+  const matches = { windows: /\.exe$/i, linux: /\.AppImage$/i };
+  const assets = (release.assets || []).filter((a) => !/^SHA256SUMS/i.test(a.name));
+  const mine = platform ? assets.find((a) => matches[platform].test(a.name)) : null;
+  const when = release.published_at
+    ? new Date(release.published_at).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })
+    : "";
+  const label = { windows: "Windows (.exe)", linux: "Linux (.AppImage)" };
+  const lines = [`<p><strong>${escapeHtml(release.name || release.tag_name)}</strong>${when ? ` <span class="muted">released ${when}</span>` : ""}</p>`];
+  if (mine) {
+    lines.push(
+      `<p><a class="button-link" href="${escapeHtml(mine.browser_download_url)}">Download for ${label[platform]}</a> ` +
+        `<span class="muted small">${formatClientSize(mine.size)}</span></p>`
+    );
+    lines.push(
+      platform === "linux"
+        ? '<p class="muted small">Make the file executable and run it once: it sets itself up to open links from this page.</p>'
+        : '<p class="muted small">Run it once: it sets itself up to open links from this page.</p>'
+    );
+  } else {
+    lines.push(`<p class="muted">There is no build for this system in the release.</p>`);
+  }
+  const others = assets.filter((a) => a !== mine);
+  if (others.length) {
+    lines.push(
+      `<p class="muted small">Other downloads: ${others
+        .map((a) => `<a href="${escapeHtml(a.browser_download_url)}">${escapeHtml(a.name)}</a>`)
+        .join(", ")}</p>`
+    );
+  }
+  lines.push(`<p class="muted small"><a href="${escapeHtml(release.html_url || CLIENT_RELEASES_URL)}" target="_blank" rel="noopener">Release notes and checksums</a></p>`);
+  return lines.join("");
+}
+
+async function loadClientRelease() {
+  const box = document.getElementById("client-release");
+  const allReleases = `<a href="${CLIENT_RELEASES_URL}" target="_blank" rel="noopener">all releases</a>`;
+  if (clientRelease) {
+    box.innerHTML = renderClientRelease(clientRelease);
+    return;
+  }
+  box.textContent = "Looking up the latest release...";
+  try {
+    const resp = await fetch(`https://api.github.com/repos/${CLIENT_REPO}/releases/latest`, {
+      headers: { Accept: "application/vnd.github+json" },
+    });
+    if (resp.status === 404) {
+      box.innerHTML = `<p class="muted">No release has been published yet. See ${allReleases}.</p>`;
+      return;
+    }
+    if (!resp.ok) throw new Error(`GitHub answered ${resp.status}`);
+    clientRelease = await resp.json();
+    box.innerHTML = renderClientRelease(clientRelease);
+  } catch (err) {
+    box.innerHTML = `<p class="muted">Could not look up the latest release (${escapeHtml(err.message)}). See ${allReleases}.</p>`;
+  }
+}
+
+function showClientModal(note) {
+  const noteEl = document.getElementById("client-modal-note");
+  noteEl.textContent = note || "";
+  noteEl.hidden = !note;
+  document.getElementById("client-modal-status").textContent = "";
+  document.getElementById("client-modal").hidden = false;
+  loadClientRelease();
+}
+
+function closeClientModal() {
+  document.getElementById("client-modal").hidden = true;
+}
+
+document.getElementById("client-install-btn").addEventListener("click", installWithClient);
+document.getElementById("client-modal-close").addEventListener("click", closeClientModal);
+document.getElementById("client-modal").addEventListener("click", (e) => {
+  if (e.target.id === "client-modal") closeClientModal();
+});
+document.getElementById("client-modal-retry").addEventListener("click", async () => {
+  if (!activeGame) return;
+  const status = document.getElementById("client-modal-status");
+  status.textContent = "Opening the MOG client...";
+  if (await openClient(clientLink(activeGame.id))) {
+    closeClientModal();
+    document.getElementById("client-install-status").textContent = `MOG is installing ${activeGame.name}.`;
+  } else {
+    status.textContent = "Still no answer. Install the client first, then try again.";
+  }
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !document.getElementById("client-modal").hidden) closeClientModal();
+});
+
 // --- Install flow ---
 
 const ARCHIVE_SOURCE_KINDS = new Set(["disc image", "archive"]);
+
+// An archive that has no installer inside it (most likely a game that needs none) can be extracted as it is
+// and taken as the install. The server says so from the archive's listing; null when it is not that case or
+// the lookup fails, which never stops an install.
+async function archiveWithoutInstaller(gameId, candidate) {
+  try {
+    let pick = candidate;
+    if (!pick) {
+      const found = await api(`/api/games/${gameId}/install/candidates`);
+      pick = (found.candidates || []).find((c) => (c.category || "game") === "game");
+    }
+    if (!pick || !ARCHIVE_SOURCE_KINDS.has(pick.kind)) return null;
+    const inside = await api(`/api/games/${gameId}/install/candidates?source=${encodeURIComponent(pick.path)}`);
+    return inside.extract_suggested ? pick : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+// Resolves "extract", "install" or null (cancelled).
+function askExtractAsIs(pick) {
+  return new Promise((resolve) => {
+    const modal = document.getElementById("extract-modal");
+    document.getElementById("extract-modal-text").textContent =
+      `No installer was found in ${pick.file_name || pick.path}: it looks like a game that needs none. ` +
+      "Do you want to extract its contents and use them as they are?";
+    const finish = (answer) => {
+      modal.hidden = true;
+      modal.onclick = null;
+      document.removeEventListener("keydown", onKey);
+      resolve(answer);
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") finish(null);
+    };
+    document.getElementById("extract-modal-extract").onclick = () => finish("extract");
+    document.getElementById("extract-modal-install").onclick = () => finish("install");
+    document.getElementById("extract-modal-cancel").onclick = () => finish(null);
+    modal.onclick = (e) => {
+      if (e.target === modal) finish(null);
+    };
+    document.addEventListener("keydown", onKey);
+    modal.hidden = false;
+  });
+}
 
 async function startInstall(candidate) {
   const body = {
@@ -1784,6 +2130,13 @@ async function startInstall(candidate) {
     } else {
       body.installer_path = candidate.path;
     }
+  }
+
+  const archive = await archiveWithoutInstaller(activeGame.id, candidate);
+  if (archive) {
+    const answer = await askExtractAsIs(archive);
+    if (answer === null) return;
+    if (answer === "extract") body.extract_only = true;
   }
 
   const session = await api(`/api/games/${activeGame.id}/install`, { method: "POST", body: JSON.stringify(body) });
@@ -1858,8 +2211,15 @@ function renderInstallState(session) {
   const statusEl = document.getElementById("install-status");
   statusEl.hidden = false;
   document.getElementById("install-state").textContent = session.state;
-  document.getElementById("install-detail").textContent =
-    session.phase_detail || (session.state === "installing" ? "Installer is running, interact with it in the display" : "");
+  const extracting = session.extract_only && session.phase === "extracting";
+  document.getElementById("install-detail").textContent = extracting
+    ? `Extracting ${session.phase_detail || "the archive"} as it is`
+    : session.phase_detail ||
+      (session.state === "installing"
+        ? session.extract_only
+          ? "Extracting"
+          : "Installer is running, interact with it in the display"
+        : "");
   renderAutoIndicator(session);
   document.getElementById("install-error").textContent = session.error || "";
 
@@ -1872,6 +2232,7 @@ function renderInstallState(session) {
 
   const vncContainer = document.getElementById("vnc-container");
   const vncFrame = document.getElementById("vnc-frame");
+  vncFrame.classList.toggle("vnc-tall", /\.(sh|run)$/i.test(session.installer_path || ""));
   if (session.vnc_url) {
     vncContainer.hidden = false;
     document.getElementById("vnc-placeholder").hidden = true;
@@ -1885,7 +2246,11 @@ function renderInstallState(session) {
     }
   } else {
     vncContainer.hidden = true;
-    document.getElementById("vnc-placeholder").hidden = false;
+    const placeholder = document.getElementById("vnc-placeholder");
+    placeholder.hidden = false;
+    placeholder.textContent = session.extract_only
+      ? "Nothing is run: the archive is extracted as it is."
+      : "Starts automatically once the installer is running.";
     vncFrame.removeAttribute("src");
     delete vncFrame.dataset.src;
   }
@@ -2101,16 +2466,18 @@ function renderSavesPanel() {
           <td>${escapeHtml(fmtWhen(v.created_at))}</td>
           <td><span class="chip chip-tag">${escapeHtml(v.trigger)}</span></td>
           <td>
-            <details data-version="${v.id}">
-              <summary>${v.file_count} file${v.file_count === 1 ? "" : "s"}</summary>
-              <ul class="saves-files"><li class="muted">Loading...</li></ul>
-            </details>
+            <button type="button" class="link-button" data-action="files" data-version="${v.id}" aria-expanded="false">
+              <span class="caret" aria-hidden="true"></span>${v.file_count} file${v.file_count === 1 ? "" : "s"}
+            </button>
           </td>
           <td>${fmtBytes(v.size_bytes)}</td>
-          <td>
+          <td class="saves-actions">
             <button type="button" data-action="download" data-version="${v.id}">Download</button>
             <button type="button" class="danger" data-action="delete" data-version="${v.id}">Delete</button>
           </td>
+        </tr>
+        <tr class="saves-files-row" data-files-for="${v.id}" hidden>
+          <td colspan="5"><ul class="saves-files"><li class="muted">Loading...</li></ul></td>
         </tr>`
         )
         .join("");
@@ -2152,6 +2519,8 @@ document.getElementById("saves-devices").addEventListener("click", async (e) => 
   try {
     if (button.dataset.action === "download") {
       await downloadWithAuth(`/api/saves/${id}/download`, "save.zip");
+    } else if (button.dataset.action === "files") {
+      await toggleSaveFiles(button);
     } else if (button.dataset.action === "delete") {
       if (!confirm("Delete this saved version from the server?")) return;
       await api(`/api/saves/${id}`, { method: "DELETE" });
@@ -2163,28 +2532,27 @@ document.getElementById("saves-devices").addEventListener("click", async (e) => 
   }
 });
 
-// The file list of a version is fetched the first time it is opened ("toggle" does not bubble).
-document.getElementById("saves-devices").addEventListener(
-  "toggle",
-  async (e) => {
-    const details = e.target;
-    if (!details.open || details.dataset.loaded || !details.dataset.version) return;
-    details.dataset.loaded = "1";
-    const list = details.querySelector(".saves-files");
-    try {
-      const version = await api(`/api/saves/${details.dataset.version}`);
-      const more = version.file_count - version.manifest.length;
-      list.innerHTML =
-        version.manifest
-          .map((f) => `<li>${escapeHtml(f.path)} <span class="muted">${fmtBytes(f.size)}</span></li>`)
-          .join("") + (more > 0 ? `<li class="muted">and ${more} more</li>` : "");
-    } catch (err) {
-      details.dataset.loaded = "";
-      list.innerHTML = `<li class="muted">${escapeHtml(err.message)}</li>`;
-    }
-  },
-  true
-);
+// The file list of a version is fetched the first time it is opened.
+async function toggleSaveFiles(button) {
+  const row = button.closest("tbody").querySelector(`tr[data-files-for="${button.dataset.version}"]`);
+  const open = row.hidden;
+  row.hidden = !open;
+  button.setAttribute("aria-expanded", String(open));
+  if (!open || row.dataset.loaded) return;
+  row.dataset.loaded = "1";
+  const list = row.querySelector(".saves-files");
+  try {
+    const version = await api(`/api/saves/${button.dataset.version}`);
+    const more = version.file_count - version.manifest.length;
+    list.innerHTML =
+      version.manifest
+        .map((f) => `<li><span class="saves-path">${escapeHtml(f.path)}</span><span class="saves-size">${fmtBytes(f.size)}</span></li>`)
+        .join("") + (more > 0 ? `<li class="muted">and ${more} more</li>` : "");
+  } catch (err) {
+    row.dataset.loaded = "";
+    list.innerHTML = `<li class="muted">${escapeHtml(err.message)}</li>`;
+  }
+}
 
 // Uploads from the browser are attributed to one device of its own, created on first use.
 async function webDevice() {

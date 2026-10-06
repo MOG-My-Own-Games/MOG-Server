@@ -76,21 +76,28 @@
         <section id="view-game" class="view" hidden>
           <a href="#" class="back-link">&laquo; Back to library</a>
 
-          <div class="game-header">
+          <div class="game-header" id="game-header">
+            <div class="game-header-art" id="game-header-art" aria-hidden="true"></div>
             <div class="game-header-cover">
               <img id="game-cover-img" hidden />
               <div id="game-cover-placeholder" class="cover-placeholder" hidden>&#127918;</div>
             </div>
-            <div>
-              <h2 id="game-title"></h2>
+            <div class="game-header-info">
+              <div class="game-title-row">
+                <img id="game-icon" class="game-icon" alt="" hidden />
+                <img id="game-logo" class="game-logo" hidden />
+                <h2 id="game-title"></h2>
+              </div>
               <p id="game-library" class="muted small"></p>
               <div id="game-versions" class="chip-row" hidden></div>
               <p class="muted small">Game ID: <code id="game-id-display"></code></p>
               <div class="page-actions">
+                <button id="client-install-btn" type="button" title="Install this game with the MOG client">Install</button>
                 <button id="scrape-btn" type="button" class="admin-only">Scrape</button>
                 <button id="edit-metadata-btn" type="button" class="admin-only">Edit metadata</button>
               </div>
               <p id="scrape-status" class="muted small"></p>
+              <p id="client-install-status" class="muted small"></p>
             </div>
           </div>
 
@@ -463,6 +470,39 @@
 
   <div id="toast-area" class="toast-area"></div>
 
+  <div id="extract-modal" class="modal" hidden>
+    <div class="modal-panel client-panel" role="dialog" aria-modal="true" aria-labelledby="extract-modal-title">
+      <h3 id="extract-modal-title">No installer found</h3>
+      <p id="extract-modal-text" class="muted"></p>
+      <p class="muted small">
+        Extracting unpacks the archive as it is and takes the result as the install: nothing is run, and the
+        files are kept as the install cache. Trying to install runs the best installer found inside instead.
+      </p>
+      <div class="modal-footer">
+        <button id="extract-modal-cancel" type="button" class="button-secondary">Cancel</button>
+        <button id="extract-modal-install" type="button" class="button-secondary">Try to install</button>
+        <button id="extract-modal-extract" type="button">Extract as it is</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="client-modal" class="modal" hidden>
+    <div class="modal-panel client-panel" role="dialog" aria-modal="true" aria-labelledby="client-modal-title">
+      <h3 id="client-modal-title">Get the MOG client</h3>
+      <p class="muted">
+        Games are installed with the MOG client, a small program for your computer. The page tried to open it and
+        nothing answered, so it is probably not installed yet.
+      </p>
+      <p id="client-modal-note" class="muted small" hidden></p>
+      <div id="client-release" class="client-release">Looking up the latest release...</div>
+      <p id="client-modal-status" class="muted small"></p>
+      <div class="modal-footer">
+        <button id="client-modal-retry" type="button" class="button-secondary">I have it, open it again</button>
+        <button id="client-modal-close" type="button">Close</button>
+      </div>
+    </div>
+  </div>
+
   <div id="scrape-modal" class="modal" hidden>
     <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="scrape-modal-title">
       <h3 id="scrape-modal-title">Scrape</h3>
@@ -477,9 +517,11 @@
   <div id="gallery" class="gallery" hidden>
     <button id="gallery-prev" class="gallery-prev" aria-label="Previous">&#8249;</button>
     <img id="gallery-img" alt="" />
+    <div id="gallery-video" class="gallery-video" hidden></div>
     <button id="gallery-next" class="gallery-next" aria-label="Next">&#8250;</button>
     <button id="gallery-close" class="gallery-close" aria-label="Close">&times;</button>
     <span id="gallery-count" class="gallery-count"></span>
+    <span id="gallery-caption" class="gallery-caption"></span>
   </div>
   <script src="app.js"></script>
 </body>

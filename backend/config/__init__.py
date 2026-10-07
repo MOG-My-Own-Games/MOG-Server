@@ -114,3 +114,5 @@ INSTALL_AUTO_MODE_DEFAULT: Final[bool] = safe_str_to_bool(_get_env("INSTALL_AUTO
 IGDB_CLIENT_ID: Final[str | None] = _get_env("IGDB_CLIENT_ID")
 IGDB_CLIENT_SECRET: Final[str | None] = _get_env("IGDB_CLIENT_SECRET")
 STEAMGRIDDB_API_KEY: Final[str | None] = _get_env("STEAMGRIDDB_API_KEY")
+# HowLongToBeat needs no key; the flag only turns the lookups off.
+HLTB_ENABLED: Final[bool] = safe_str_to_bool(_get_env("HLTB_ENABLED") or "true")

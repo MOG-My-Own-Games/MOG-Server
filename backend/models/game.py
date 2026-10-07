@@ -37,6 +37,9 @@ class Game(BaseModel):
     igdb_id: Mapped[int | None] = mapped_column(Integer(), default=None)
     igdb_metadata: Mapped[dict[str, Any] | None] = mapped_column(CustomJSON(), default=dict)
     sgdb_id: Mapped[int | None] = mapped_column(Integer(), default=None)
+    hltb_id: Mapped[int | None] = mapped_column(Integer(), default=None)
+    # Completion times in seconds (main_story, main_plus_extra, completionist, all_styles) and their report counts.
+    hltb_metadata: Mapped[dict[str, Any] | None] = mapped_column(CustomJSON(), default=dict)
     cover_path: Mapped[str | None] = mapped_column(String(length=1000), default=None)
     # The artwork chosen for each kind (see handler/media.py): {kind: {"url": ..., "source": ...}}.
     # cover_path mirrors media["cover"] for what reads it directly.

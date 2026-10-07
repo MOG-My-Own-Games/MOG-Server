@@ -24,6 +24,7 @@ class ScanResult:
     added: int
     missing: int
     total: int
+    new_games: tuple[tuple[int, str], ...] = ()  # (id, name) of the games this scan added
 
 
 def has_files(path: Path) -> bool:
@@ -70,12 +71,12 @@ def _scan_library(library: Library) -> ScanResult:
 
     existing = {g.fs_name: g for g in db_game_handler.get_games_for_library(library.id)}
 
-    added = 0
+    new_games = []
     for fs_name in sorted(on_disk - existing.keys()):
-        db_game_handler.add_game(
+        game = db_game_handler.add_game(
             Game(library_id=library.id, fs_name=fs_name, name=fs_name, addons_only=only_addons(root / fs_name))
         )
-        added += 1
+        new_games.append((game.id, fs_name))
 
     # Vanished games are only flagged, never deleted, so their metadata and
     # install history survive a temporarily unmounted share.
@@ -92,4 +93,4 @@ def _scan_library(library: Library) -> ScanResult:
             db_game_handler.update_game(game.id, changes)
         missing += is_missing
 
-    return ScanResult(added=added, missing=missing, total=len(on_disk))
+    return ScanResult(added=len(new_games), missing=missing, total=len(on_disk), new_games=tuple(new_games))

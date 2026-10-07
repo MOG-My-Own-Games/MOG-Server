@@ -31,7 +31,7 @@ class World:
             libraries=lambda: self.libs,
             look=lambda root: self.disk.get(str(root)),
             scan=scan,
-            after_scan=lambda lib: self.after.append(lib.id),
+            after_scan=lambda lib, result: self.after.append(lib.id),
         )
 
 
@@ -114,7 +114,7 @@ def test_a_failure_matching_metadata_does_not_undo_the_scan():
     world = World([library()])
     watcher = world.watcher()
 
-    def boom(lib):
+    def boom(lib, result):
         raise RuntimeError("IGDB is down")
 
     watcher.after_scan = boom

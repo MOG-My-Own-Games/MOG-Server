@@ -129,3 +129,16 @@ class TestAddonsOnly:
 
         added = {c.args[0].fs_name: c.args[0].addons_only for c in db.add_game.call_args_list}
         assert added == {"OnlyMods": True, "Full": False}
+
+
+@patch("handler.scan_handler.db_game_handler")
+def test_a_scan_lists_the_games_it_added(db, tmp_path):
+    for name in ("A", "B"):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "f.bin").write_bytes(b"x")
+    db.get_games_for_library.return_value = []
+    db.add_game.side_effect = lambda game: Game(id=len(db.add_game.call_args_list) + 40, fs_name=game.fs_name, name=game.name)
+
+    result = scan_library(Library(id=1, name="L", root_path=str(tmp_path)))
+
+    assert result.new_games == ((41, "A"), (42, "B")) and result.added == 2

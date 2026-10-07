@@ -21,7 +21,7 @@ from models.library import Library
 
 from handler.database import db_game_handler, db_library_handler
 from handler.scan_handler import ScanResult, scan_library
-from handler.scrape_handler import needs_scrape, scrape_library_in_background
+from handler.scrape_handler import needs_scrape, scrape_and_announce
 
 Signature = tuple[tuple[str, bool, int, int], ...]
 
@@ -54,7 +54,7 @@ class LibraryWatcher:
     libraries: Callable[[], list[Library]] = db_library_handler.get_all_libraries
     look: Callable[[Path], Signature | None] = signature
     scan: Callable[[Library], ScanResult] = scan_library
-    after_scan: Callable[[Library], None] = lambda library: _scrape_what_is_missing(library)
+    after_scan: Callable[[Library, ScanResult], None] = lambda library, result: _scrape_what_is_missing(library, result)
     seen: dict[int, _Seen] = field(default_factory=dict)
 
     def poll(self) -> list[int]:
@@ -92,15 +92,15 @@ class LibraryWatcher:
             f"({result.added} added, {result.missing} missing, {result.total} on disk)"
         )
         try:
-            self.after_scan(library)
+            self.after_scan(library, result)
         except Exception as e:  # noqa: BLE001
             log.warning(f"Matching metadata for library {library.name!r} failed: {e}")
         return result
 
 
-def _scrape_what_is_missing(library: Library) -> None:
-    if any(needs_scrape(g) for g in db_game_handler.get_games_for_library(library.id)):
-        scrape_library_in_background(library.id)
+def _scrape_what_is_missing(library: Library, result: ScanResult) -> None:
+    if result.new_games or any(needs_scrape(g) for g in db_game_handler.get_games_for_library(library.id)):
+        scrape_and_announce(library, result.new_games)
 
 
 def run(

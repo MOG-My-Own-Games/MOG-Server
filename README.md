@@ -19,9 +19,10 @@ copy of.
   the defaults and never undo a pick.
 - Metadata comes from a one-click "Scrape" per game or per library, or a search-and-apply by hand
   (genres, screenshots, age ratings, DLC/expansions/remakes all come along with a match).
-- Keeps each machine's save files per game (the client uploads them): the last three versions of
-  every device are kept, listed under the game's Files > Saves tab, and a version can be downloaded
-  or a zip uploaded by hand. Machines are named after their hostname, asking when a name is already
+- Keeps each machine's save files per game (the client uploads them) and lets them follow the
+  player: a newer save from another machine is offered, or brought over, when a game starts. The
+  last three versions of every device are kept, listed under the game's Files > Saves tab (so you
+  can tell where a save came from), and a version can be downloaded or a zip uploaded by hand. Machines are named after their hostname, asking when a name is already
   taken (a reinstall, or a second system on the same computer). A game that is gone from disk but
   still has saves is not "missing": it stays, marked "Saves only" (amber corner with a floppy disk),
   and clearing the missing games leaves it alone; deleting it asks whether to keep the saves (the default, the game then stays listed) or delete

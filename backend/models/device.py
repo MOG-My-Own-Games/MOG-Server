@@ -1,5 +1,5 @@
-"""A machine a user runs the MOG client on. Its saves are kept apart from every other
-machine's, so two PCs sharing a game never overwrite each other's."""
+"""A machine a user runs the MOG client on. Its saves are filed under it, so each upload shows
+which machine it came from and each machine keeps its own history."""
 
 from __future__ import annotations
 

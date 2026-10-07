@@ -164,3 +164,28 @@ def test_saves_belong_to_their_user_and_respect_hidden_libraries(api):
         id=1, is_admin=False, hidden_library_ids=[GAME.library_id]
     )
     assert api.get("/api/games/5/saves").status_code == 404
+
+
+def test_a_game_was_last_played_when_its_newest_version_was_made(api):
+    from handler.database import db_saves_handler
+
+    device = _register(api).json()
+    assert db_saves_handler.last_saved_by_game(1) == {}
+
+    version = _upload(api, device["id"]).json()["version"]
+    _upload(api, device["id"], {"s.sav": b"later"})
+
+    played = db_saves_handler.last_saved_by_game(1)
+    assert list(played) == [5] and played[5] is not None and version["id"]
+    assert db_saves_handler.last_saved_by_game(2) == {}  # another user's games are not this one's
+
+
+def test_a_new_version_notifies_but_the_same_content_again_does_not(api, monkeypatch):
+    sent = []
+    monkeypatch.setattr(saves_endpoints, "notify_save_synced", lambda *args: sent.append(args))
+    device = _register(api).json()
+
+    _upload(api, device["id"], trigger="quit")
+    _upload(api, device["id"], trigger="quit")  # nothing new: no second notification
+
+    assert sent == [(1, 5, "karasu", "quit", 1)]

@@ -3,7 +3,14 @@ from unittest.mock import patch
 
 from handler import notifications
 from models.library import Library
-from models.notification import KIND_AUTO_MODE_FAILED, KIND_AUTO_MODE_STUCK, KIND_GAMES_ADDED, KIND_SAVE_SYNCED
+from models.notification import (
+    KIND_AUTO_MODE_FAILED,
+    KIND_AUTO_MODE_STUCK,
+    KIND_GAMES_ADDED,
+    KIND_MOD_FAILED,
+    KIND_MOD_READY,
+    KIND_SAVE_SYNCED,
+)
 
 
 def _session(auto_mode=True):
@@ -112,3 +119,17 @@ def test_a_failing_notification_does_not_fail_the_upload(games, store):
     games.get_game.return_value = None
     store.add_notification.side_effect = RuntimeError("db down")
     notifications.notify_save_synced(3, 5, "karasu", "quit", 1)
+
+
+@patch("handler.notifications.db_notification_handler")
+@patch("handler.notifications.db_game_handler")
+def test_a_zipped_mod_notifies_whoever_asked_for_it_and_a_failed_one_says_why(games, store):
+    games.get_game.return_value = SimpleNamespace(name="Some Game")
+
+    notifications.notify_mod_zipped(3, 5, "mod1")
+    ready = store.add_notification.call_args.args[0]
+    assert (ready.user_id, ready.kind, ready.game_id, ready.title) == (3, KIND_MOD_READY, 5, "Mod ready: mod1")
+
+    notifications.notify_mod_zipped(3, 5, "mod1", "disk full")
+    failed = store.add_notification.call_args.args[0]
+    assert failed.kind == KIND_MOD_FAILED and "disk full" in failed.body

@@ -80,6 +80,16 @@ class DBSavesHandler(DBBaseHandler):
         return set(session.scalars(select(SaveVersion.game_id).distinct()).all())
 
     @begin_session
+    def last_saved_by_game(self, user_id: int, session: Session = None) -> dict:  # type: ignore
+        """When this user's newest version of each game was made: the last time it was played."""
+        rows = session.execute(
+            select(SaveVersion.game_id, func.max(SaveVersion.created_at))
+            .where(SaveVersion.user_id == user_id)
+            .group_by(SaveVersion.game_id)
+        ).all()
+        return {game_id: created for game_id, created in rows}
+
+    @begin_session
     def summary(
         self, user_id: int | None = None, game_id: int | None = None, session: Session = None  # type: ignore
     ) -> tuple[int, int]:

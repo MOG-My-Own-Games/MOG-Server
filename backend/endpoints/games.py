@@ -12,7 +12,10 @@ from handler.filesystem.installer_detection import category_for_path
 from handler import media as media_handler
 from handler import video_handler
 from handler.metadata import igdb_handler, sgdb_handler
+from handler import mods as mods_handler
+from handler.notifications import notify_mod_zipped
 from handler.saves import purge_game
+from handler.sizes import game_sizes
 from handler.scrape_handler import refresh_game, search_name
 from models.install_session import InstallSessionState
 from starlette.concurrency import run_in_threadpool
@@ -24,8 +27,12 @@ from endpoints.responses.game import (
     GameFilesSchema,
     GameSchema,
     GameSizeSchema,
+    GameSizesSchema,
     GameUpdateForm,
     MediaSelectionForm,
+    ModJobSchema,
+    ModSchema,
+    ModsSchema,
 )
 
 router = APIRouter(prefix="/games", tags=["games"])
@@ -51,12 +58,25 @@ async def list_games(user: CurrentUser, library_id: int | None = None) -> list[G
             games = [g for g in games if g.library_id not in user.hidden_library_ids]
     installed = _installed_game_ids(user.id)
     with_saves = db_saves_handler.game_ids_with_saves()
+    last_played = db_saves_handler.last_saved_by_game(user.id)
     return [
         GameSchema.model_validate(g).model_copy(
-            update={"installed": g.id in installed, "saves_only": g.missing_from_fs and g.id in with_saves}
+            update={
+                "installed": g.id in installed,
+                "saves_only": g.missing_from_fs and g.id in with_saves,
+                "last_played": last_played.get(g.id),
+            }
         )
         for g in games
     ]
+
+
+@router.get("/revision")
+async def games_revision(user: CurrentUser) -> dict:
+    """What changed in the library, in one short value: a client that sees it differ from the last one it saw reloads
+    the games. Games in libraries hidden from the user do not count."""
+    hidden = [] if user.is_admin else user.hidden_library_ids
+    return {"revision": db_game_handler.revision(hidden)}
 
 
 @router.get("/missing")
@@ -106,7 +126,10 @@ async def get_game(user: CurrentUser, id: Annotated[int, Path(ge=1)]) -> GameSch
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     installed = game.id in _installed_game_ids(user.id)
     saves_only = game.missing_from_fs and game.id in db_saves_handler.game_ids_with_saves()
-    return GameSchema.model_validate(game).model_copy(update={"installed": installed, "saves_only": saves_only})
+    last_played = db_saves_handler.last_saved_by_game(user.id).get(game.id)
+    return GameSchema.model_validate(game).model_copy(
+        update={"installed": installed, "saves_only": saves_only, "last_played": last_played}
+    )
 
 
 def _serve_image(url: str | None, max_height: int | None = None) -> FileResponse:
@@ -205,14 +228,97 @@ async def get_game_screenshot(
     return await run_in_threadpool(_serve_image, url, None)
 
 
+def _visible_game(user, game_id: int):
+    game = db_game_handler.get_game(game_id)
+    if game is None or (not user.is_admin and game.library_id in user.hidden_library_ids):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    return game
+
+
+def _mod_of(user, game_id: int, name: str):
+    game = _visible_game(user, game_id)
+    mod = mods_handler.find_mod(fs_game_handler.get_game_root_abs_path(game), name)
+    if mod is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No such mod")
+    return mod
+
+
+def _job_schema(mod, job) -> ModJobSchema:
+    if mod.kind != mods_handler.KIND_FOLDER:  # an archive or a file needs no zipping
+        return ModJobSchema(name=mod.name, state="ready", bytes_done=mod.size_bytes, bytes_total=mod.size_bytes)
+    if job is None:
+        return ModJobSchema(name=mod.name, state="idle", bytes_total=mod.size_bytes)
+    return ModJobSchema(
+        name=mod.name, state=job.state, bytes_done=job.bytes_done, bytes_total=job.bytes_total, error=job.error
+    )
+
+
+@router.get("/{id}/mods")
+async def list_game_mods(user: CurrentUser, id: Annotated[int, Path(ge=1)]) -> ModsSchema:
+    """The game's mods: every folder or archive directly inside its mods folder is one."""
+    game = _visible_game(user, id)
+    found = await run_in_threadpool(mods_handler.list_mods, fs_game_handler.get_game_root_abs_path(game))
+    return ModsSchema(
+        mods=[ModSchema(name=m.name, kind=m.kind, size_bytes=m.size_bytes, file_count=m.file_count) for m in found]
+    )
+
+
+@router.post("/{id}/mods/{name}/prepare")
+async def prepare_game_mod(user: CurrentUser, id: Annotated[int, Path(ge=1)], name: str) -> ModJobSchema:
+    """Get a mod ready to download: a folder is zipped in the background (poll `/status`), and the user is told
+    by a notification when it is done; an archive or a file is ready at once."""
+    mod = await run_in_threadpool(_mod_of, user, id, name)
+    if mod.kind != mods_handler.KIND_FOLDER:
+        return _job_schema(mod, None)
+    game_id = id
+    job = await run_in_threadpool(
+        mods_handler.start_zip,
+        game_id,
+        mod,
+        user.id,
+        lambda error: notify_mod_zipped(user.id, game_id, mod.name, error),
+    )
+    return _job_schema(mod, job)
+
+
+@router.get("/{id}/mods/{name}/status")
+async def game_mod_status(user: CurrentUser, id: Annotated[int, Path(ge=1)], name: str) -> ModJobSchema:
+    mod = await run_in_threadpool(_mod_of, user, id, name)
+    return _job_schema(mod, mods_handler.job_for(id, mod.name))
+
+
+@router.get("/{id}/mods/{name}/download")
+async def download_game_mod(user: CurrentUser, id: Annotated[int, Path(ge=1)], name: str) -> FileResponse:
+    """The mod as one file: the archive or file itself, or the zip made of its folder (409 until it is ready)."""
+    mod = await run_in_threadpool(_mod_of, user, id, name)
+    if mod.kind != mods_handler.KIND_FOLDER:
+        return FileResponse(mod.path, filename=mod.path.name, media_type="application/octet-stream")
+    job = mods_handler.job_for(id, mod.name)
+    if job is None or job.state != "ready" or job.path is None or not job.path.is_file():
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="The mod is not zipped yet")
+    return FileResponse(job.path, filename=f"{mod.name}.zip", media_type="application/zip")
+
+
 @router.get("/{id}/size")
 async def get_game_size(user: CurrentUser, id: Annotated[int, Path(ge=1)]) -> GameSizeSchema:
     """What the game's folder (or file) takes on the server's disk."""
     game = db_game_handler.get_game(id)
     if game is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-    detected = await run_in_threadpool(fs_game_handler.list_game_files_flat, game)
-    return GameSizeSchema(size_bytes=sum(f.size_bytes for f in detected), file_count=len(detected))
+    sizes = await run_in_threadpool(game_sizes, game)
+    return GameSizeSchema(size_bytes=sizes.installer, file_count=sizes.files)
+
+
+@router.get("/{id}/sizes")
+async def get_game_sizes(user: CurrentUser, id: Annotated[int, Path(ge=1)]) -> GameSizesSchema:
+    """The game's folder, its install caches and its saves, and their total (remembered between calls)."""
+    game = db_game_handler.get_game(id)
+    if game is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    sizes = await run_in_threadpool(game_sizes, game)
+    return GameSizesSchema(
+        installer_bytes=sizes.installer, cache_bytes=sizes.cache, saves_bytes=sizes.saves, total_bytes=sizes.total
+    )
 
 
 @router.get("/{id}/files")

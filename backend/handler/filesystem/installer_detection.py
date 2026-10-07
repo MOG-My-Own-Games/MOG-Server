@@ -135,6 +135,11 @@ def is_addon_folder(name: str) -> bool:
     return _CATEGORY_BY_FOLDER.get(name.lower()) in ADDON_CATEGORIES
 
 
+def is_mods_folder(name: str) -> bool:
+    """Whether a top-level folder name is the game's mods folder ("mods", "mod")."""
+    return _CATEGORY_BY_FOLDER.get(name.lower()) == "mod"
+
+
 def is_base_installer(path: str) -> bool:
     """Whether a game-relative file would be offered as an installer of the base game."""
     candidate = _classify(DetectedFile(path=path, size_bytes=0))

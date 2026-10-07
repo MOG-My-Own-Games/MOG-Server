@@ -10,6 +10,8 @@ from models.notification import (
     KIND_AUTO_MODE_FAILED,
     KIND_AUTO_MODE_STUCK,
     KIND_GAMES_ADDED,
+    KIND_MOD_FAILED,
+    KIND_MOD_READY,
     KIND_SAVE_SYNCED,
     TITLE_MAX_LENGTH,
     Notification,
@@ -107,3 +109,14 @@ def notify_games_added(library: Library, added: tuple[tuple[int, str], ...]) -> 
     for user in db_user_handler.get_all_users():
         if user.is_admin or library.id not in (user.hidden_library_ids or []):
             notify(user.id, KIND_GAMES_ADDED, title, body, game_id=game_id)
+
+
+def notify_mod_zipped(user_id: int, game_id: int, mod: str, error: str | None = None) -> None:
+    """A mod folder has been zipped for download (or could not be): told to whoever asked for it."""
+    try:
+        if error is None:
+            notify(user_id, KIND_MOD_READY, f"Mod ready: {mod}", f"{_game_name(game_id)}: the zip is ready to download.", game_id=game_id)
+        else:
+            notify(user_id, KIND_MOD_FAILED, f"Mod could not be zipped: {mod}", f"{_game_name(game_id)}: {error}", game_id=game_id)
+    except Exception as e:  # noqa: BLE001 - a notification must never fail the job
+        log.warning(f"Could not create the mod notification: {e}")

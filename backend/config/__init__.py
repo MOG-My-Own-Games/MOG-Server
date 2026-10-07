@@ -55,6 +55,10 @@ AUTH_SECRET_KEY: Final[str] = _get_env("AUTH_SECRET_KEY") or "dev-insecure-secre
 
 INSTALL_CACHE_PATH: Final[str] = f"{MOG_BASE_PATH}/cache/installs"
 
+# Zips made on the fly of the folders under a game's mods folder, until a client has fetched them.
+MODS_CACHE_PATH: Final[str] = f"{MOG_BASE_PATH}/cache/mods"
+MODS_CACHE_MAX_AGE_HOURS: Final[int] = max(1, safe_int(_get_env("MODS_CACHE_MAX_AGE_HOURS"), 24))
+
 INSTALL_CACHE_DEFAULT_TTL_DAYS: Final[int] = safe_int(
     _get_env("INSTALL_CACHE_DEFAULT_TTL_DAYS"), 7
 )

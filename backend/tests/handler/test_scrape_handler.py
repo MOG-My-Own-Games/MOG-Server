@@ -1,4 +1,12 @@
+from types import SimpleNamespace
 from unittest.mock import patch
+
+import pytest
+
+import config
+from handler import scrape_handler
+from handler.metadata import hltb_handler
+from handler.metadata.hltb_handler import HLTBUnavailable
 
 from handler.scrape_handler import search_names, scrape_game, search_name
 from models.game import Game
@@ -357,3 +365,184 @@ class TestNameFromTheMatch:
         sgdb.search_games.return_value = [{"id": 4, "name": "Provider Name"}]
         refresh_game(_game(name="My Name", fs_name="raw-folder"), rematch_cover=True)
         assert all("name" not in c.args[1] for c in db.update_game.call_args_list)
+
+
+
+class TestAnnouncingAddedGames:
+    def _library(self):
+        from models.library import Library
+
+        return Library(id=3, name="Games", root_path="/g")
+
+    def test_the_games_are_announced_once_the_scrape_has_named_them(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(scrape_handler, "scrape_library_in_background", lambda lib_id: calls.append(("scrape", lib_id)))
+        names = {10: "AI Shoujo", 11: "Hearthlands"}  # what the scrape renamed them to
+        monkeypatch.setattr(scrape_handler.db_game_handler, "get_game", lambda gid: SimpleNamespace(name=names[gid]))
+        monkeypatch.setattr(scrape_handler, "notify_games_added", lambda lib, added: calls.append(("notify", added)))
+
+        scrape_handler.scrape_and_announce(self._library(), ((10, "[Group] AI Shoujo R15"), (11, "Hearthlands [v26]")))
+
+        assert calls == [("scrape", 3), ("notify", ((10, "AI Shoujo"), (11, "Hearthlands")))]
+
+    def test_a_game_that_is_gone_keeps_its_folder_name(self, monkeypatch):
+        sent = []
+        monkeypatch.setattr(scrape_handler, "scrape_library_in_background", lambda lib_id: None)
+        monkeypatch.setattr(scrape_handler.db_game_handler, "get_game", lambda gid: None)
+        monkeypatch.setattr(scrape_handler, "notify_games_added", lambda lib, added: sent.append(added))
+
+        scrape_handler.scrape_and_announce(self._library(), ((10, "Folder"),))
+
+        assert sent == [((10, "Folder"),)]
+
+    def test_nothing_added_sends_nothing(self, monkeypatch):
+        sent = []
+        monkeypatch.setattr(scrape_handler, "scrape_library_in_background", lambda lib_id: None)
+        monkeypatch.setattr(scrape_handler, "notify_games_added", lambda lib, added: sent.append(added))
+
+        scrape_handler.scrape_and_announce(self._library(), ())
+
+        assert sent == []
+
+    def test_a_pass_already_running_is_waited_for(self, monkeypatch):
+        order = []
+        scrape_handler._scraping.add(3)
+        monkeypatch.setattr(scrape_handler.time, "sleep", lambda s: scrape_handler._scraping.discard(3) or order.append("waited"))
+        monkeypatch.setattr(scrape_handler, "scrape_library_in_background", lambda lib_id: order.append("scrape"))
+        monkeypatch.setattr(scrape_handler.db_game_handler, "get_game", lambda gid: SimpleNamespace(name="X"))
+        monkeypatch.setattr(scrape_handler, "notify_games_added", lambda lib, added: order.append("notify"))
+
+        scrape_handler.scrape_and_announce(self._library(), ((1, "x"),))
+
+        assert order == ["waited", "scrape", "notify"]
+
+    def test_a_failed_notification_is_only_logged(self, monkeypatch):
+        monkeypatch.setattr(scrape_handler, "scrape_library_in_background", lambda lib_id: None)
+        monkeypatch.setattr(scrape_handler.db_game_handler, "get_game", lambda gid: SimpleNamespace(name="X"))
+
+        def boom(lib, added):
+            raise RuntimeError("db down")
+
+        monkeypatch.setattr(scrape_handler, "notify_games_added", boom)
+        scrape_handler.scrape_and_announce(self._library(), ((1, "x"),))
+
+
+TIMES = {"main_story": 36000, "main_plus_extra": 54000}
+
+
+class TestHltb:
+    """HowLongToBeat is asked only for a game with an IGDB match."""
+
+    @pytest.fixture(autouse=True)
+    def _hltb_on(self, monkeypatch):
+        monkeypatch.setattr(config, "HLTB_ENABLED", True)
+
+    @staticmethod
+    def _matched(**overrides) -> Game:
+        base = dict(igdb_id=99, igdb_metadata={"id": 99}, cover_path="x", media={"cover": {"url": "x", "source": "steamgriddb"}})
+        return _game(**{**base, **overrides})
+
+    @patch("handler.scrape_handler.db_game_handler")
+    @patch("handler.scrape_handler.sgdb_handler")
+    @patch("handler.scrape_handler.igdb_handler")
+    def test_a_scraped_game_gets_its_times(self, igdb, sgdb, db):
+        with patch.object(hltb_handler, "search_games", return_value=[{"id": 7, "name": "Some Game", "metadata": TIMES}]) as search:
+            assert scrape_game(self._matched()) is True
+
+        assert search.call_args_list[0].args == ("Some Game",)
+        db.update_game.assert_called_once_with(1, {"hltb_id": 7, "hltb_metadata": TIMES})
+
+    @patch("handler.scrape_handler.db_game_handler")
+    @patch("handler.scrape_handler.sgdb_handler")
+    @patch("handler.scrape_handler.igdb_handler")
+    def test_a_game_with_no_igdb_match_never_asks(self, igdb, sgdb, db):
+        igdb.search_games.return_value = []
+        sgdb.search_games.return_value = []
+
+        with patch.object(hltb_handler, "search_games") as search, patch.object(hltb_handler, "get_game_by_id") as by_id:
+            scrape_game(_game())
+
+        search.assert_not_called()
+        by_id.assert_not_called()
+
+    @patch("handler.scrape_handler.db_game_handler")
+    @patch("handler.scrape_handler.sgdb_handler")
+    @patch("handler.scrape_handler.igdb_handler")
+    def test_a_fresh_igdb_match_is_searched_by_the_name_it_gave(self, igdb, sgdb, db):
+        igdb.search_games.return_value = [{"id": 42, "name": "Some Game"}]
+        igdb.get_game_by_id.return_value = {"id": 42, "name": "Some Game", "summary": "S"}
+        sgdb.search_games.return_value = []
+
+        with patch.object(hltb_handler, "search_games", return_value=[]) as search:
+            scrape_game(_game(fs_name="some.game-GRP", name="some.game-GRP"))
+
+        assert search.call_args_list[0].args == ("Some Game",)
+
+    @patch("handler.scrape_handler.db_game_handler")
+    @patch("handler.scrape_handler.sgdb_handler")
+    @patch("handler.scrape_handler.igdb_handler")
+    def test_a_lookup_that_found_nothing_is_recorded_and_not_repeated(self, igdb, sgdb, db):
+        with patch.object(hltb_handler, "search_games", return_value=[]) as search:
+            assert scrape_game(self._matched()) is False
+            db.update_game.assert_called_once_with(1, {"hltb_id": 0})
+            search.reset_mock()
+            scrape_game(self._matched(hltb_id=0))
+
+        search.assert_not_called()
+
+    @patch("handler.scrape_handler.db_game_handler")
+    @patch("handler.scrape_handler.sgdb_handler")
+    @patch("handler.scrape_handler.igdb_handler")
+    def test_hltb_being_unreachable_stores_nothing_and_does_not_record_a_miss(self, igdb, sgdb, db):
+        with patch.object(hltb_handler, "search_games", side_effect=HLTBUnavailable("blocked")):
+            assert scrape_game(self._matched()) is False
+
+        db.update_game.assert_not_called()
+
+    @patch("handler.scrape_handler.db_game_handler")
+    @patch("handler.scrape_handler.sgdb_handler")
+    @patch("handler.scrape_handler.igdb_handler")
+    def test_a_game_that_has_its_times_is_left_alone(self, igdb, sgdb, db):
+        with patch.object(hltb_handler, "search_games") as search:
+            assert scrape_game(self._matched(hltb_id=7, hltb_metadata=TIMES)) is False
+
+        search.assert_not_called()
+        db.update_game.assert_not_called()
+
+    @patch("handler.scrape_handler.db_game_handler")
+    @patch("handler.scrape_handler.sgdb_handler")
+    @patch("handler.scrape_handler.igdb_handler")
+    def test_a_set_hltb_id_is_fetched_directly(self, igdb, sgdb, db):
+        with patch.object(hltb_handler, "search_games") as search, patch.object(
+            hltb_handler, "get_game_by_id", return_value={"id": 7, "name": "X", "metadata": TIMES}
+        ) as by_id:
+            assert scrape_game(self._matched(hltb_id=7)) is True
+
+        search.assert_not_called()
+        by_id.assert_called_once_with(7)
+
+    @patch("handler.scrape_handler.db_game_handler")
+    @patch("handler.scrape_handler.sgdb_handler")
+    @patch("handler.scrape_handler.igdb_handler")
+    def test_switched_off_asks_nothing(self, igdb, sgdb, db, monkeypatch):
+        monkeypatch.setattr(config, "HLTB_ENABLED", False)
+        with patch.object(hltb_handler, "search_games") as search:
+            assert scrape_game(self._matched()) is False
+
+        search.assert_not_called()
+
+    @patch("handler.scrape_handler.db_game_handler")
+    @patch("handler.scrape_handler.sgdb_handler")
+    @patch("handler.scrape_handler.igdb_handler")
+    def test_a_refresh_searches_again_and_keeps_the_old_times_on_a_miss(self, igdb, sgdb, db):
+        from handler.scrape_handler import refresh_game
+
+        igdb.get_game_by_id.return_value = {"id": 99, "name": "Some Game"}
+        sgdb.search_games.return_value = []
+        game = self._matched(hltb_id=7, hltb_metadata=TIMES)
+
+        with patch.object(hltb_handler, "get_game_by_id", return_value=None) as by_id:
+            refresh_game(game)
+
+        by_id.assert_called_once_with(7)
+        assert not any("hltb_id" in c.args[1] or "hltb_metadata" in c.args[1] for c in db.update_game.call_args_list)

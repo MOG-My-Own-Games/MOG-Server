@@ -9,14 +9,17 @@ from __future__ import annotations
 
 import re
 import threading
+import time
 from dataclasses import dataclass
 
 from handler.database import db_game_handler
+from handler.notifications import notify_games_added
 from handler import media as media_handler
-from handler.metadata import igdb_handler, sgdb_handler
+from handler.metadata import hltb_handler, igdb_handler, sgdb_handler
 from logger.logger import log
 from handler.name_matching import best_match, query_variants
 from models.game import Game
+from models.library import Library
 
 _BRACKETED = re.compile(r"[\[(\{][^\])}]*[\])}]")
 # A year in parentheses, "(1997)": kept as written, since it tells apart games that share a name (two Dooms).
@@ -135,6 +138,32 @@ def _apply_igdb(game: Game, igdb_id: int) -> bool:
     return True
 
 
+def _find_hltb(game: Game, matched_name: str | None) -> dict | None:
+    names = list(dict.fromkeys([matched_name, *_names(game)] if matched_name else _names(game)))
+    return best_match(query_variants(names), names[0], hltb_handler.search_games, lambda r: r.get("name", ""))
+
+
+def _fill_hltb(game: Game, matched_name: str | None = None, refresh: bool = False) -> bool:
+    """Completion times from HowLongToBeat, for a game with an IGDB match only (`matched_name` is the name
+    that match just gave it). hltb_id 0 records a lookup that found nothing, so a scan does not search again
+    for it; a refresh does. HowLongToBeat being unreachable changes nothing. Returns True if times were stored."""
+    if not hltb_handler.is_enabled() or not (game.igdb_id or matched_name):
+        return False
+    if not refresh and (game.hltb_id == 0 or hltb_handler.has_times(game.hltb_metadata)):
+        return False
+    try:
+        found = hltb_handler.get_game_by_id(game.hltb_id) if game.hltb_id else _find_hltb(game, matched_name)
+    except hltb_handler.HLTBUnavailable as e:
+        log.warning(f"HowLongToBeat lookup for {game.name!r} failed: {e}")
+        return False
+    if found is None:
+        if game.hltb_id is None:
+            db_game_handler.update_game(game.id, {"hltb_id": 0})
+        return False
+    db_game_handler.update_game(game.id, {"hltb_id": found["id"], "hltb_metadata": found["metadata"]})
+    return True
+
+
 def _store_media(game: Game, sgdb_id: int | None, replace: bool, keep: set[str] | frozenset[str] = frozenset()) -> bool:
     """Give the game the providers' own pick for each kind of artwork. With `replace` every kind
     not in `keep` is overwritten (a scrape the person asked for); without, only the kinds the game
@@ -162,6 +191,7 @@ def scrape_game(game: Game) -> bool:
     igdb_id / sgdb_id is used directly instead of searching by name. Returns
     True if anything was applied."""
     applied = False
+    igdb_name = None
 
     if game.igdb_id:
         if not game.igdb_metadata:
@@ -169,6 +199,7 @@ def scrape_game(game: Game) -> bool:
     else:
         match = _find_igdb(game)
         if match:
+            igdb_name = match.get("name")
             # Search results can come back with sparser nested fields
             # than a by-id fetch, so re-fetch the full record.
             if not _apply_igdb(game, match["id"]):
@@ -192,6 +223,7 @@ def scrape_game(game: Game) -> bool:
             db_game_handler.update_game(game.id, update)
         applied |= _store_media(game, sgdb_id, replace=False)
 
+    applied |= _fill_hltb(game, igdb_name)
     return applied
 
 
@@ -227,6 +259,7 @@ def refresh_game(game: Game, keep: frozenset[str] = frozenset(), rematch_cover: 
         db_game_handler.update_game(game.id, update)
     applied |= _store_media(game, sgdb_id, replace=True, keep={"cover"} if "cover_path" in keep else set())
 
+    applied |= _fill_hltb(game, (full or {}).get("name"), refresh=True)
     return applied
 
 
@@ -259,6 +292,7 @@ def scrape_library(library_id: int, refresh: bool = False) -> ScrapeResult:
 
 _scraping: set[int] = set()
 _scraping_lock = threading.Lock()
+WAIT_FOR_RUNNING_PASS = 600  # seconds
 
 
 def scrape_library_in_background(library_id: int) -> None:
@@ -273,3 +307,25 @@ def scrape_library_in_background(library_id: int) -> None:
     finally:
         with _scraping_lock:
             _scraping.discard(library_id)
+
+
+def scrape_and_announce(library: Library, new_games: tuple[tuple[int, str], ...]) -> None:
+    """After a scan: match the games it added, then tell the users about them under the names the match found.
+    A pass already running for the library is waited for, so the games are named by it, not by their folders."""
+    deadline = time.monotonic() + WAIT_FOR_RUNNING_PASS
+    while time.monotonic() < deadline:
+        with _scraping_lock:
+            if library.id not in _scraping:
+                break
+        time.sleep(1)
+    scrape_library_in_background(library.id)
+    if not new_games:
+        return
+    named = []
+    for game_id, folder_name in new_games:
+        game = db_game_handler.get_game(game_id)
+        named.append((game_id, game.name if game else folder_name))
+    try:
+        notify_games_added(library, tuple(named))
+    except Exception as e:  # noqa: BLE001 - the scan and the match are done; a notification must not undo them
+        log.warning(f"Could not create the notification for the added games: {e}")

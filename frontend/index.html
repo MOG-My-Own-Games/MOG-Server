@@ -47,7 +47,20 @@
     <div class="layout">
       <aside id="sidebar" class="sidebar">
         <div class="sidebar-inner">
-          <input id="game-search" type="text" placeholder="Search games..." class="search-box" />
+          <div class="search-wrap">
+            <input id="game-search" type="text" placeholder="Search games..." class="search-box" autocomplete="off" />
+            <button id="game-search-clear" class="search-clear" type="button" title="Clear" aria-label="Clear the search" hidden>&times;</button>
+          </div>
+
+          <div class="sort-box">
+            <label class="check-row"><input type="checkbox" id="sort-last-played" /> Last played first</label>
+            <select id="game-sort" aria-label="Sort games by">
+              <option value="newest">Release date: newest first</option>
+              <option value="oldest">Release date: oldest first</option>
+              <option value="az">A to Z</option>
+              <option value="za">Z to A</option>
+            </select>
+          </div>
 
           <div id="active-installs-widget" class="widget" hidden>
             <h2>Active installs</h2>
@@ -68,6 +81,10 @@
           <div class="main-header">
             <h2 id="games-heading">All Games</h2>
             <button id="refresh-games-btn">Refresh</button>
+          </div>
+          <div id="games-loading" class="loading-screen">
+            <img src="assets/mog-loading.png" alt="" />
+            <p>MOG is loading your library...</p>
           </div>
           <div id="game-grid" class="game-grid"></div>
         </section>
@@ -91,6 +108,7 @@
               <p id="game-library" class="muted small"></p>
               <div id="game-versions" class="chip-row" hidden></div>
               <p class="muted small">Game ID: <code id="game-id-display"></code></p>
+              <p id="game-sizes" class="muted small" hidden></p>
               <div class="page-actions">
                 <button id="client-install-btn" type="button" title="Install this game with the MOG client">Install</button>
                 <button id="scrape-btn" type="button" class="admin-only">Scrape</button>
@@ -137,6 +155,8 @@
                 <div id="game-genres" class="chip-row"></div>
                 <div id="game-age-ratings" class="chip-row"></div>
                 <div id="game-player-info" class="muted small"></div>
+
+                <div id="game-hltb" class="hltb" hidden></div>
 
                 <div id="game-screenshots" class="screenshot-row"></div>
 
@@ -238,8 +258,11 @@
                     </div>
                   </div>
                   <p class="muted small">
-                    Each machine keeps its own copies, so one never overwrites another's. The newest
-                    <span id="saves-keep">3</span> of each are kept.
+                    Saves follow you between machines: starting a game offers a newer save from another
+                    machine (what it replaces is backed up first), and what you play is uploaded when you
+                    quit. Each machine's uploads are listed separately, so you can see where a save came
+                    from and go back to an older one if two machines diverge. The newest
+                    <span id="saves-keep">3</span> of each machine are kept.
                   </p>
                   <p id="saves-status" class="saves-status" role="status"></p>
                   <div id="saves-devices"></div>

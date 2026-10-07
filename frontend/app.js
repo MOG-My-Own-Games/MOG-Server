@@ -24,7 +24,10 @@ const IGDB_RATING_VALUE = {
 let creds = null; // {user, pass}
 let currentUser = null;
 let libraries = [];
-let games = [];
+let games = []; // what the grid shows: the games of the selected library
+let gamesAll = null; // every game this user can see, once loaded
+let gamesFetchedAt = 0;
+const gameCache = new Map(); // games looked up one by one (an active install of a game not loaded yet)
 let selectedLibraryId = null;
 let activeGame = null;
 let installQueue = []; // candidates checked to run one after another
@@ -95,13 +98,21 @@ function activateTab(navSelector, dataAttr, panelPrefix, name) {
   });
 }
 
-function initTabs(navSelector, dataAttr, panelPrefix) {
+// Where the page is goes in the address (without a history entry per tab), so a refresh comes back to it.
+function setAddress(hash) {
+  if (location.hash.replace(/^#\/?/, "") !== hash) history.replaceState(null, "", `#${hash}`);
+}
+
+function initTabs(navSelector, dataAttr, panelPrefix, address) {
   document.querySelectorAll(`${navSelector} .tab-btn`).forEach((btn) => {
-    btn.addEventListener("click", () => activateTab(navSelector, dataAttr, panelPrefix, btn.dataset[dataAttr]));
+    btn.addEventListener("click", () => {
+      activateTab(navSelector, dataAttr, panelPrefix, btn.dataset[dataAttr]);
+      if (address) setAddress(address(btn.dataset[dataAttr]));
+    });
   });
 }
-initTabs("#view-game .tabs", "tab", "tab");
-initTabs("#view-settings .tabs", "settingsTab", "settings-tab");
+initTabs("#view-game .tabs", "tab", "tab", (name) => `game/${(location.hash.match(/game\/(\d+)/) || [])[1]}/${name}`);
+initTabs("#view-settings .tabs", "settingsTab", "settings-tab", (name) => `settings/${name}`);
 
 // --- Auth ---
 
@@ -277,6 +288,9 @@ document.getElementById("logout-btn").addEventListener("click", () => {
   sessionStorage.removeItem("mog_pass");
   creds = null;
   currentUser = null;
+  gamesAll = null;
+  gameCache.clear();
+  document.getElementById("games-loading").hidden = false;
   stopNotificationPolling();
   showScreen("login-screen");
 });
@@ -298,9 +312,13 @@ function router() {
   document.querySelectorAll(".view").forEach((v) => (v.hidden = true));
 
   if (hash.startsWith("game/")) {
-    const id = parseInt(hash.slice("game/".length), 10);
+    const [idText, tab] = hash.slice("game/".length).split("/");
     document.getElementById("view-game").hidden = false;
-    openGamePage(id);
+    gamesFetchedAt = 0; // the page may change the game: the list is fetched again on the way back
+    openGamePage(parseInt(idText, 10));
+    if (tab && document.querySelector(`#view-game .tab-btn[data-tab="${tab}"]`)) {
+      activateTab("#view-game .tabs", "tab", "tab", tab);
+    }
   } else if (hash === "notifications") {
     document.getElementById("view-notifications").hidden = false;
     loadNotifications().catch(() => {});
@@ -317,7 +335,11 @@ function router() {
     openSettingsPage(subTab);
   } else {
     document.getElementById("view-games").hidden = false;
-    refreshGames();
+    const wanted = hash.startsWith("library/") ? parseInt(hash.slice("library/".length), 10) : null;
+    selectedLibraryId = Number.isInteger(wanted) ? wanted : null;
+    renderLibraryList("library-list", { clickable: true });
+    if (gamesAll) showGames();
+    if (!gamesAll || Date.now() - gamesFetchedAt > 15000) refreshGames().catch(showGamesError);
   }
   refreshSidebarWidgets();
 }
@@ -820,10 +842,11 @@ async function refreshCacheTable() {
     body.innerHTML = "";
     for (const entry of data.entries) {
       const tr = document.createElement("tr");
-      const game = games.find((g) => g.id === entry.game_id);
+      const game = await gameById(entry.game_id);
+      const title = escapeHtml(game ? game.name : entry.game_id ?? "?");
       tr.innerHTML = `
         <td>${entry.session_id}</td>
-        <td>${escapeHtml(game ? game.name : entry.game_id ?? "?")}</td>
+        <td>${entry.game_id ? `<a href="#game/${entry.game_id}">${title}</a>` : title}</td>
         <td>${escapeHtml(entry.state || "")}</td>
         <td>${fmtBytes(entry.size_bytes)}</td>
       `;
@@ -1009,13 +1032,18 @@ async function refreshSidebarWidgets() {
     widget.hidden = sessions.length === 0;
     list.innerHTML = "";
     for (const s of sessions) {
-      const game = games.find((g) => g.id === s.game_id);
+      const game = await gameById(s.game_id);
       const li = document.createElement("li");
       const pct = s.bytes_total ? (s.bytes_written / s.bytes_total) * 100 : 0;
+      const icon = gameIconUrl(game);
+      const state = s.state.charAt(0).toUpperCase() + s.state.slice(1).replace(/_/g, " ");
       li.innerHTML = `
-        <span class="ai-name">${escapeHtml(game ? game.name : `Game ${s.game_id}`)}</span>
-        <span class="muted small">${escapeHtml(s.state)}</span>
-        <div class="ai-progress"><div class="ai-progress-fill" style="width:${pct}%"></div></div>
+        ${icon ? `<img class="ai-icon" src="${escapeHtml(icon)}" alt="" />` : '<span class="ai-icon ai-icon-none">&#127918;</span>'}
+        <div class="ai-text">
+          <span class="ai-name">${escapeHtml(game ? game.name : `Game ${s.game_id}`)}</span>
+          <span class="muted small">${escapeHtml(state)}...${pct ? ` ${Math.round(pct)}%` : ""}</span>
+          <div class="ai-progress"><div class="ai-progress-fill" style="width:${pct}%"></div></div>
+        </div>
       `;
       li.addEventListener("click", () => {
         location.hash = `game/${s.game_id}`;
@@ -1050,13 +1078,37 @@ function renderLibraryList(containerId, { clickable, showScrape = false, allowDe
 
   if (clickable) {
     const allItem = document.createElement("li");
-    allItem.textContent = "All games";
     allItem.className = selectedLibraryId === null ? "active" : "";
-    allItem.addEventListener("click", () => {
-      selectedLibraryId = null;
+    const allName = document.createElement("div");
+    allName.innerHTML = '<span class="lib-name">All games</span>';
+    allName.addEventListener("click", () => {
       location.hash = "";
-      refreshGames();
     });
+    allItem.appendChild(allName);
+    if (isAdmin() && libraries.length > 1) {
+      const actions = document.createElement("div");
+      actions.className = "library-actions";
+      const scanAll = document.createElement("button");
+      scanAll.textContent = "Scan";
+      scanAll.title = "Scan every library";
+      scanAll.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        scanAll.textContent = "...";
+        try {
+          let scraping = false;
+          for (const lib of libraries) {
+            const result = await api(`/api/libraries/${lib.id}/scan`, { method: "POST" });
+            scraping = scraping || Boolean(result.scraping);
+          }
+          await refreshGames();
+          if (scraping) pollWhileScraping();
+        } finally {
+          scanAll.textContent = "Scan";
+        }
+      });
+      actions.appendChild(scanAll);
+      allItem.appendChild(actions);
+    }
     list.appendChild(allItem);
   }
 
@@ -1068,9 +1120,7 @@ function renderLibraryList(containerId, { clickable, showScrape = false, allowDe
     info.innerHTML = `<span class="lib-name">${escapeHtml(lib.name)}</span><span class="lib-path">${escapeHtml(lib.root_path)}</span>`;
     if (clickable) {
       info.addEventListener("click", () => {
-        selectedLibraryId = lib.id;
-        location.hash = "";
-        refreshGames();
+        location.hash = `library/${lib.id}`;
       });
     }
     li.appendChild(info);
@@ -1148,12 +1198,41 @@ document.getElementById("add-library-form").addEventListener("submit", async (e)
 
 // --- Games grid page ---
 
+// Every game is fetched once and a library only filters them, so switching libraries needs no round trip.
 async function refreshGames() {
-  const qs = selectedLibraryId !== null ? `?library_id=${selectedLibraryId}` : "";
-  games = await api(`/api/games${qs}`);
+  gamesAll = await api("/api/games");
+  gamesFetchedAt = Date.now();
+  showGames();
+}
+
+function showGames() {
+  games = selectedLibraryId === null ? gamesAll : gamesAll.filter((g) => g.library_id === selectedLibraryId);
   const libName = selectedLibraryId === null ? "All Games" : (libraries.find((l) => l.id === selectedLibraryId) || {}).name || "Games";
+  document.getElementById("games-loading").hidden = true;
   document.getElementById("games-heading").textContent = `${libName} (${gridEntries().length})`;
   renderGameGrid(document.getElementById("game-search").value.trim().toLowerCase());
+}
+
+function showGamesError(err) {
+  const box = document.getElementById("games-loading");
+  box.querySelector("p").textContent = `Could not load the library: ${err.message}`;
+  box.classList.add("failed");
+}
+
+async function gameById(id) {
+  const known = (gamesAll || []).find((g) => g.id === id) || gameCache.get(id);
+  if (known) return known;
+  try {
+    const game = await api(`/api/games/${id}`);
+    gameCache.set(id, game);
+    return game;
+  } catch (_) {
+    return null;
+  }
+}
+
+function gameIconUrl(game) {
+  return ((game && game.media) || {}).icon?.url || null;
 }
 
 // Corner badge on a cover: the game has a finished install on the server.
@@ -1179,17 +1258,18 @@ function groupGames(list) {
   const out = [];
   for (const game of list) {
     if (!game.igdb_id) {
-      out.push({ game, versions: 1 });
+      out.push({ game, versions: 1, lastPlayed: game.last_played || null });
       continue;
     }
     let entry = groups.get(game.igdb_id);
     if (!entry) {
-      entry = { game, versions: 0 };
+      entry = { game, versions: 0, lastPlayed: null };
       groups.set(game.igdb_id, entry);
       out.push(entry);
     } else if (entry.game.missing_from_fs && !game.missing_from_fs) {
       entry.game = game;
     }
+    if (game.last_played && (!entry.lastPlayed || game.last_played > entry.lastPlayed)) entry.lastPlayed = game.last_played;
     entry.versions += 1;
   }
   return out;
@@ -1203,8 +1283,55 @@ function groupGamesEnabled() {
   }
 }
 
+// --- Sorting (per browser): last played first, then the chosen order ---
+
+const SORT_ORDERS = {
+  newest: (a, b) => releaseOf(b) - releaseOf(a) || a.game.name.localeCompare(b.game.name),
+  oldest: (a, b) => releaseOf(a, Infinity) - releaseOf(b, Infinity) || a.game.name.localeCompare(b.game.name),
+  az: (a, b) => a.game.name.localeCompare(b.game.name),
+  za: (a, b) => b.game.name.localeCompare(a.game.name),
+};
+const DEFAULT_SORT_ORDER = "newest";
+
+function releaseOf(entry, missing = -Infinity) {
+  return ((entry.game.igdb_metadata || {}).first_release_date ?? missing);
+}
+
+function sortSettings() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("mog_sort") || "{}");
+    return { lastPlayed: Boolean(saved.lastPlayed), order: SORT_ORDERS[saved.order] ? saved.order : DEFAULT_SORT_ORDER };
+  } catch (_) {
+    return { lastPlayed: false, order: DEFAULT_SORT_ORDER };
+  }
+}
+
+function saveSortSettings(settings) {
+  try {
+    localStorage.setItem("mog_sort", JSON.stringify(settings));
+  } catch (_) {
+    // Not remembered; the choice still applies until the page is reloaded.
+  }
+}
+
+function sortEntries(entries) {
+  const { lastPlayed, order } = sortSettings();
+  const byOrder = SORT_ORDERS[order];
+  return [...entries].sort((a, b) => {
+    if (lastPlayed && (a.lastPlayed || b.lastPlayed)) {
+      if (!a.lastPlayed) return 1;
+      if (!b.lastPlayed) return -1;
+      if (a.lastPlayed !== b.lastPlayed) return a.lastPlayed < b.lastPlayed ? 1 : -1;
+    }
+    return byOrder(a, b);
+  });
+}
+
 function gridEntries() {
-  return groupGamesEnabled() ? groupGames(games) : games.map((game) => ({ game, versions: 1 }));
+  const entries = groupGamesEnabled()
+    ? groupGames(games)
+    : games.map((game) => ({ game, versions: 1, lastPlayed: game.last_played || null }));
+  return sortEntries(entries);
 }
 
 function renderGameGrid(filterText) {
@@ -1230,8 +1357,30 @@ function renderGameGrid(filterText) {
 document.getElementById("refresh-games-btn").addEventListener("click", refreshGames);
 
 document.getElementById("game-search").addEventListener("input", (e) => {
-  renderGameGrid(e.target.value.trim().toLowerCase());
+  document.getElementById("game-search-clear").hidden = !e.target.value;
+  if (gamesAll) renderGameGrid(e.target.value.trim().toLowerCase());
 });
+
+document.getElementById("game-search-clear").addEventListener("click", () => {
+  const box = document.getElementById("game-search");
+  box.value = "";
+  box.dispatchEvent(new Event("input"));
+  box.focus();
+});
+
+{
+  const saved = sortSettings();
+  const lastPlayedBox = document.getElementById("sort-last-played");
+  const orderSelect = document.getElementById("game-sort");
+  lastPlayedBox.checked = saved.lastPlayed;
+  orderSelect.value = saved.order;
+  const changed = () => {
+    saveSortSettings({ lastPlayed: lastPlayedBox.checked, order: orderSelect.value });
+    if (gamesAll) showGames();
+  };
+  lastPlayedBox.addEventListener("change", changed);
+  orderSelect.addEventListener("change", changed);
+}
 
 // --- Sidebar collapse (per-browser, remembered across reloads) ---
 
@@ -1257,6 +1406,22 @@ function resetGameTabs() {
   document.getElementById("tab-files").hidden = true;
 }
 
+// What the game takes on the server: "40.0 GB (Installer 27.7 GB, Cache 12.3 GB, Saves 1.4 MB)". The server
+// remembers it, so this is cheap to ask for on every visit.
+async function loadGameSizes(gameId) {
+  const line = document.getElementById("game-sizes");
+  line.hidden = true;
+  try {
+    const sizes = await api(`/api/games/${gameId}/sizes`);
+    if (!activeGame || activeGame.id !== gameId) return;
+    const parts = [`Installer ${fmtBytes(sizes.installer_bytes)}`, `Cache ${fmtBytes(sizes.cache_bytes)}`, `Saves ${fmtBytes(sizes.saves_bytes)}`];
+    line.textContent = `Size on server: ${fmtBytes(sizes.total_bytes)} (${parts.join(", ")})`;
+    line.hidden = false;
+  } catch (_) {
+    // An older server has no such figure; the line just stays out.
+  }
+}
+
 async function openGamePage(id) {
   resetGameTabs();
   let game;
@@ -1272,6 +1437,8 @@ async function openGamePage(id) {
 
   document.getElementById("game-title").textContent = game.name;
   document.getElementById("game-id-display").textContent = game.id;
+  loadGameSizes(game.id);
+  document.querySelector("#view-game .back-link").href = selectedLibraryId !== null ? `#library/${selectedLibraryId}` : "#";
   const libName = (libraries.find((l) => l.id === game.library_id) || {}).name || "";
   document.getElementById("game-library").textContent = libName;
 
@@ -1343,7 +1510,7 @@ function relationCard(item) {
 
 function renderVersions(game) {
   const el = document.getElementById("game-versions");
-  const versions = game.igdb_id ? games.filter((g) => g.igdb_id === game.igdb_id) : [];
+  const versions = game.igdb_id ? (gamesAll || games).filter((g) => g.igdb_id === game.igdb_id) : [];
   el.hidden = versions.length < 2;
   el.innerHTML = versions
     .map((g) => {
@@ -1352,6 +1519,35 @@ function renderVersions(game) {
       return `<a class="chip${g.id === game.id ? " chip-active" : ""}" href="#game/${g.id}">${escapeHtml(label)}</a>`;
     })
     .join("");
+}
+
+const HLTB_STYLES = [
+  ["main_story", "Main Story"],
+  ["main_plus_extra", "Main + Extra"],
+  ["completionist", "Completionist"],
+];
+
+// Seconds as "45m" under an hour, else hours to the nearest half ("12.5h").
+function formatPlaytime(seconds) {
+  const minutes = Math.round(seconds / 60);
+  return minutes < 60 ? `${minutes}m` : `${Math.round((seconds / 3600) * 2) / 2}h`;
+}
+
+// Shown only when HowLongToBeat gave this game a time; otherwise nothing at all.
+function renderHltb(game) {
+  const el = document.getElementById("game-hltb");
+  const times = game.hltb_metadata || {};
+  const cells = HLTB_STYLES.filter(([key]) => times[key] > 0).map(([key, label]) => {
+    const players = times[`${key}_count`];
+    return (
+      `<div class="hltb-cell"><span class="hltb-label">${label}</span>` +
+      `<span class="hltb-time">${formatPlaytime(times[key])}</span>` +
+      (players > 0 ? `<span class="hltb-players">${players} players</span>` : "") +
+      "</div>"
+    );
+  });
+  el.innerHTML = cells.length ? `<h4>How Long To Beat</h4><div class="hltb-grid">${cells.join("")}</div>` : "";
+  el.hidden = !cells.length;
 }
 
 function renderOverview(game) {
@@ -1398,6 +1594,8 @@ function renderOverview(game) {
     if (mp.offlinecoop) mpBits.push(`offline co-op (up to ${mp.offlinemax || "?"})`);
   }
   playerEl.textContent = [...modes, ...mpBits].join(" · ");
+
+  renderHltb(game);
 
   const shotsEl = document.getElementById("game-screenshots");
   shotsEl.innerHTML = (meta.screenshots || [])

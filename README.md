@@ -28,6 +28,11 @@ copy of.
   and clearing the missing games leaves it alone; deleting it asks whether to keep the saves (the default, the game then stays listed) or delete
   both, and deleting a user asks first and says how many saved games would be lost. A folder with only mods or DLC and nothing that installs the game
   is marked "Add-ons only" (violet corner with a puzzle piece).
+- Offers a game's mods for download (never installed): every top-level folder or archive inside the game's `mods` folder
+  is one mod, so `mods/mod1/file.zip` and `mods/mod2.zip` are mod1 and mod2. An archive is served as it is; a folder is zipped
+  on the fly in the background (`/api/games/{id}/mods`, `.../{name}/prepare`, `.../status`, `.../download`), with progress for
+  the client and a notification when the zip is ready. Zips are kept in `/mog/cache/mods` and forgotten after
+  `MODS_CACHE_MAX_AGE_HOURS` (24 by default).
 - Runs an installer for a Game inside a sandboxed Wine/Proton environment
   (bubblewrap + Xvfb + VNC, viewable live in the web UI), with an
   experimental OCR-driven "auto mode" (on by default; if it gets stuck or the

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
 from decorators.database import begin_session
@@ -37,6 +37,16 @@ class DBGamesHandler(DBBaseHandler):
                 select(Game).where(Game.library_id == library_id).order_by(Game.name)
             ).all()
         )
+
+    @begin_session
+    def revision(self, hidden_library_ids: list[int] | None = None, session: Session = None) -> str:  # type: ignore
+        """A short text that changes whenever a game is added, removed or changed (a scan, a scrape, an edit): how
+        many games there are and when the last one was touched. Cheap, so a client can ask often."""
+        query = select(func.count(Game.id), func.max(Game.updated_at))
+        if hidden_library_ids:
+            query = query.where(Game.library_id.not_in(hidden_library_ids))
+        count, newest = session.execute(query).one()
+        return f"{count}-{newest.isoformat() if newest else 0}"
 
     @begin_session
     def get_missing_games(self, library_id: int | None = None, session: Session = None) -> list[Game]:  # type: ignore

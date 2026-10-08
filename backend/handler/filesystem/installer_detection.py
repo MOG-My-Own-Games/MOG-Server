@@ -12,7 +12,8 @@ Detection order (lower rank = higher priority):
   2. Any executable installer anywhere (recursive) in the game folder.
   3. Disc images (.iso/.cue/.chd/.ccd/.bin/.img/.mds/.mdf/.nrg).
   4. Archives (.zip/.7z/.rar/.tar/.gz/.tgz/.tbz2/.txz/.bz2/.xz).
-  5. Generic installers packaged as a shell script or AppImage (.sh/.run/.appimage).
+  5. Generic installers packaged as a shell script or AppImage (.sh/.run/.appimage); a small .sh is the game's
+     own start script and is not one.
 When nothing matches, the caller falls back to a manual file picker.
 
 Like RomM's file categories, a top-level folder inside the game directory
@@ -25,6 +26,7 @@ it. Folders holding no installable content (manual, soundtrack, ...) are skipped
 from __future__ import annotations
 
 import fnmatch
+import re
 from dataclasses import dataclass, replace
 from pathlib import PurePosixPath
 
@@ -59,6 +61,17 @@ ARCHIVE_EXTENSIONS: frozenset[str] = frozenset(
     (".zip", ".7z", ".rar", ".tar", ".gz", ".tgz", ".tbz2", ".txz", ".bz2", ".xz")
 )
 LINUX_INSTALLER_EXTENSIONS: frozenset[str] = frozenset((".sh", ".run", ".appimage"))
+
+# A shell script smaller than this is the game's own start script (a Ren'Py game's `Game.sh`, a `start.sh`), not an
+# installer: an installer script carries the game (GOG's and itch's are many megabytes). A size of 0 is "not known".
+MIN_INSTALLER_SCRIPT_BYTES = 1024 * 1024
+
+# Bundled prerequisite installers told by their own name, wherever they sit (a Ren'Py game keeps dxwebsetup.exe in
+# lib/windows-i686, which is no folder named for it): DirectX, the VC++ and .NET runtimes, PhysX, OpenAL, XNA.
+_PREREQUISITE_NAME = re.compile(
+    r"^(dx[\w. -]*setup|dxweb|directx|vc_?redist|vcruntime|dotnet|ndp\d|windowsdesktop-runtime|oalinst|physx|xnafx)",
+    re.IGNORECASE,
+)
 
 # Category folder names (singular; plural "s"/"es" forms also match), as in RomM.
 GAME_CATEGORY = "game"
@@ -172,8 +185,11 @@ def _classify_file(file: DetectedFile) -> InstallerCandidate | None:
     if category_for_path(posix) in NON_INSTALLABLE_CATEGORIES:
         return None
 
-    if ext in EXECUTABLE_EXTENSIONS and _under_prerequisite_dir(posix):
+    if ext in EXECUTABLE_EXTENSIONS and (_under_prerequisite_dir(posix) or _PREREQUISITE_NAME.match(posix.stem)):
         return None
+
+    if ext == ".sh" and 0 < file.size_bytes < MIN_INSTALLER_SCRIPT_BYTES:
+        return None  # the game's own start script, not an installer
 
     if ext in EXECUTABLE_EXTENSIONS and _matches_known_installer(name_lower):
         return _make(file, RANK_KNOWN_INSTALLER, "known installer")

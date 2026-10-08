@@ -137,8 +137,31 @@ class TestLooksPortable:
     def test_linux_installers_archives_and_disc_images_are_not(self):
         from handler.filesystem.installer_detection import looks_portable
 
-        for name in ("game_1_2_3.sh", "game.run", "Game.AppImage", "Game.zip", "Game.iso"):
+        from handler.filesystem.installer_detection import DetectedFile, detect_installer_candidates
+
+        for name in ("game.run", "Game.AppImage", "Game.zip", "Game.iso"):
             assert not looks_portable(_found(name)), name
+        big_script = detect_installer_candidates([DetectedFile("game_1_2_3.sh", 400 * 1024**2)])
+        assert not looks_portable(big_script)  # a GOG Linux installer carries the game
+
+    def test_a_games_own_start_script_is_not_an_installer(self):
+        from handler.filesystem.installer_detection import looks_portable
+
+        # What a Ren'Py zip holds: the game's exe and .sh, and DirectX's web installer in lib/.
+        files = _found(
+            "Some_Game_1.0-pc/Some_Game.exe",
+            "Some_Game_1.0-pc/Some_Game.sh",
+            "Some_Game_1.0-pc/lib/windows-i686/dxwebsetup.exe",
+            "Some_Game_1.0-pc/lib/windows-i686/python.exe",
+        )
+        assert looks_portable(files)
+        assert [c.file_name for c in files] == ["Some_Game.exe", "python.exe"]  # no .sh, no DirectX installer
+
+    def test_prerequisite_installers_are_told_by_name_wherever_they_are(self):
+        for name in ("dxwebsetup.exe", "DXSETUP.exe", "dx9setup.exe", "dx_setup.exe", "DXSetup_x64.exe", "dx-web-setup.exe", "vcredist_x64.exe", "VC_redist.x86.exe", "dotnetfx35.exe", "oalinst.exe", "PhysX_9.exe"):
+            assert _found(f"game/lib/{name}") == [], name
+        assert [c.file_name for c in _found("game/setup.exe")] == ["setup.exe"]  # an installer of the game stays
+        assert [c.file_name for c in _found("game/dxcpl.exe", "game/dxdiag_tool.exe")] == ["dxcpl.exe", "dxdiag_tool.exe"]  # not every dx name
 
     def test_a_dlc_installer_does_not_make_the_base_game_one(self):
         from handler.filesystem.installer_detection import looks_portable

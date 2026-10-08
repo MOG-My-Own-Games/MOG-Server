@@ -181,11 +181,27 @@ function renderNotificationCounts() {
   menuCount.hidden = unread === 0;
 }
 
+// The library follows the server: a game a scan found, or a scrape changed, shows up in the grid by itself. The server
+// gives a short text that changes whenever a game is added, removed or changed, which is cheap to ask for.
+let libraryRevision = null;
+
+async function checkLibraryRevision() {
+  const { revision } = await api("/api/games/revision");
+  const changed = libraryRevision !== null && revision !== libraryRevision;
+  libraryRevision = revision;
+  if (!changed) return;
+  gamesFetchedAt = 0; // whatever page is up, the list is fetched again when the grid comes back
+  if (!document.getElementById("view-games").hidden) await refreshGames();
+}
+
 async function loadNotifications() {
   const data = await api("/api/notifications");
   const newest = data.notifications.reduce((m, n) => Math.max(m, n.id), 0);
   if (newestNotificationId !== null) {
-    data.notifications.filter((n) => n.id > newestNotificationId && !n.read).forEach(showToast);
+    const fresh = data.notifications.filter((n) => n.id > newestNotificationId && !n.read);
+    fresh.forEach(showToast);
+    // The server says games came in: look at the library now instead of at the next poll.
+    if (fresh.some((n) => n.kind === "games_added")) checkLibraryRevision().catch(() => {});
   }
   newestNotificationId = newest;
   notificationData = data;
@@ -196,13 +212,18 @@ async function loadNotifications() {
 function startNotificationPolling() {
   clearInterval(notificationTimer);
   newestNotificationId = null;
-  const poll = () => loadNotifications().catch(() => {});
+  libraryRevision = null;
+  const poll = () => {
+    loadNotifications().catch(() => {});
+    checkLibraryRevision().catch(() => {});
+  };
   poll();
   notificationTimer = setInterval(poll, 15000);
 }
 
 function stopNotificationPolling() {
   clearInterval(notificationTimer);
+  libraryRevision = null;
   notificationData = { notifications: [], unread: 0 };
   renderNotificationCounts();
 }

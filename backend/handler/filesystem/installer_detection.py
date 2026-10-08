@@ -216,6 +216,26 @@ def detect_installer_candidates(files: list[DetectedFile]) -> list[InstallerCand
     return candidates
 
 
+_INSTALLER_NAME_HINTS = ("setup", "install")
+
+
+def is_probable_installer(candidate: InstallerCandidate) -> bool:
+    """Whether a candidate is likely an installer for real: a known installer name, anything named like one
+    (setup, install; an uninstaller is not), an archive or disc image to unpack, or a Linux installer script.
+    A bare executable with some other name is more likely the game itself."""
+    if candidate.rank in (RANK_KNOWN_INSTALLER, RANK_DISC_IMAGE, RANK_ARCHIVE, RANK_LINUX_INSTALLER):
+        return True
+    name = candidate.file_name.lower()
+    return any(hint in name for hint in _INSTALLER_NAME_HINTS) and "uninst" not in name
+
+
+def looks_portable(candidates: list[InstallerCandidate]) -> bool:
+    """Whether a game's folder holds no installer for the game (only executables that are probably the game
+    itself, or nothing runnable): then it needs none, and the person is offered its executables and the choice
+    to use the files as they are. Add-ons (DLC, mods, patches) do not count."""
+    return not any(c.category == GAME_CATEGORY and is_probable_installer(c) for c in candidates)
+
+
 def pick_default_installer(candidates: list[InstallerCandidate]) -> InstallerCandidate | None:
     """The top-ranked candidate, or None when there is nothing to run.
 

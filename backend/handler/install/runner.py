@@ -423,7 +423,7 @@ def _run_install(install_session_id: int) -> None:
         _fail(install_session_id, "Game no longer exists")
         return
 
-    if not session.installer_path and not session.source_path:
+    if not session.installer_path and not session.source_path and not session.extract_only:
         _fail(install_session_id, "No installer selected for this session")
         return
 
@@ -869,18 +869,44 @@ def _live_manifest_loop(
             return
 
 
+def _copy_game_files(game, work_dir: Path) -> str | None:
+    """Put the game's own files, as they are, into `work_dir`: linked to the library's files when both are on one
+    filesystem (nothing is duplicated), copied otherwise. Returns what went wrong, or None."""
+    root = fs_game_handler.get_game_root_abs_path(game)
+    if root.is_file():
+        files = [(root, Path(root.name))]
+    elif root.is_dir():
+        files = [
+            (Path(folder, name), Path(folder, name).relative_to(root))
+            for folder, _dirs, names in os.walk(root, followlinks=False)
+            for name in names
+        ]
+    else:
+        return "the game's files are not there"
+    for src, rel in files:
+        if src.is_symlink():
+            continue
+        dest = work_dir / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            os.link(src, dest)
+        except OSError:
+            shutil.copy2(src, dest)
+    return None
+
+
 def _run_extract_only(install_session_id: int, game, source_rel: str | None) -> None:
-    """Install a game that needs no installer: unpack its archive straight into the install cache and
-    take the result as the install's output, as `_finalize_install` does for what an installer wrote.
-    Nothing is run, so there is no sandbox, display or Wine prefix."""
-    if source_rel is None:
-        _fail(install_session_id, "Extracting as it is needs an archive or disc image")
-        return
-    try:
-        source_abs = Path(fs_game_handler.resolve_installer_abs_path(game, source_rel))
-    except (ValueError, FileNotFoundError) as e:
-        _fail(install_session_id, str(e))
-        return
+    """Install a game that needs no installer: unpack its archive (or, with none named, take the game's own files)
+    straight into the install cache and take the result as the install's output, as `_finalize_install` does for
+    what an installer wrote. Nothing is run, so there is no sandbox, display or Wine prefix."""
+    source_abs: Path | None = None
+    if source_rel is not None:
+        try:
+            source_abs = Path(fs_game_handler.resolve_installer_abs_path(game, source_rel))
+        except (ValueError, FileNotFoundError) as e:
+            _fail(install_session_id, str(e))
+            return
+    what = source_abs.name if source_abs is not None else game.fs_name
 
     work_dir = ensure_session_cache_dir(install_session_id)
     db_install_session_handler.update_session(
@@ -888,15 +914,15 @@ def _run_extract_only(install_session_id: int, game, source_rel: str | None) -> 
         {
             "state": InstallSessionState.INSTALLING,
             "cache_path": str(work_dir),
-            "phase": source_phase(source_abs).value,
-            "phase_detail": source_abs.name,
+            "phase": (source_phase(source_abs) if source_abs is not None else InstallPhase.EXTRACTING).value,
+            "phase_detail": what,
         },
     )
-    log.info(f"Extracting {hl(source_abs.name)} as it is for session {hl(str(install_session_id))}")
+    log.info(f"Extracting {hl(what)} as it is for session {hl(str(install_session_id))}")
     try:
-        problem = extract_archive(source_abs, work_dir)
+        problem = extract_archive(source_abs, work_dir) if source_abs is not None else _copy_game_files(game, work_dir)
         if problem:
-            _fail(install_session_id, f"Could not extract {source_abs.name}: {problem}")
+            _fail(install_session_id, f"Could not extract {what}: {problem}")
             return
         current = db_install_session_handler.get_session(install_session_id)
         if current is None or current.state != InstallSessionState.INSTALLING:
@@ -908,7 +934,7 @@ def _run_extract_only(install_session_id: int, game, source_rel: str | None) -> 
             elif path.is_file() and path.name not in (MANIFEST_FILENAME, LIVE_MANIFEST_FILENAME):
                 files.append(path)
         if not files:
-            _fail(install_session_id, f"{source_abs.name} holds no files")
+            _fail(install_session_id, f"{what} holds no files")
             return
         db_install_session_handler.update_session(
             install_session_id, {"state": InstallSessionState.STREAMING, "phase": None, "phase_detail": None}
@@ -928,8 +954,8 @@ def _run_extract_only(install_session_id: int, game, source_rel: str | None) -> 
             },
         )
     except Exception as e:  # noqa: BLE001 - surface any failure to the UI
-        log.error(f"Extracting {source_abs.name} failed: {e}")
-        _fail(install_session_id, f"Could not extract {source_abs.name}: {e}")
+        log.error(f"Extracting {what} failed: {e}")
+        _fail(install_session_id, f"Could not extract {what}: {e}")
 
 
 def _enter_streaming(install_session_id: int, vnc: VncSession) -> None:

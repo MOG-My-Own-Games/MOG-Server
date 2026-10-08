@@ -172,9 +172,62 @@ def test_a_session_cancelled_while_unpacking_is_left_cancelled(env, monkeypatch)
     assert read_manifest(env.work) is None
 
 
-def test_extracting_needs_an_archive_to_extract(env):
-    runner._run_extract_only(1, object(), None)
-    assert env.db.session.state == InstallSessionState.FAILED
+def _game_folder(env, monkeypatch, tmp_path, files):
+    root = tmp_path / "library" / "Metroid"
+    for rel, content in files.items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_bytes(content)
+    monkeypatch.setattr(runner.fs_game_handler, "get_game_root_abs_path", lambda game: root)
+    return root
+
+
+def test_with_no_archive_the_games_own_files_are_the_install(env, monkeypatch, tmp_path):
+    _game_folder(env, monkeypatch, tmp_path, {"Metroid.exe": b"x" * 10, "data/level.bin": b"y" * 5})
+    runner._run_extract_only(1, SimpleNamespace(fs_name="Metroid"), None)
+    assert env.db.session.state == InstallSessionState.DONE
+    assert {e.path: e.size_bytes for e in read_manifest(env.work)} == {"Metroid.exe": 10, "data/level.bin": 5}
+    assert env.db.updates[0]["phase_detail"] == "Metroid"
+
+
+def test_the_games_files_are_linked_not_duplicated_when_they_can_be(env, monkeypatch, tmp_path):
+    root = _game_folder(env, monkeypatch, tmp_path, {"Metroid.exe": b"x"})
+    runner._run_extract_only(1, SimpleNamespace(fs_name="Metroid"), None)
+    assert (env.work / "Metroid.exe").stat().st_ino == (root / "Metroid.exe").stat().st_ino
+
+
+def test_the_files_are_copied_when_linking_is_not_possible(env, monkeypatch, tmp_path):
+    root = _game_folder(env, monkeypatch, tmp_path, {"Metroid.exe": b"x"})
+
+    def no_link(src, dst):
+        raise OSError("cross-device link")
+
+    monkeypatch.setattr(runner.os, "link", no_link)
+    runner._run_extract_only(1, SimpleNamespace(fs_name="Metroid"), None)
+    assert (env.work / "Metroid.exe").read_bytes() == b"x"
+    assert (env.work / "Metroid.exe").stat().st_ino != (root / "Metroid.exe").stat().st_ino
+
+
+def test_a_link_in_the_games_folder_is_left_out(env, monkeypatch, tmp_path):
+    root = _game_folder(env, monkeypatch, tmp_path, {"Metroid.exe": b"x"})
+    outside = tmp_path / "secret.txt"
+    outside.write_text("do not serve")
+    (root / "leak.txt").symlink_to(outside)
+    runner._run_extract_only(1, SimpleNamespace(fs_name="Metroid"), None)
+    assert [e.path for e in read_manifest(env.work)] == ["Metroid.exe"] and not (env.work / "leak.txt").exists()
+
+
+def test_a_game_that_is_one_file_is_taken_as_that_file(env, monkeypatch, tmp_path):
+    single = tmp_path / "library" / "Metroid.exe"
+    single.write_bytes(b"MZ")
+    monkeypatch.setattr(runner.fs_game_handler, "get_game_root_abs_path", lambda game: single)
+    runner._run_extract_only(1, SimpleNamespace(fs_name="Metroid.exe"), None)
+    assert [e.path for e in read_manifest(env.work)] == ["Metroid.exe"]
+
+
+def test_a_game_whose_files_are_gone_fails_cleanly(env, monkeypatch, tmp_path):
+    monkeypatch.setattr(runner.fs_game_handler, "get_game_root_abs_path", lambda game: tmp_path / "nowhere")
+    runner._run_extract_only(1, SimpleNamespace(fs_name="Metroid"), None)
+    assert env.db.session.state == InstallSessionState.FAILED and "not there" in env.db.session.error
 
 
 def test_a_missing_source_file_fails_cleanly(env, monkeypatch):
@@ -266,12 +319,70 @@ def test_extracting_ignores_manual_mode(start):
     assert session.state == InstallSessionState.INSTALLING and start.enqueued == [7]
 
 
-def test_something_that_is_not_an_archive_cannot_be_extracted_as_it_is(start):
-    with pytest.raises(HTTPException) as err:
-        start.go(extract_only=True, installer_path="setup.exe")
-    assert err.value.status_code == 400 and start.enqueued == []
+def test_extracting_a_non_archive_takes_the_games_own_files(start):
+    session = start.go(extract_only=True, installer_path="setup.exe")
+    assert session.extract_only and session.source_path is None and session.installer_path is None
+    assert session.state == InstallSessionState.INSTALLING and start.enqueued == [7]
+
+
+def test_a_folder_with_no_installer_in_it_is_not_run_until_the_person_picks(start, monkeypatch):
+    monkeypatch.setattr(
+        endpoint.fs_game_handler, "get_installer_candidates", lambda game: [cand("Metroid.exe", 1, "executable (top level)")]
+    )
+    session = start.go()
+    assert session.state == InstallSessionState.AWAITING_INSTALLER and session.installer_path is None
+    assert start.enqueued == []
+
+
+def test_that_folder_can_still_be_extracted_as_it_is(start, monkeypatch):
+    monkeypatch.setattr(
+        endpoint.fs_game_handler, "get_installer_candidates", lambda game: [cand("Metroid.exe", 1, "executable (top level)")]
+    )
+    session = start.go(extract_only=True)
+    assert session.extract_only and session.source_path is None and session.installer_path is None
+    assert session.state == InstallSessionState.INSTALLING and start.enqueued == [7]
+
+
+def test_a_chosen_executable_is_run_as_before(start, monkeypatch):
+    monkeypatch.setattr(
+        endpoint.fs_game_handler, "get_installer_candidates", lambda game: [cand("Metroid.exe", 1, "executable (top level)")]
+    )
+    session = start.go(installer_path="setup.exe")
+    assert session.installer_path == "setup.exe" and not session.extract_only and start.enqueued == [7]
+
+
+def test_a_folder_with_a_known_installer_is_still_run_by_itself(start, monkeypatch):
+    monkeypatch.setattr(
+        endpoint.fs_game_handler, "get_installer_candidates", lambda game: [cand("setup.exe", 0, "known installer")]
+    )
+    session = start.go()
+    assert session.installer_path == "setup.exe" and start.enqueued == [7]
 
 
 def test_a_normal_start_is_not_extract_only(start):
     session = start.go()
     assert session.extract_only is False
+
+
+# --- the candidates endpoint ------------------------------------------------------------------------
+
+
+def _candidates_of(monkeypatch, found):
+    monkeypatch.setattr(endpoint.db_game_handler, "get_game", lambda _id: SimpleNamespace(id=1, name="Metroid"))
+    monkeypatch.setattr(endpoint.fs_game_handler, "get_installer_candidates", lambda game: found)
+    return asyncio.run(endpoint.get_install_candidates(SimpleNamespace(id=3), 1))
+
+
+def test_a_folder_with_only_game_executables_is_suggested_to_be_extracted(monkeypatch):
+    answer = _candidates_of(monkeypatch, [cand("Metroid.exe", 1, "executable (top level)")])
+    assert answer.extract_suggested is True and [c.path for c in answer.candidates] == ["Metroid.exe"]
+
+
+def test_a_folder_with_nothing_runnable_is_suggested_to_be_extracted_too(monkeypatch):
+    answer = _candidates_of(monkeypatch, [])
+    assert answer.extract_suggested is True and answer.needs_manual_pick is True
+
+
+def test_a_folder_with_an_installer_is_not(monkeypatch):
+    answer = _candidates_of(monkeypatch, [cand("setup.exe", 0, "known installer"), cand("game.exe", 1)])
+    assert answer.extract_suggested is False

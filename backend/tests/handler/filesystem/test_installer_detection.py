@@ -100,3 +100,52 @@ class TestCategoryFolders:
     def test_addon_is_never_the_default_pick(self):
         files = [DetectedFile(path="dlc/setup.exe", size_bytes=1)]
         assert pick_default_installer(detect_installer_candidates(files)) is None
+
+
+def _found(*paths):
+    from handler.filesystem.installer_detection import DetectedFile, detect_installer_candidates
+
+    return detect_installer_candidates([DetectedFile(p, 1000) for p in paths])
+
+
+class TestLooksPortable:
+    """A folder with no installer in it (the Metroid case) is offered its executables and "just extract"."""
+
+    def test_only_game_executables_is_portable(self):
+        from handler.filesystem.installer_detection import looks_portable
+
+        assert looks_portable(_found("Metroid.exe", "Metroid/bin/helper.exe", "readme.txt"))
+
+    def test_nothing_runnable_is_portable(self):
+        from handler.filesystem.installer_detection import looks_portable
+
+        assert looks_portable(_found("data.pak", "readme.txt")) and looks_portable([])
+
+    def test_known_installer_names_are_not(self):
+        from handler.filesystem.installer_detection import looks_portable
+
+        for name in ("setup.exe", "gog-game.exe", "setup_game_1.0.exe", "install.exe"):
+            assert not looks_portable(_found(name, "game.exe")), name
+
+    def test_a_name_with_setup_or_install_in_it_is_an_installer_but_an_uninstaller_is_not(self):
+        from handler.filesystem.installer_detection import looks_portable
+
+        assert not looks_portable(_found("Game_Installer.exe"))
+        assert not looks_portable(_found("installgame.exe"))
+        assert looks_portable(_found("uninstall.exe", "game.exe"))
+
+    def test_linux_installers_archives_and_disc_images_are_not(self):
+        from handler.filesystem.installer_detection import looks_portable
+
+        for name in ("game_1_2_3.sh", "game.run", "Game.AppImage", "Game.zip", "Game.iso"):
+            assert not looks_portable(_found(name)), name
+
+    def test_a_dlc_installer_does_not_make_the_base_game_one(self):
+        from handler.filesystem.installer_detection import looks_portable
+
+        assert looks_portable(_found("Metroid.exe", "DLC/setup_dlc.exe"))
+
+    def test_the_bundled_prerequisites_do_not_count(self):
+        from handler.filesystem.installer_detection import looks_portable
+
+        assert looks_portable(_found("Metroid.exe", "_CommonRedist/vcredist/setup.exe"))

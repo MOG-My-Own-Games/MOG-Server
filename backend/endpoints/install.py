@@ -38,10 +38,12 @@ from endpoints.responses.install import (
     InstallSessionSchema,
     InstallStartForm,
     InstallStreamFileSchema,
+    ModCacheEntrySchema,
     InstallStreamManifestSchema,
     ProtonBuildSchema,
     ProtonBuildsSchema,
 )
+from handler import mods as mods_handler
 from handler.auth import AdminUser, CurrentUser
 from handler.database import db_game_handler, db_install_session_handler
 from handler.filesystem import fs_game_handler
@@ -581,7 +583,16 @@ async def list_install_cache(user: AdminUser) -> InstallCacheSchema:
                 size_bytes=dir_size_bytes(path),
             )
         )
-    return InstallCacheSchema(entries=entries)
+    mod_zips = await asyncio.to_thread(mods_handler.cached_zips)
+    return InstallCacheSchema(
+        entries=entries,
+        mods=[
+            ModCacheEntrySchema(
+                game_id=z.game_id, file_name=z.file_name, size_bytes=z.size_bytes, modified_at=z.modified_at
+            )
+            for z in mod_zips
+        ],
+    )
 
 
 @router.delete("/install/cache")
@@ -602,6 +613,21 @@ async def clear_all_install_cache(user: AdminUser) -> InstallCacheClearSchema:
             db_install_session_handler.delete_session(session_id)
         cleared += 1
     return InstallCacheClearSchema(cleared=cleared)
+
+
+@router.delete("/install/cache/mods")
+async def clear_mod_cache(user: AdminUser) -> InstallCacheClearSchema:
+    """Delete every zipped mod kept for download that is not being zipped again right now."""
+    return InstallCacheClearSchema(cleared=await asyncio.to_thread(mods_handler.clear_cached_zips))
+
+
+@router.delete("/install/cache/mods/{game_id}/{file_name}")
+async def clear_one_mod_cache(
+    user: AdminUser, game_id: Annotated[int, PathVar(ge=1)], file_name: str
+) -> None:
+    removed = await asyncio.to_thread(mods_handler.remove_cached_zip, game_id, file_name)
+    if not removed:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No such cached mod, or it is being zipped")
 
 
 @router.delete("/install/cache/{session_id}")

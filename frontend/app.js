@@ -460,6 +460,7 @@ async function openSettingsPage(subTab) {
     document.getElementById("setting-igdb-secret").value = apiSettings.igdb_client_secret || "";
     document.getElementById("setting-sgdb-key").value = apiSettings.steamgriddb_api_key || "";
     document.getElementById("setting-cache-ttl").value = apiSettings.install_cache_ttl_days ?? "";
+    applyProviderToggles(apiSettings);
     document.getElementById("proton-default-saved").textContent = "";
     await refreshProtonBuildsTable(apiSettings.install_default_proton_build || "");
   } catch (_) {
@@ -470,6 +471,32 @@ async function openSettingsPage(subTab) {
   await refreshMissingTable();
   await refreshProviderValidityBadges();
   await refreshUsersTable();
+}
+
+// --- Metadata provider switches ---
+
+// Each provider has its own switch, saved as it is flipped. A provider that is off keeps its keys, which stay editable.
+function applyProviderToggles(settings) {
+  for (const box of document.querySelectorAll("input[data-provider]")) {
+    box.checked = settings[box.dataset.provider] !== false;
+    box.closest(".provider-card").classList.toggle("provider-off", !box.checked);
+  }
+}
+
+for (const box of document.querySelectorAll("input[data-provider]")) {
+  box.addEventListener("change", async () => {
+    const card = box.closest(".provider-card");
+    card.classList.toggle("provider-off", !box.checked);
+    try {
+      const saved = await api("/api/settings", { method: "PUT", body: JSON.stringify({ [box.dataset.provider]: box.checked }) });
+      applyProviderToggles(saved);
+      await refreshProviderValidityBadges();
+    } catch (err) {
+      box.checked = !box.checked;
+      card.classList.toggle("provider-off", !box.checked);
+      alert(`Could not save: ${err.message}`);
+    }
+  });
 }
 
 // --- Metadata provider key validation badges ---
@@ -835,6 +862,7 @@ async function refreshCacheTable() {
   body.innerHTML = "<tr><td colspan='5' class='muted'>Loading...</td></tr>";
   try {
     const data = await api("/api/games/install/cache");
+    await renderModCacheTable(data.mods || []);
     if (data.entries.length === 0) {
       body.innerHTML = "<tr><td colspan='5' class='muted'>No cached installs.</td></tr>";
       return;
@@ -870,6 +898,53 @@ async function refreshCacheTable() {
     body.innerHTML = `<tr><td colspan="5" class="error">${escapeHtml(err.message)}</td></tr>`;
   }
 }
+
+async function renderModCacheTable(mods) {
+  const body = document.getElementById("mod-cache-table-body");
+  document.getElementById("clear-mod-cache-btn").hidden = mods.length === 0;
+  if (mods.length === 0) {
+    body.innerHTML = "<tr><td colspan='5' class='muted'>No cached mod zips.</td></tr>";
+    return;
+  }
+  body.innerHTML = "";
+  for (const entry of mods) {
+    const game = await gameById(entry.game_id);
+    const title = escapeHtml(game ? game.name : String(entry.game_id));
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td><a href="#game/${entry.game_id}">${title}</a></td>
+      <td>${escapeHtml(entry.file_name)}</td>
+      <td>${fmtBytes(entry.size_bytes)}</td>
+      <td>${escapeHtml(new Date(entry.modified_at * 1000).toLocaleString())}</td>
+    `;
+    const actionTd = document.createElement("td");
+    const delBtn = document.createElement("button");
+    delBtn.textContent = "Delete";
+    delBtn.className = "danger";
+    delBtn.addEventListener("click", async () => {
+      try {
+        await api(`/api/games/install/cache/mods/${entry.game_id}/${encodeURIComponent(entry.file_name)}`, { method: "DELETE" });
+        await refreshCacheTable();
+      } catch (err) {
+        alert(`Could not delete: ${err.message}`);
+      }
+    });
+    actionTd.appendChild(delBtn);
+    tr.appendChild(actionTd);
+    body.appendChild(tr);
+  }
+}
+
+document.getElementById("clear-mod-cache-btn").addEventListener("click", async () => {
+  if (!confirm("Delete every cached mod zip? They are made again when a mod is downloaded.")) return;
+  try {
+    const result = await api("/api/games/install/cache/mods", { method: "DELETE" });
+    alert(`Cleared ${result.cleared} zip(s).`);
+    await refreshCacheTable();
+  } catch (err) {
+    alert(`Could not clear: ${err.message}`);
+  }
+});
 
 document.getElementById("refresh-cache-btn").addEventListener("click", refreshCacheTable);
 
@@ -1406,7 +1481,7 @@ function resetGameTabs() {
   document.getElementById("tab-files").hidden = true;
 }
 
-// What the game takes on the server: "40.0 GB (Installer 27.7 GB, Cache 12.3 GB, Saves 1.4 MB)". The server
+// What the game takes on the server: "40.0 GB (Installer 27.7 GB, Cache 12.3 GB, Saves 1.4 MB)", the empty parts left out. The server
 // remembers it, so this is cheap to ask for on every visit.
 async function loadGameSizes(gameId) {
   const line = document.getElementById("game-sizes");
@@ -1414,20 +1489,35 @@ async function loadGameSizes(gameId) {
   try {
     const sizes = await api(`/api/games/${gameId}/sizes`);
     if (!activeGame || activeGame.id !== gameId) return;
-    const parts = [`Installer ${fmtBytes(sizes.installer_bytes)}`, `Cache ${fmtBytes(sizes.cache_bytes)}`, `Saves ${fmtBytes(sizes.saves_bytes)}`];
-    line.textContent = `Size on server: ${fmtBytes(sizes.total_bytes)} (${parts.join(", ")})`;
+    const parts = [["Installer", sizes.installer_bytes], ["Cache", sizes.cache_bytes], ["Saves", sizes.saves_bytes]]
+      .filter(([, bytes]) => bytes > 0)
+      .map(([name, bytes]) => `${name} ${fmtBytes(bytes)}`);
+    line.textContent = `Size on server: ${fmtBytes(sizes.total_bytes)}` + (parts.length ? ` (${parts.join(", ")})` : "");
     line.hidden = false;
   } catch (_) {
     // An older server has no such figure; the line just stays out.
   }
 }
 
+// "Last played: 8 Oct 2026, 01:40 on karasu": the newest saved version, and the machine that made it. Nothing for a game never played.
+function renderLastPlayed(game) {
+  const line = document.getElementById("game-last-played");
+  line.hidden = !game.last_played;
+  if (!game.last_played) return;
+  const when = new Date(game.last_played).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+  line.textContent = `Last played: ${when}` + (game.last_played_on ? ` on ${game.last_played_on}` : "");
+}
+
 async function openGamePage(id) {
   resetGameTabs();
+  // Until the game arrives the page still holds the one seen before: keep it out of sight rather than let it flash.
+  const view = document.getElementById("view-game");
+  if (!activeGame || activeGame.id !== id) view.classList.add("loading");
   let game;
   try {
     game = await api(`/api/games/${id}`);
   } catch (err) {
+    view.classList.remove("loading");
     document.getElementById("game-title").textContent = "Not found";
     document.getElementById("game-summary").textContent = err.message;
     return;
@@ -1438,6 +1528,7 @@ async function openGamePage(id) {
   document.getElementById("game-title").textContent = game.name;
   document.getElementById("game-id-display").textContent = game.id;
   loadGameSizes(game.id);
+  renderLastPlayed(game);
   document.querySelector("#view-game .back-link").href = selectedLibraryId !== null ? `#library/${selectedLibraryId}` : "#";
   const libName = (libraries.find((l) => l.id === game.library_id) || {}).name || "";
   document.getElementById("game-library").textContent = libName;
@@ -1445,9 +1536,21 @@ async function openGamePage(id) {
   const coverImg = document.getElementById("game-cover-img");
   const coverPlaceholder = document.getElementById("game-cover-placeholder");
   if (game.cover_path) {
-    coverImg.src = game.cover_path;
-    coverImg.hidden = false;
+    // The old cover stays on screen until the new one has loaded, so it is hidden meanwhile.
     coverPlaceholder.hidden = true;
+    coverImg.onerror = () => {
+      coverImg.hidden = true;
+      coverPlaceholder.hidden = false;
+    };
+    if (coverImg.getAttribute("src") === game.cover_path && coverImg.complete) {
+      coverImg.hidden = false;
+    } else {
+      coverImg.hidden = true;
+      coverImg.onload = () => {
+        coverImg.hidden = false;
+      };
+      coverImg.src = game.cover_path;
+    }
   } else {
     coverImg.hidden = true;
     coverPlaceholder.hidden = false;
@@ -1477,6 +1580,7 @@ async function openGamePage(id) {
   setSavesStatus("");
   filesSubtab = "all";
   renderFilesTab();
+  view.classList.remove("loading");
 
   getInstallDefaults().then((defaults) => {
     document.getElementById("auto-mode-check").checked = defaults.autoMode;
@@ -1781,9 +1885,18 @@ function renderHeaderArt(game) {
       img.hidden = true;
       if (onBroken) onBroken();
     };
-    img.hidden = !src;
-    if (src) img.src = src;
-    else img.removeAttribute("src");
+    if (!src) {
+      img.hidden = true;
+      img.removeAttribute("src");
+    } else if (img.getAttribute("src") === src && img.complete) {
+      img.hidden = false;
+    } else {
+      img.hidden = true; // the previous game's image stays until the new one has loaded
+      img.onload = () => {
+        img.hidden = false;
+      };
+      img.src = src;
+    }
     return img;
   };
   const logo = show("game-logo", url("logo"), () => header.classList.remove("has-logo"));

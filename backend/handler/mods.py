@@ -89,7 +89,7 @@ class ZipJob:
     error: str | None = None
     fingerprint: tuple = ()
     user_id: int | None = None
-    lock: threading.Lock = field(default_factory=threading.Lock)
+    cancel: threading.Event = field(default_factory=threading.Event)
 
 
 _jobs: dict[tuple[int, str], ZipJob] = {}
@@ -133,6 +133,19 @@ def job_for(game_id: int, name: str) -> ZipJob | None:
         return _jobs.get((game_id, name))
 
 
+class _Cancelled(Exception):
+    pass
+
+
+def cancel_zip(game_id: int, name: str) -> bool:
+    """Stop zipping a mod: the work ends at the next chunk and its half-made file goes. False when nothing was running."""
+    job = job_for(game_id, name)
+    if job is None or job.state != "zipping":
+        return False
+    job.cancel.set()
+    return True
+
+
 def start_zip(game_id: int, mod: Mod, user_id: int, on_done=None) -> ZipJob:
     """Zip the mod's folder in the background, unless an earlier zip of the same content is ready or one is running.
     `on_done(error_or_None)` is called from the thread when the work ends."""
@@ -168,12 +181,20 @@ def _run_zip(game_id: int, mod: Mod, job: ZipJob, on_done) -> None:
                         info.compress_type = method
                         with open(full, "rb") as source, archive.open(info, "w", force_zip64=True) as out:
                             while chunk := source.read(CHUNK):
+                                if job.cancel.is_set():
+                                    raise _Cancelled
                                 out.write(chunk)
                                 job.bytes_done += len(chunk)
                     except OSError as e:
                         log.warning(f"Skipped {full} while zipping the mod {mod.name!r}: {e}")
         part.replace(target)
         job.path, job.state = target, "ready"
+    except _Cancelled:
+        part.unlink(missing_ok=True)
+        with _jobs_lock:
+            if _jobs.get((game_id, mod.name)) is job:
+                del _jobs[(game_id, mod.name)]  # nothing is left of it: its status is "idle" again
+        return
     except Exception as e:  # noqa: BLE001 - reported to the client as the job's error
         error = str(e) or e.__class__.__name__
         part.unlink(missing_ok=True)
@@ -181,3 +202,55 @@ def _run_zip(game_id: int, mod: Mod, job: ZipJob, on_done) -> None:
         log.warning(f"Zipping the mod {mod.name!r} of game {game_id} failed: {e}")
     if on_done is not None:
         on_done(error)
+
+
+@dataclass(frozen=True)
+class CachedZip:
+    game_id: int
+    file_name: str
+    size_bytes: int
+    modified_at: float
+
+
+def cached_zips() -> list[CachedZip]:
+    """The finished zips kept in the cache, oldest game first (a zip still being written ends in `.part`)."""
+    root = Path(MODS_CACHE_PATH)
+    if not root.is_dir():
+        return []
+    found = []
+    for folder in sorted(root.iterdir(), key=lambda p: (not p.name.isdigit(), int(p.name) if p.name.isdigit() else 0)):
+        if not folder.is_dir() or not folder.name.isdigit():
+            continue
+        for zip_file in sorted(folder.glob("*.zip")):
+            try:
+                stat = zip_file.stat()
+            except OSError:
+                continue
+            found.append(CachedZip(int(folder.name), zip_file.name, stat.st_size, stat.st_mtime))
+    return found
+
+
+def _being_zipped(game_id: int, file_name: str) -> bool:
+    with _jobs_lock:
+        return any(
+            job.state == "zipping" and _zip_path(key[0], key[1]).name == file_name
+            for key, job in _jobs.items()
+            if key[0] == game_id
+        )
+
+
+def remove_cached_zip(game_id: int, file_name: str) -> bool:
+    """Delete one cached zip. False when there is no such file or it is being made again right now. A zip asked
+    for later is simply made again."""
+    path = Path(MODS_CACHE_PATH) / str(game_id) / file_name
+    if Path(file_name).name != file_name or not file_name.endswith(".zip") or not path.is_file():
+        return False
+    if _being_zipped(game_id, file_name):
+        return False
+    path.unlink(missing_ok=True)
+    return True
+
+
+def clear_cached_zips() -> int:
+    """Delete every cached zip that is not being made again; returns how many went."""
+    return sum(remove_cached_zip(z.game_id, z.file_name) for z in cached_zips())

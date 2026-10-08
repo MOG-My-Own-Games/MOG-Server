@@ -115,8 +115,17 @@ class InstallCacheEntrySchema(BaseModel):
     size_bytes: int
 
 
+class ModCacheEntrySchema(BaseModel):
+    game_id: int
+    file_name: str
+    size_bytes: int
+    modified_at: float
+
+
 class InstallCacheSchema(BaseModel):
     entries: list[InstallCacheEntrySchema]
+    # The zipped mods kept for download, apart from the installers' caches above.
+    mods: list[ModCacheEntrySchema] = []
 
 
 class InstallCacheClearSchema(BaseModel):

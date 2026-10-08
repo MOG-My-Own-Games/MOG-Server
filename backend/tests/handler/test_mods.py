@@ -147,3 +147,30 @@ def test_an_unknown_mod_or_game_is_a_404(api):
     assert api.get("/api/games/5/mods/nope/status").status_code == 404
     assert api.post("/api/games/5/mods/..%2Fgame.exe/prepare").status_code == 404
     assert api.get("/api/games/9/mods").status_code == 404
+
+
+def test_a_zip_can_be_cancelled_and_leaves_nothing_behind(game_root, monkeypatch):
+    mod = mods.find_mod(game_root, "mod1")
+    gate = threading.Event()
+    monkeypatch.setattr(mods, "_forget_old_zips", lambda: gate.wait(5))  # holds the worker until the test has cancelled
+    finished = []
+    job = mods.start_zip(5, mod, 3, on_done=finished.append)
+    assert mods.cancel_zip(5, "mod1") is True
+    gate.set()
+    for _ in range(500):
+        if mods.job_for(5, "mod1") is None:
+            break
+        threading.Event().wait(0.01)
+
+    assert mods.job_for(5, "mod1") is None and job.cancel.is_set()  # "idle" again
+    assert finished == []  # a cancelled zip is not a failure, nobody is told
+    assert not list(Path(mods.MODS_CACHE_PATH).rglob("*.zip*"))
+    assert mods.cancel_zip(5, "mod1") is False  # nothing is running now
+
+
+def test_the_cancel_endpoint_stops_a_running_zip_and_does_nothing_for_an_archive(api, game_root, monkeypatch):
+    assert api.post("/api/games/5/mods/mod2.zip/cancel").json()["state"] == "ready"  # an archive is never "zipping"
+    called = []
+    monkeypatch.setattr(mods, "cancel_zip", lambda gid, name: called.append((gid, name)))
+    assert api.post("/api/games/5/mods/mod1/cancel").json()["state"] == "idle"
+    assert called == [(5, "mod1")]

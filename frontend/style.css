@@ -155,6 +155,18 @@ code {
 .brand-icon { height: 32px; }
 .brand-title { height: 28px; }
 .topbar-actions { display: flex; gap: 0.75em; align-items: center; }
+/* Refresh, notifications and the user menu share one bordered pill, split by thin dividers. */
+.topbar-group {
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+}
+.topbar-group > * + * { border-left: 1px solid var(--border); }
+.topbar-group button { background: transparent; border-radius: 0; color: var(--text); }
+.topbar-group button:hover { background: var(--bg-elevated-2); filter: none; }
+.topbar-group > :first-child, .topbar-group > :first-child button { border-radius: var(--radius) 0 0 var(--radius); }
+.topbar-group > :last-child, .topbar-group > :last-child button { border-radius: 0 var(--radius) var(--radius) 0; }
 
 .avatar-sm, .avatar-placeholder {
   width: 28px;
@@ -214,7 +226,7 @@ code {
   height: calc(100vh - var(--topbar-h));
 }
 .sidebar.collapsed { width: 0; border-right: none; }
-.sidebar-inner { width: 260px; padding: 1em; }
+.sidebar-inner { width: 260px; padding: 1em; display: flex; flex-direction: column; min-height: 100%; }
 .sidebar h2 { font-size: 0.9em; text-transform: uppercase; color: var(--muted); }
 
 .search-wrap {
@@ -235,17 +247,27 @@ code {
   padding: 0;
   line-height: 1;
   border: none;
-  background: transparent;
-  color: var(--muted);
+  border-radius: 50%;
+  background: var(--accent-gradient);
+  color: #fff;
   font-size: 1.1em;
   cursor: pointer;
 }
-.search-clear:hover { color: var(--text); }
+.search-clear:hover { filter: brightness(1.12); }
 .search-clear[hidden] { display: none; }
 
-.sort-box { display: flex; flex-direction: column; gap: 0.4em; margin-bottom: 1em; }
+/* The sort controls sit at the bottom of the sidebar, as in the client. */
+.sort-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4em;
+  margin-top: auto;
+  padding-top: 0.8em;
+  border-top: 1px solid var(--border);
+}
 .sort-box select { width: 100%; }
-.check-row { display: flex; align-items: center; gap: 0.5em; font-size: 0.85em; color: var(--muted); }
+.sort-toggle { padding: 0.1em 0.2em; border-bottom: none; font-size: 0.85em; color: var(--muted); }
+.sort-toggle label:not(.switch) { cursor: pointer; flex: 1; }
 
 .loading-screen {
   display: flex;
@@ -321,6 +343,7 @@ code {
 .add-library-form { display: flex; flex-direction: column; gap: 0.5em; max-width: 360px; }
 
 .main { flex: 1; padding: 1.5em; overflow-y: auto; }
+#view-game.loading > :not(.back-link) { visibility: hidden; }
 .main-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1em; gap: 1em; }
 .main-header h3 { margin: 0; }
 
@@ -722,6 +745,8 @@ a.chip { color: inherit; text-decoration: none; }
 .provider-card-header { display: flex; justify-content: space-between; align-items: baseline; gap: 1em; }
 .provider-card-header h3 { display: flex; align-items: center; gap: 0.5em; }
 .provider-card-header a { font-size: 0.85em; }
+.provider-card-actions { display: flex; align-items: center; gap: 1em; }
+.provider-card.provider-off .field-label, .provider-card.provider-off > p { opacity: 0.55; }
 .validity-badge { font-size: 0.8em; }
 .validity-badge.valid { color: var(--success); }
 .validity-badge.invalid { color: var(--danger); }
@@ -772,8 +797,8 @@ a.chip { color: inherit; text-decoration: none; }
 .files-content .data-table td:first-child { word-break: break-all; }
 .files-content .data-table td:not(:first-child) { white-space: nowrap; }
 
-.bell-btn { position: relative; display: flex; align-items: center; padding: 0.45em 0.6em; }
-.bell-btn svg { width: 20px; height: 20px; fill: #fff; }
+.bell-btn, .icon-btn { position: relative; display: flex; align-items: center; padding: 0.45em 0.6em; }
+.bell-btn svg, .icon-btn svg { width: 20px; height: 20px; fill: #fff; }
 .bell-badge {
   position: absolute;
   top: -6px;

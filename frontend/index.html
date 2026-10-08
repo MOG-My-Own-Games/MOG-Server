@@ -23,8 +23,11 @@
   <div id="app-screen" class="screen" hidden>
     <header class="topbar">
       <a href="#" class="topbar-brand" title="MOG"><img class="brand-icon" src="assets/icon.png" alt="" /><img class="brand-title" src="assets/title.png" alt="MOG" /></a>
-      <div class="topbar-actions">
-        <button id="bell-btn" class="bell-btn" type="button" title="Notifications" aria-label="Notifications">
+      <div class="topbar-actions topbar-group">
+        <button id="refresh-games-btn" class="icon-btn" type="button" title="Refresh the library" aria-label="Refresh the library">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.65 6.35A7.96 7.96 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z" /></svg>
+        </button>
+        <button id="bell-btn" class="bell-btn icon-btn" type="button" title="Notifications" aria-label="Notifications">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a6 6 0 0 0-6 6v3.5L4.5 16h15L18 12.5V9a6 6 0 0 0-6-6zm-2 15a2 2 0 0 0 4 0z" /></svg>
           <span id="bell-badge" class="bell-badge" hidden>0</span>
         </button>
@@ -52,16 +55,6 @@
             <button id="game-search-clear" class="search-clear" type="button" title="Clear" aria-label="Clear the search" hidden>&times;</button>
           </div>
 
-          <div class="sort-box">
-            <label class="check-row"><input type="checkbox" id="sort-last-played" /> Last played first</label>
-            <select id="game-sort" aria-label="Sort games by">
-              <option value="newest">Release date: newest first</option>
-              <option value="oldest">Release date: oldest first</option>
-              <option value="az">A to Z</option>
-              <option value="za">Z to A</option>
-            </select>
-          </div>
-
           <div id="active-installs-widget" class="widget" hidden>
             <h2>Active installs</h2>
             <ul id="active-installs-list" class="active-installs-list"></ul>
@@ -71,6 +64,19 @@
           <ul id="library-list" class="library-list"></ul>
 
           <a href="#settings/cache" class="cache-size-link admin-only">Install cache: <span id="total-cache-size">...</span></a>
+
+          <div class="sort-box">
+            <div class="toggle-row sort-toggle">
+              <label for="sort-last-played">Last played first</label>
+              <label class="switch"><input type="checkbox" id="sort-last-played" /><span class="slider"></span></label>
+            </div>
+            <select id="game-sort" aria-label="Sort games by">
+              <option value="newest">Release date: newest first</option>
+              <option value="oldest">Release date: oldest first</option>
+              <option value="az">A to Z</option>
+              <option value="za">Z to A</option>
+            </select>
+          </div>
         </div>
       </aside>
       <button id="sidebar-toggle" class="sidebar-toggle" title="Collapse sidebar">&laquo;</button>
@@ -80,7 +86,6 @@
         <section id="view-games" class="view">
           <div class="main-header">
             <h2 id="games-heading">All Games</h2>
-            <button id="refresh-games-btn">Refresh</button>
           </div>
           <div id="games-loading" class="loading-screen">
             <img src="assets/mog-loading.png" alt="" />
@@ -109,6 +114,7 @@
               <div id="game-versions" class="chip-row" hidden></div>
               <p class="muted small">Game ID: <code id="game-id-display"></code></p>
               <p id="game-sizes" class="muted small" hidden></p>
+              <p id="game-last-played" class="muted small" hidden></p>
               <div class="page-actions">
                 <button id="client-install-btn" type="button" title="Install this game with the MOG client">Install</button>
                 <button id="scrape-btn" type="button" class="admin-only">Scrape</button>
@@ -419,6 +425,20 @@
                 <tbody id="cache-table-body"></tbody>
               </table>
             </div>
+
+            <div class="card">
+              <div class="main-header">
+                <h3>Cached mod zips</h3>
+                <div class="page-actions">
+                  <button id="clear-mod-cache-btn" class="danger" type="button">Clear all</button>
+                </div>
+              </div>
+              <p class="muted small">Zips made on demand from a mod's folder so it can be downloaded. They are made again when asked for.</p>
+              <table id="mod-cache-table" class="data-table">
+                <thead><tr><th>Game</th><th>Mod</th><th>Size</th><th>Made</th><th></th></tr></thead>
+                <tbody id="mod-cache-table-body"></tbody>
+              </table>
+            </div>
           </div>
 
           <div id="settings-tab-missing" class="tab-panel" hidden>
@@ -442,7 +462,10 @@
             <div class="card provider-card">
               <div class="provider-card-header">
                 <h3>IGDB <span id="igdb-valid-badge" class="validity-badge"></span></h3>
-                <a href="https://api-docs.igdb.com/#getting-started" target="_blank" rel="noopener">Getting started guide &#8599;</a>
+                <div class="provider-card-actions">
+                  <a href="https://api-docs.igdb.com/#getting-started" target="_blank" rel="noopener">Getting started guide &#8599;</a>
+                  <label class="switch" title="Use IGDB"><input type="checkbox" id="igdb-enabled" data-provider="igdb_enabled" aria-label="Use IGDB" /><span class="slider"></span></label>
+                </div>
               </div>
               <p class="muted small">
                 Create a Twitch developer app at
@@ -456,11 +479,26 @@
             <div class="card provider-card">
               <div class="provider-card-header">
                 <h3>SteamGridDB <span id="sgdb-valid-badge" class="validity-badge"></span></h3>
-                <a href="https://www.steamgriddb.com/profile/preferences/api" target="_blank" rel="noopener">Get an API key &#8599;</a>
+                <div class="provider-card-actions">
+                  <a href="https://www.steamgriddb.com/profile/preferences/api" target="_blank" rel="noopener">Get an API key &#8599;</a>
+                  <label class="switch" title="Use SteamGridDB"><input type="checkbox" id="sgdb-enabled" data-provider="steamgriddb_enabled" aria-label="Use SteamGridDB" /><span class="slider"></span></label>
+                </div>
               </div>
               <p class="muted small">Used for cover art. Free account, no approval wait.</p>
               <label class="field-label">API Key<input type="password" id="setting-sgdb-key" autocomplete="off" /></label>
             </div>
+
+            <div class="card provider-card">
+              <div class="provider-card-header">
+                <h3>HowLongToBeat</h3>
+                <div class="provider-card-actions">
+                  <label class="switch" title="Use HowLongToBeat"><input type="checkbox" id="hltb-enabled" data-provider="hltb_enabled" aria-label="Use HowLongToBeat" /><span class="slider"></span></label>
+                </div>
+              </div>
+              <p class="muted small">Completion times (main story, main + extra, completionist). No account or key is needed, and only games with an IGDB match are looked up.</p>
+            </div>
+
+            <p class="muted small">A provider that is switched off is not asked anything. Its saved keys stay, so switching it on again needs nothing typed in.</p>
 
             <button id="save-api-keys-btn" type="button">Save API keys</button>
             <p id="api-keys-saved" class="muted small"></p>

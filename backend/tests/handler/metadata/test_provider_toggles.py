@@ -16,6 +16,7 @@ def row(**over):
         igdb_enabled=None,
         steamgriddb_enabled=None,
         hltb_enabled=None,
+        watch_libraries=None,
         install_cache_ttl_days=None,
         install_default_proton_build=None,
         install_default_auto_mode=None,

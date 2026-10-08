@@ -19,11 +19,23 @@ from config import LIBRARY_WATCH_INTERVAL
 from logger.logger import log
 from models.library import Library
 
-from handler.database import db_game_handler, db_library_handler
+from handler.database import db_game_handler, db_library_handler, db_settings_handler
 from handler.scan_handler import ScanResult, scan_library
 from handler.scrape_handler import needs_scrape, scrape_and_announce
 
 Signature = tuple[tuple[str, bool, int, int], ...]
+
+DEFAULT_INTERVAL = 30  # seconds between looks when the environment does not say
+
+
+def enabled_in(settings) -> bool:
+    """Whether the folders are being watched: the switch in Settings > Libraries, or, while it has not been
+    touched, on (off when LIBRARY_WATCH_INTERVAL is 0 in the environment)."""
+    return LIBRARY_WATCH_INTERVAL > 0 if settings.watch_libraries is None else settings.watch_libraries
+
+
+def _watching_now() -> bool:
+    return enabled_in(db_settings_handler.get_settings())
 
 
 def signature(root: Path) -> Signature | None:
@@ -55,6 +67,7 @@ class LibraryWatcher:
     look: Callable[[Path], Signature | None] = signature
     scan: Callable[[Library], ScanResult] = scan_library
     after_scan: Callable[[Library, ScanResult], None] = lambda library, result: _scrape_what_is_missing(library, result)
+    enabled: Callable[[], bool] = _watching_now
     seen: dict[int, _Seen] = field(default_factory=dict)
 
     def poll(self) -> list[int]:
@@ -62,7 +75,10 @@ class LibraryWatcher:
 
         A library is scanned when it differs from what was last scanned and has looked the same on two polls
         in a row. One seen for the first time (after a start) differs from nothing, so it is scanned once,
-        which also catches what changed while the server was down."""
+        which also catches what changed while the server was down. Nothing is looked at while the switch in
+        Settings is off; what changed meanwhile is found once it is on again."""
+        if not self.enabled():
+            return []
         libraries = self.libraries()
         for gone in set(self.seen) - {library.id for library in libraries}:
             del self.seen[gone]
@@ -104,7 +120,7 @@ def _scrape_what_is_missing(library: Library, result: ScanResult) -> None:
 
 
 def run(
-    stop: threading.Event, interval: float = LIBRARY_WATCH_INTERVAL, watcher: LibraryWatcher | None = None
+    stop: threading.Event, interval: float = LIBRARY_WATCH_INTERVAL or DEFAULT_INTERVAL, watcher: LibraryWatcher | None = None
 ) -> None:
     """The watching loop, until `stop` is set."""
     watcher = watcher or LibraryWatcher()
@@ -115,11 +131,11 @@ def run(
             log.warning(f"Watching the libraries failed: {e}")
 
 
-def start() -> threading.Event | None:
-    """Start watching in the background; the event stops it. None when watching is turned off."""
-    if LIBRARY_WATCH_INTERVAL <= 0:
-        return None
+def start() -> threading.Event:
+    """Start the watching thread; the event stops it. It runs whatever the switch says and looks only while the
+    switch is on, so turning it on in Settings needs no restart."""
     stop = threading.Event()
-    threading.Thread(target=run, args=(stop,), daemon=True, name="library-watcher").start()
-    log.info(f"Watching the library folders for changes every {LIBRARY_WATCH_INTERVAL}s")
+    interval = LIBRARY_WATCH_INTERVAL or DEFAULT_INTERVAL
+    threading.Thread(target=run, args=(stop, interval), daemon=True, name="library-watcher").start()
+    log.info(f"Library folders are looked at every {interval}s while watching is on in Settings")
     return stop

@@ -4,6 +4,7 @@ from fastapi import APIRouter
 from starlette.concurrency import run_in_threadpool
 
 from endpoints.responses.settings import SettingsSchema, SettingsUpdateForm, SettingsValidationSchema
+from handler import library_watcher
 from handler.auth import AdminUser
 from handler.database import db_settings_handler
 from handler.metadata import hltb_handler, igdb_handler, sgdb_handler
@@ -17,6 +18,7 @@ def _schema(row: Settings) -> SettingsSchema:
     fields["igdb_enabled"] = igdb_handler.enabled_in(row)
     fields["steamgriddb_enabled"] = sgdb_handler.enabled_in(row)
     fields["hltb_enabled"] = hltb_handler.enabled_in(row)
+    fields["watch_libraries"] = library_watcher.enabled_in(row)
     return SettingsSchema(**fields)
 
 

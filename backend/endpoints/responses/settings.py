@@ -13,6 +13,7 @@ class SettingsSchema(BaseModel):
     igdb_enabled: bool
     steamgriddb_enabled: bool
     hltb_enabled: bool
+    watch_libraries: bool
     install_cache_ttl_days: int | None
     install_default_proton_build: str | None
     install_default_auto_mode: bool | None
@@ -34,6 +35,7 @@ class SettingsUpdateForm(BaseModel):
     igdb_enabled: bool | None = None
     steamgriddb_enabled: bool | None = None
     hltb_enabled: bool | None = None
+    watch_libraries: bool | None = None
     install_cache_ttl_days: int | None = None
     install_default_proton_build: str | None = None
     install_default_auto_mode: bool | None = None

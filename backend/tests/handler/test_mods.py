@@ -108,6 +108,7 @@ def api(game_root, monkeypatch):
     monkeypatch.setattr(games_endpoints.db_game_handler, "get_game", lambda i: game if i == 5 else None)
     notices = []
     monkeypatch.setattr(games_endpoints, "notify_mod_zipped", lambda *args: notices.append(args))
+    monkeypatch.setattr(games_endpoints, "notify_mod_downloaded", lambda *args: notices.append(("downloaded", *args)))
     app = FastAPI()
     app.include_router(games_endpoints.router, prefix="/api")
     user = SimpleNamespace(id=1, is_admin=False, hidden_library_ids=[])
@@ -141,6 +142,13 @@ def test_a_folder_is_zipped_on_request_then_downloaded_and_the_user_is_told(api)
     assert download.status_code == 200 and download.headers["content-type"] == "application/zip"
     assert zipfile.ZipFile(io.BytesIO(download.content)).namelist() == ["mod1/mod1file.zip", "mod1/readme.txt"]
     assert api.notices == [(1, 5, "mod1", None)]
+
+
+def test_a_finished_download_is_told_in_the_notifications_with_the_machine(api):
+    assert api.post("/api/games/5/mods/mod2.zip/downloaded", params={"machine": "karasu"}).status_code == 200
+    assert api.post("/api/games/5/mods/mod2.zip/downloaded").status_code == 200
+    assert api.post("/api/games/5/mods/nope/downloaded").status_code == 404
+    assert api.notices == [("downloaded", 1, 5, "mod2.zip", "karasu"), ("downloaded", 1, 5, "mod2.zip", None)]
 
 
 def test_an_unknown_mod_or_game_is_a_404(api):

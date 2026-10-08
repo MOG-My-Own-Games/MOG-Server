@@ -10,6 +10,7 @@ from models.notification import (
     KIND_AUTO_MODE_FAILED,
     KIND_AUTO_MODE_STUCK,
     KIND_GAMES_ADDED,
+    KIND_MOD_DOWNLOADED,
     KIND_MOD_FAILED,
     KIND_MOD_READY,
     KIND_SAVE_SYNCED,
@@ -109,6 +110,15 @@ def notify_games_added(library: Library, added: tuple[tuple[int, str], ...]) -> 
     for user in db_user_handler.get_all_users():
         if user.is_admin or library.id not in (user.hidden_library_ids or []):
             notify(user.id, KIND_GAMES_ADDED, title, body, game_id=game_id)
+
+
+def notify_mod_downloaded(user_id: int, game_id: int, mod: str, machine: str | None = None) -> None:
+    """A client finished downloading a mod: told in the inbox rather than with a window over the client."""
+    try:
+        where = f" on {machine}" if machine else ""
+        notify(user_id, KIND_MOD_DOWNLOADED, f"Mod downloaded: {mod}", f"{_game_name(game_id)}: saved{where}.", game_id=game_id)
+    except Exception as e:  # noqa: BLE001 - a notification must never fail the request
+        log.warning(f"Could not create the mod notification: {e}")
 
 
 def notify_mod_zipped(user_id: int, game_id: int, mod: str, error: str | None = None) -> None:

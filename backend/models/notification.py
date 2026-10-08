@@ -18,6 +18,7 @@ KIND_SAVE_SYNCED = "save_synced"
 KIND_GAMES_ADDED = "games_added"
 KIND_MOD_READY = "mod_ready"
 KIND_MOD_FAILED = "mod_failed"
+KIND_MOD_DOWNLOADED = "mod_downloaded"
 
 
 class Notification(BaseModel):

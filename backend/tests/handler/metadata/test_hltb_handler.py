@@ -188,3 +188,52 @@ class TestGetGameById:
         serve(monkeypatch, lambda m, u, k: (200, "<html></html>"))
         with pytest.raises(HLTBUnavailable):
             hltb_handler.get_game_by_id(7)
+
+
+class TestManualMatchEndpoints:
+    @staticmethod
+    def _run(monkeypatch, coro_fn, *args, game=True):
+        import asyncio
+        from types import SimpleNamespace
+
+        from endpoints import games
+
+        saved = {}
+        found = SimpleNamespace(id=1, name="Some Game") if game else None
+        monkeypatch.setattr(games.db_game_handler, "get_game", lambda _id: found)
+        monkeypatch.setattr(games.db_game_handler, "update_game", lambda gid, data: saved.update(data) or SimpleNamespace(**data))
+        monkeypatch.setattr(games.GameSchema, "model_validate", staticmethod(lambda obj: obj))
+        return asyncio.run(getattr(games, coro_fn)(SimpleNamespace(), 1, *args)), saved
+
+    def test_search_uses_the_typed_query_or_the_game_name(self, monkeypatch):
+        asked = []
+        monkeypatch.setattr(hltb_handler, "search_games", lambda name: asked.append(name) or [{"id": 7}])
+        assert self._run(monkeypatch, "search_hltb", "Typed")[0] == [{"id": 7}]
+        self._run(monkeypatch, "search_hltb", None)
+        assert asked == ["Typed", "Some Game"]
+
+    def test_apply_stores_the_id_and_the_times(self, monkeypatch):
+        monkeypatch.setattr(hltb_handler, "get_game_by_id", lambda i: {"id": i, "name": "Doom", "metadata": {"main_story": 3600}})
+        _, saved = self._run(monkeypatch, "apply_hltb_match", 7)
+        assert saved == {"hltb_id": 7, "hltb_metadata": {"main_story": 3600}}
+
+    def test_apply_of_a_game_without_times_changes_nothing(self, monkeypatch):
+        from fastapi import HTTPException
+
+        monkeypatch.setattr(hltb_handler, "get_game_by_id", lambda i: None)
+        with pytest.raises(HTTPException) as err:
+            self._run(monkeypatch, "apply_hltb_match", 7)
+        assert err.value.status_code == 404
+
+    def test_an_unreachable_site_is_a_bad_gateway(self, monkeypatch):
+        from fastapi import HTTPException
+
+        def blocked(*args):
+            raise HLTBUnavailable("blocked")
+
+        monkeypatch.setattr(hltb_handler, "search_games", blocked)
+        monkeypatch.setattr(hltb_handler, "get_game_by_id", blocked)
+        for fn, arg in (("search_hltb", None), ("apply_hltb_match", 7)):
+            with pytest.raises(HTTPException) as err:
+                self._run(monkeypatch, fn, arg)
+            assert err.value.status_code == 502

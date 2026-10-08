@@ -11,9 +11,9 @@ from handler.filesystem import fs_game_handler
 from handler.filesystem.installer_detection import category_for_path
 from handler import media as media_handler
 from handler import video_handler
-from handler.metadata import igdb_handler, ludusavi_handler, sgdb_handler
+from handler.metadata import hltb_handler, igdb_handler, ludusavi_handler, sgdb_handler
 from handler import mods as mods_handler
-from handler.notifications import notify_mod_zipped
+from handler.notifications import notify_mod_downloaded, notify_mod_zipped
 from handler.saves import purge_game
 from handler.sizes import game_sizes
 from handler.scrape_handler import refresh_game, search_name
@@ -298,6 +298,15 @@ async def cancel_game_mod(user: CurrentUser, id: Annotated[int, Path(ge=1)], nam
     return _job_schema(mod, mods_handler.job_for(id, mod.name))
 
 
+@router.post("/{id}/mods/{name}/downloaded")
+async def game_mod_downloaded(
+    user: CurrentUser, id: Annotated[int, Path(ge=1)], name: str, machine: Annotated[str | None, Query(max_length=64)] = None
+) -> None:
+    """A client says it has the mod now: the user finds that in their notifications."""
+    mod = await run_in_threadpool(_mod_of, user, id, name)
+    notify_mod_downloaded(user.id, id, mod.name, machine)
+
+
 @router.get("/{id}/mods/{name}/status")
 async def game_mod_status(user: CurrentUser, id: Annotated[int, Path(ge=1)], name: str) -> ModJobSchema:
     mod = await run_in_threadpool(_mod_of, user, id, name)
@@ -434,6 +443,35 @@ async def apply_igdb_match(user: AdminUser, id: Annotated[int, Path(ge=1)], igdb
     game = db_game_handler.update_game(id, {"sgdb_id": None})
     await run_in_threadpool(refresh_game, game, frozenset({"name", "summary"}))
     return GameSchema.model_validate(db_game_handler.get_game(id))
+
+
+@router.get("/{id}/metadata/hltb/search")
+async def search_hltb(
+    user: AdminUser, id: Annotated[int, Path(ge=1)], query: Annotated[str | None, Query()] = None
+) -> list[dict]:
+    """HowLongToBeat games for the name, each with the times it has: {id, name, metadata}."""
+    game = db_game_handler.get_game(id)
+    if game is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    try:
+        return await run_in_threadpool(hltb_handler.search_games, query or search_name(game.name))
+    except hltb_handler.HLTBUnavailable as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"HowLongToBeat could not be reached: {e}")
+
+
+@router.post("/{id}/metadata/hltb/{hltb_id}")
+async def apply_hltb_match(user: AdminUser, id: Annotated[int, Path(ge=1)], hltb_id: int) -> GameSchema:
+    """Apply one HowLongToBeat game as this game's times. Later scrapes keep the chosen id."""
+    if db_game_handler.get_game(id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    try:
+        found = await run_in_threadpool(hltb_handler.get_game_by_id, hltb_id)
+    except hltb_handler.HLTBUnavailable as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"HowLongToBeat could not be reached: {e}")
+    if found is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="HowLongToBeat has no times for this game")
+    game = db_game_handler.update_game(id, {"hltb_id": found["id"], "hltb_metadata": found["metadata"]})
+    return GameSchema.model_validate(game)
 
 
 @router.get("/{id}/metadata/sgdb/search")

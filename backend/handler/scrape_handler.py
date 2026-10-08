@@ -270,7 +270,11 @@ class ScrapeResult:
 
 
 def needs_scrape(game: Game) -> bool:
-    return not game.missing_from_fs and (not game.igdb_id or not game.cover_path or not game.media)
+    if game.missing_from_fs:
+        return False
+    # hltb_id 0 is a lookup that found nothing, so only a game never looked up is still to do.
+    hltb_pending = bool(game.igdb_id) and game.hltb_id is None and hltb_handler.is_enabled()
+    return not game.igdb_id or not game.cover_path or not game.media or hltb_pending
 
 
 def scrape_library(library_id: int, refresh: bool = False) -> ScrapeResult:

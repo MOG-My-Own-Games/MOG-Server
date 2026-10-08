@@ -287,6 +287,18 @@ class TestScrapeLibrary:
         assert not needs_scrape(_game(igdb_id=1, cover_path="c.png", media=picked))
         assert not needs_scrape(_game(missing_from_fs=True))
 
+    def test_a_scraped_game_never_looked_up_on_hltb_still_needs_a_scrape(self, monkeypatch):
+        from handler.scrape_handler import needs_scrape
+
+        done = dict(igdb_id=1, cover_path="c.png", media={"cover": {"url": "c.png", "source": "steamgriddb"}})
+        monkeypatch.setattr(config, "HLTB_ENABLED", True)
+        assert needs_scrape(_game(**done))
+        assert not needs_scrape(_game(**done, hltb_id=0))  # looked up, nothing found
+        assert not needs_scrape(_game(**done, hltb_id=7))
+        assert needs_scrape(_game(**{**done, "igdb_id": None}, hltb_id=0))  # the IGDB match is what is missing
+        monkeypatch.setattr(config, "HLTB_ENABLED", False)
+        assert not needs_scrape(_game(**done))
+
 
 class TestExplicitScrapeReplaces:
     @patch("handler.scrape_handler.refresh_game")

@@ -11,7 +11,7 @@ from handler.filesystem import fs_game_handler
 from handler.filesystem.installer_detection import category_for_path
 from handler import media as media_handler
 from handler import video_handler
-from handler.metadata import igdb_handler, sgdb_handler
+from handler.metadata import igdb_handler, ludusavi_handler, sgdb_handler
 from handler import mods as mods_handler
 from handler.notifications import notify_mod_zipped
 from handler.saves import purge_game
@@ -33,6 +33,7 @@ from endpoints.responses.game import (
     ModJobSchema,
     ModSchema,
     ModsSchema,
+    SavePathsSchema,
 )
 
 router = APIRouter(prefix="/games", tags=["games"])
@@ -59,12 +60,14 @@ async def list_games(user: CurrentUser, library_id: int | None = None) -> list[G
     installed = _installed_game_ids(user.id)
     with_saves = db_saves_handler.game_ids_with_saves()
     last_played = db_saves_handler.last_saved_by_game(user.id)
+    last_played_on = db_saves_handler.last_saved_on_by_game(user.id)
     return [
         GameSchema.model_validate(g).model_copy(
             update={
                 "installed": g.id in installed,
                 "saves_only": g.missing_from_fs and g.id in with_saves,
                 "last_played": last_played.get(g.id),
+                "last_played_on": last_played_on.get(g.id),
             }
         )
         for g in games
@@ -127,8 +130,14 @@ async def get_game(user: CurrentUser, id: Annotated[int, Path(ge=1)]) -> GameSch
     installed = game.id in _installed_game_ids(user.id)
     saves_only = game.missing_from_fs and game.id in db_saves_handler.game_ids_with_saves()
     last_played = db_saves_handler.last_saved_by_game(user.id).get(game.id)
+    last_played_on = db_saves_handler.last_saved_on_by_game(user.id).get(game.id)
     return GameSchema.model_validate(game).model_copy(
-        update={"installed": installed, "saves_only": saves_only, "last_played": last_played}
+        update={
+            "installed": installed,
+            "saves_only": saves_only,
+            "last_played": last_played,
+            "last_played_on": last_played_on,
+        }
     )
 
 
@@ -281,6 +290,14 @@ async def prepare_game_mod(user: CurrentUser, id: Annotated[int, Path(ge=1)], na
     return _job_schema(mod, job)
 
 
+@router.post("/{id}/mods/{name}/cancel")
+async def cancel_game_mod(user: CurrentUser, id: Annotated[int, Path(ge=1)], name: str) -> ModJobSchema:
+    """Stop zipping a mod (nothing happens when it is not being zipped)."""
+    mod = await run_in_threadpool(_mod_of, user, id, name)
+    mods_handler.cancel_zip(id, mod.name)
+    return _job_schema(mod, mods_handler.job_for(id, mod.name))
+
+
 @router.get("/{id}/mods/{name}/status")
 async def game_mod_status(user: CurrentUser, id: Annotated[int, Path(ge=1)], name: str) -> ModJobSchema:
     mod = await run_in_threadpool(_mod_of, user, id, name)
@@ -307,6 +324,16 @@ async def get_game_size(user: CurrentUser, id: Annotated[int, Path(ge=1)]) -> Ga
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     sizes = await run_in_threadpool(game_sizes, game)
     return GameSizeSchema(size_bytes=sizes.installer, file_count=sizes.files)
+
+
+@router.get("/{id}/save-paths")
+async def get_game_save_paths(user: CurrentUser, id: Annotated[int, Path(ge=1)]) -> SavePathsSchema:
+    """Where the game keeps its saves on Linux, when the community manifest knows (a client asks for a native game)."""
+    game = db_game_handler.get_game(id)
+    if game is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    names = (game.name, (game.igdb_metadata or {}).get("name"))
+    return SavePathsSchema(paths=ludusavi_handler.paths_for(*names))
 
 
 @router.get("/{id}/sizes")

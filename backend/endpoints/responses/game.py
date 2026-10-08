@@ -33,11 +33,19 @@ class GameSchema(BaseModel):
     installed: bool = False
     # When this user's newest saved version of the game was made (a game's saves are made as it is played).
     last_played: datetime | None = None
+    # The name of the machine that made that version, so where the game was last played.
+    last_played_on: str | None = None
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def fs_tags(self) -> list[str]:
         return parse_fs_tags(self.fs_name)
+
+
+class SavePathsSchema(BaseModel):
+    # Where a Linux build of the game keeps its saves, from the Ludusavi manifest, with its placeholders
+    # (`<xdgConfig>/Game/Saves`, `<home>/.game`, `<base>/saves`). Empty when the manifest does not know the game.
+    paths: list[str]
 
 
 class GameFileSchema(BaseModel):

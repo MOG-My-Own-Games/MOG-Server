@@ -180,6 +180,20 @@ def test_a_game_was_last_played_when_its_newest_version_was_made(api):
     assert db_saves_handler.last_saved_by_game(2) == {}  # another user's games are not this one's
 
 
+def test_a_game_was_last_played_on_the_machine_that_made_the_newest_version(api):
+    from handler.database import db_saves_handler
+
+    a = _register(api).json()
+    b = _register(api, UID_B, name="deck").json()
+    assert db_saves_handler.last_saved_on_by_game(1) == {}
+
+    _upload(api, a["id"])
+    assert db_saves_handler.last_saved_on_by_game(1) == {5: "karasu"}
+    _upload(api, b["id"], {"s.sav": b"later, on the other machine"})
+    assert db_saves_handler.last_saved_on_by_game(1) == {5: "deck"}
+    assert db_saves_handler.last_saved_on_by_game(2) == {}
+
+
 def test_a_new_version_notifies_but_the_same_content_again_does_not(api, monkeypatch):
     sent = []
     monkeypatch.setattr(saves_endpoints, "notify_save_synced", lambda *args: sent.append(args))

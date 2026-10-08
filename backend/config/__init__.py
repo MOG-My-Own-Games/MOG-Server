@@ -120,3 +120,12 @@ IGDB_CLIENT_SECRET: Final[str | None] = _get_env("IGDB_CLIENT_SECRET")
 STEAMGRIDDB_API_KEY: Final[str | None] = _get_env("STEAMGRIDDB_API_KEY")
 # HowLongToBeat needs no key; the flag only turns the lookups off.
 HLTB_ENABLED: Final[bool] = safe_str_to_bool(_get_env("HLTB_ENABLED") or "true")
+# Where games keep their saves: the community Ludusavi manifest, downloaded at startup and then now and then. It is
+# never part of the image; until a download ends, the copy kept from the last run answers.
+LUDUSAVI_ENABLED: Final[bool] = safe_str_to_bool(_get_env("LUDUSAVI_ENABLED") or "true")
+LUDUSAVI_MANIFEST_URL: Final[str] = (
+    _get_env("LUDUSAVI_MANIFEST_URL")
+    or "https://raw.githubusercontent.com/mtkennerly/ludusavi-manifest/master/data/manifest.yaml"
+)
+LUDUSAVI_CACHE_PATH: Final[str] = f"{MOG_BASE_PATH}/cache/ludusavi"
+LUDUSAVI_REFRESH_HOURS: Final[int] = max(1, safe_int(_get_env("LUDUSAVI_REFRESH_HOURS"), 24))

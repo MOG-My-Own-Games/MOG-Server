@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import and_, delete, func, select
 from sqlalchemy.orm import Session
 
 from decorators.database import begin_session
+from models.device import Device
 from models.save_version import SaveVersion
 
 from .base_handler import DBBaseHandler
@@ -88,6 +89,24 @@ class DBSavesHandler(DBBaseHandler):
             .group_by(SaveVersion.game_id)
         ).all()
         return {game_id: created for game_id, created in rows}
+
+    @begin_session
+    def last_saved_on_by_game(self, user_id: int, session: Session = None) -> dict:  # type: ignore
+        """The name of the machine that made this user's newest version of each game: where it was last played."""
+        newest = (
+            select(SaveVersion.game_id, func.max(SaveVersion.created_at).label("at"))
+            .where(SaveVersion.user_id == user_id)
+            .group_by(SaveVersion.game_id)
+            .subquery()
+        )
+        rows = session.execute(
+            select(SaveVersion.game_id, Device.name)
+            .join(Device, Device.id == SaveVersion.device_id)
+            .join(newest, and_(SaveVersion.game_id == newest.c.game_id, SaveVersion.created_at == newest.c.at))
+            .where(SaveVersion.user_id == user_id)
+            .order_by(SaveVersion.id)
+        ).all()
+        return {game_id: name for game_id, name in rows}
 
     @begin_session
     def summary(

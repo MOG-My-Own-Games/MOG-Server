@@ -136,6 +136,11 @@
               <ul id="igdb-results" class="match-results"></ul>
             </div>
             <div class="metadata-search">
+              <h4>How Long To Beat</h4>
+              <button id="hltb-search-btn" type="button">Search by name</button>
+              <ul id="hltb-results" class="match-results"></ul>
+            </div>
+            <div class="metadata-search">
               <h4>SteamGridDB cover</h4>
               <button id="sgdb-search-btn" type="button">Search by name</button>
               <div id="sgdb-results" class="grid-results"></div>
@@ -258,6 +263,7 @@
                   <div class="main-header">
                     <h3>Saves</h3>
                     <div class="page-actions">
+                      <button type="button" id="saves-download-latest" hidden>Download latest</button>
                       <select id="saves-upload-device" aria-label="Device the zip belongs to"></select>
                       <label class="button-link" for="saves-upload-input">Upload zip</label>
                       <input type="file" id="saves-upload-input" accept=".zip,application/zip" hidden />

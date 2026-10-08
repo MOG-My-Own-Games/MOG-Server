@@ -1566,6 +1566,7 @@ async function openGamePage(id) {
   document.getElementById("client-install-status").textContent = "";
   document.getElementById("igdb-results").innerHTML = "";
   document.getElementById("sgdb-results").innerHTML = "";
+  document.getElementById("hltb-results").innerHTML = "";
   document.getElementById("edit-metadata-form").hidden = true;
 
   document.getElementById("install-status").hidden = true;
@@ -2097,6 +2098,45 @@ document.getElementById("igdb-search-btn").addEventListener("click", async () =>
   }
 });
 
+document.getElementById("hltb-search-btn").addEventListener("click", async () => {
+  const list = document.getElementById("hltb-results");
+  list.innerHTML = "Searching...";
+  try {
+    const results = await api(`/api/games/${activeGame.id}/metadata/hltb/search${searchQuery()}`);
+    if (results.length === 0) {
+      list.innerHTML = '<li class="muted">No results with a completion time.</li>';
+      return;
+    }
+    list.innerHTML = "";
+    for (const r of results) {
+      const li = document.createElement("li");
+      const name = document.createElement("span");
+      name.className = "match-name";
+      const main = r.metadata?.main_story;
+      name.textContent = main ? `${r.name} (${formatPlaytime(main)})` : r.name;
+      li.appendChild(name);
+      const applyBtn = document.createElement("button");
+      applyBtn.type = "button";
+      applyBtn.textContent = "Apply";
+      applyBtn.addEventListener("click", async () => {
+        try {
+          const game = await api(`/api/games/${activeGame.id}/metadata/hltb/${r.id}`, { method: "POST" });
+          activeGame = game;
+          renderOverview(game);
+          document.getElementById("scrape-status").textContent = `How Long To Beat: ${r.name}`;
+          await refreshGames();
+        } catch (err) {
+          alert(`Could not apply: ${err.message}`);
+        }
+      });
+      li.appendChild(applyBtn);
+      list.appendChild(li);
+    }
+  } catch (err) {
+    list.innerHTML = `<li class="error">${escapeHtml(err.message)}</li>`;
+  }
+});
+
 document.getElementById("sgdb-search-btn").addEventListener("click", async () => {
   const grid = document.getElementById("sgdb-results");
   grid.innerHTML = "Searching...";
@@ -2137,41 +2177,69 @@ document.getElementById("sgdb-search-btn").addEventListener("click", async () =>
 // excludes them (see handler/filesystem/installer_detection.py).
 const CHAINABLE_KINDS = new Set(["known installer", "executable (top level)", "executable (nested)"]);
 
+// "Use the files as they are": picked from the list when the folder holds no installer (it is probably the game
+// itself). Starting it sends extract_only with no file named.
+const EXTRACT_AS_IS = { path: "", kind: "extract as it is", category: "game", extractAsIs: true };
+
 async function loadCandidates(gameId) {
   const el = document.getElementById("game-candidates");
   el.innerHTML = "Loading installer candidates...";
   try {
     const data = await api(`/api/games/${gameId}/install/candidates`);
     const chainable = data.candidates.filter((c) => CHAINABLE_KINDS.has(c.kind));
-    if (data.candidates.length === 0) {
+    const portable = Boolean(data.extract_suggested);
+    if (data.candidates.length === 0 && !portable) {
       el.innerHTML = '<p class="muted">No installer detected automatically - start the install anyway to pick one by hand through the installer display.</p>';
       return;
     }
     el.innerHTML = "";
+    if (portable) {
+      const note = document.createElement("p");
+      note.className = "muted small";
+      note.textContent =
+        "No installer was found in this folder, so it is probably the game itself. Extract it as it is, or pick one of its executables to run as the installer.";
+      el.appendChild(note);
+    }
+    // The "just extract" entry comes first and excludes the executables below it: it is one way to install,
+    // they are another (and can be chained).
+    const entries = portable ? [EXTRACT_AS_IS, ...chainable] : chainable;
     const list = document.createElement("div");
     list.className = "candidate-list";
-    chainable.forEach((c, i) => {
+    const checks = [];
+    const select = () => {
+      installQueue = entries.filter((_, j) => checks[j].checked);
+    };
+    entries.forEach((c, i) => {
       const label = document.createElement("label");
       label.className = "candidate-row";
       const check = document.createElement("input");
       check.type = "checkbox";
       const isBase = c.category === "game";
       check.checked = i === 0 && isBase;
-      if (check.checked) installQueue = [c];
+      checks.push(check);
       check.addEventListener("change", () => {
-        installQueue = chainable.filter((_, j) => list.children[j].querySelector("input").checked);
+        if (check.checked) {
+          // Extracting as it is and running an executable do not mix.
+          entries.forEach((other, j) => {
+            if (j !== i && (c.extractAsIs || other.extractAsIs)) checks[j].checked = false;
+          });
+        }
+        select();
       });
       label.appendChild(check);
       const text = document.createElement("span");
-      text.textContent = `${isBase ? "" : `[${c.category.toUpperCase()}] `}${c.path} (${fmtBytes(c.file_size_bytes)})`;
+      text.textContent = c.extractAsIs
+        ? "Just extract: use the files as they are, run nothing"
+        : `${isBase ? "" : `[${c.category.toUpperCase()}] `}${c.path} (${fmtBytes(c.file_size_bytes)})`;
       label.appendChild(text);
       list.appendChild(label);
     });
+    select();
     el.appendChild(list);
     // An archive/disc image with nothing directly executable alongside it
     // (e.g. the whole game ships as one .zip) - not chainable, but still
     // worth surfacing so Install has something to run.
-    if (chainable.length === 0 && data.candidates.length > 0 && data.candidates[0].category === "game") {
+    if (chainable.length === 0 && !portable && data.candidates.length > 0 && data.candidates[0].category === "game") {
       installQueue = [data.candidates[0]];
       const note = document.createElement("p");
       note.className = "muted small";
@@ -2246,6 +2314,8 @@ async function startInstallInBackground(game) {
   // starts nothing for it here.
   const archive = await archiveWithoutInstaller(game.id, null);
   if (archive) return { askedByClient: archive.file_name || archive.path };
+  // A folder with no installer in it needs the same decision, and the server would only wait for a pick.
+  if (await folderWithoutInstaller(game.id)) return { askedByClient: game.name };
   await api(`/api/games/${game.id}/install`, { method: "POST", body: JSON.stringify({}) });
   return {};
 }
@@ -2270,7 +2340,7 @@ async function installWithClient() {
   const server = serverError
     ? ` The server could not start the installer: ${serverError}`
     : outcome.askedByClient
-      ? ` ${outcome.askedByClient} has no installer in it, so MOG will ask whether to extract it as it is.`
+      ? ` ${outcome.askedByClient} has no installer in it, so MOG will ask which executable to run, or to extract it as it is.`
       : " The installer is running on the server.";
   if (answered) {
     status.textContent = `MOG is installing ${game.name}.${server}`;
@@ -2399,6 +2469,16 @@ async function archiveWithoutInstaller(gameId, candidate) {
   }
 }
 
+// The same for a game's own folder: true when the server finds no installer in it (it is probably the game itself).
+async function folderWithoutInstaller(gameId) {
+  try {
+    const found = await api(`/api/games/${gameId}/install/candidates`);
+    return Boolean(found.extract_suggested);
+  } catch (_) {
+    return false;
+  }
+}
+
 // Resolves "extract", "install" or null (cancelled).
 function askExtractAsIs(pick) {
   return new Promise((resolve) => {
@@ -2435,7 +2515,9 @@ async function startInstall(candidate) {
   const ttlRaw = document.getElementById("ttl-days-input").value;
   if (ttlRaw !== "") body.ttl_seconds = parseInt(ttlRaw, 10) * 86400;
 
-  if (candidate) {
+  if (candidate?.extractAsIs) {
+    body.extract_only = true;
+  } else if (candidate) {
     if (ARCHIVE_SOURCE_KINDS.has(candidate.kind)) {
       body.source_path = candidate.path;
     } else {
@@ -2443,7 +2525,7 @@ async function startInstall(candidate) {
     }
   }
 
-  const archive = await archiveWithoutInstaller(activeGame.id, candidate);
+  const archive = candidate?.extractAsIs ? null : await archiveWithoutInstaller(activeGame.id, candidate);
   if (archive) {
     const answer = await askExtractAsIs(archive);
     if (answer === null) return;
@@ -2763,9 +2845,29 @@ function fmtWhen(iso) {
   return iso ? new Date(iso).toLocaleString() : "never";
 }
 
+// The newest version of the game from any machine, with the machine that made it.
+function newestSave(devices) {
+  let best = null;
+  for (const { device, versions } of devices) {
+    for (const v of versions) {
+      if (!best || v.created_at > best.version.created_at || (v.created_at === best.version.created_at && v.id > best.version.id)) {
+        best = { version: v, device };
+      }
+    }
+  }
+  return best;
+}
+
 function renderSavesPanel() {
   document.getElementById("saves-keep").textContent = gameSaves ? gameSaves.keep_versions : 3;
   const devices = gameSaves ? gameSaves.devices : [];
+  const latest = newestSave(devices);
+  const latestBtn = document.getElementById("saves-download-latest");
+  latestBtn.hidden = !latest;
+  if (latest) {
+    latestBtn.dataset.version = latest.version.id;
+    latestBtn.title = `Saved ${fmtWhen(latest.version.created_at)} on ${latest.device.name}`;
+  }
   document.getElementById("saves-empty").hidden = devices.length > 0;
   document.getElementById("saves-devices").innerHTML = devices
     .map(({ device, versions }) => {
@@ -2796,7 +2898,6 @@ function renderSavesPanel() {
         <div class="saves-device">
           <div class="main-header">
             <h4>${escapeHtml(device.name)}${platform}</h4>
-            <button type="button" data-action="download" data-version="${versions[0].id}">Download latest</button>
           </div>
           <p class="muted small">${escapeHtml(device.hostname || "")} - last seen ${escapeHtml(fmtWhen(device.last_seen))}</p>
           <table class="data-table">
@@ -2838,6 +2939,14 @@ document.getElementById("saves-devices").addEventListener("click", async (e) => 
       setSavesStatus("Deleted.", "success");
       await loadSaves(activeGame.id);
     }
+  } catch (err) {
+    setSavesStatus(`Failed: ${err.message}`, "error");
+  }
+});
+
+document.getElementById("saves-download-latest").addEventListener("click", async (e) => {
+  try {
+    await downloadWithAuth(`/api/saves/${e.currentTarget.dataset.version}/download`, "save.zip");
   } catch (err) {
     setSavesStatus(`Failed: ${err.message}`, "error");
   }

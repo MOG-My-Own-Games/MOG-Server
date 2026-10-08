@@ -207,19 +207,39 @@ function stopNotificationPolling() {
   renderNotificationCounts();
 }
 
-function renderNotificationList() {
+// What the server records about something a client did itself; every other kind comes from the server.
+const CLIENT_NOTIFICATION_KINDS = new Set(["save_synced", "save_restored", "mod_downloaded"]);
+
+// A notification about a game shows the game's own icon (its cover when it has no icon); the others show who wrote
+// them: the client's icon for what a client did, the server's for the rest.
+function notificationIcon(n, game) {
+  const own = game && (gameIconUrl(game) || game.cover_path);
+  if (own) return own;
+  return CLIENT_NOTIFICATION_KINDS.has(n.kind) ? "assets/mog-client.png" : "assets/icon.png";
+}
+
+let notificationRender = 0;
+
+async function renderNotificationList() {
+  const token = ++notificationRender;
+  const items = notificationData.notifications;
+  const games = await Promise.all(items.map((n) => (n.game_id ? gameById(n.game_id) : null)));
+  if (token !== notificationRender) return; // a newer list is being drawn
   const list = document.getElementById("notifications-list");
   list.innerHTML = "";
-  document.getElementById("notifications-empty").hidden = notificationData.notifications.length > 0;
-  for (const n of notificationData.notifications) {
+  document.getElementById("notifications-empty").hidden = items.length > 0;
+  for (const [index, n] of items.entries()) {
     const li = document.createElement("li");
     li.className = `notification-item${n.read ? "" : " unread"}`;
     const game = n.game_id ? `<a href="#game/${n.game_id}">Open game</a> &middot; ` : "";
     li.innerHTML = `
-      <div>
-        <h4 class="notification-title">${escapeHtml(n.title)}</h4>
-        ${n.body ? `<p class="notification-body">${escapeHtml(n.body)}</p>` : ""}
-        <div class="notification-meta">${game}${escapeHtml(new Date(n.created_at).toLocaleString())}</div>
+      <div class="notification-main">
+        <img class="notification-icon" src="${escapeHtml(notificationIcon(n, games[index]))}" alt="" />
+        <div>
+          <h4 class="notification-title">${escapeHtml(n.title)}</h4>
+          ${n.body ? `<p class="notification-body">${escapeHtml(n.body)}</p>` : ""}
+          <div class="notification-meta">${game}${escapeHtml(new Date(n.created_at).toLocaleString())}</div>
+        </div>
       </div>
     `;
     const actions = document.createElement("div");

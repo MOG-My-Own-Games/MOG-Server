@@ -517,7 +517,8 @@ for (const box of document.querySelectorAll("input[data-provider]")) {
     try {
       const saved = await api("/api/settings", { method: "PUT", body: JSON.stringify({ [box.dataset.provider]: box.checked }) });
       applyProviderToggles(saved);
-      await refreshProviderValidityBadges();
+      const provider = { igdb_enabled: "igdb", steamgriddb_enabled: "steamgriddb" }[box.dataset.provider];
+      if (provider) await refreshProviderValidityBadges(provider); // HowLongToBeat has no key to check
     } catch (err) {
       box.checked = !box.checked;
       card.classList.toggle("provider-off", !box.checked);
@@ -541,16 +542,30 @@ function applyValidityBadge(el, valid) {
   }
 }
 
-async function refreshProviderValidityBadges() {
-  const igdbBadge = document.getElementById("igdb-valid-badge");
-  const sgdbBadge = document.getElementById("sgdb-valid-badge");
+const PROVIDER_BADGES = { igdb: "igdb-valid-badge", steamgriddb: "sgdb-valid-badge" };
+// What each provider needs typed in before it can be asked anything: IGDB wants both values.
+const PROVIDER_FIELDS = { igdb: ["setting-igdb-id", "setting-igdb-secret"], steamgriddb: ["setting-sgdb-key"] };
+
+function providerHasItsKeys(provider) {
+  return PROVIDER_FIELDS[provider].every((id) => document.getElementById(id).value.trim() !== "");
+}
+
+// Checks the keys against the provider, for one provider (`only`) or both. A provider with a key still missing is
+// not asked, and when nothing is left to ask nothing is sent: a call to a provider is made only to find something out.
+async function refreshProviderValidityBadges(only = null) {
+  const wanted = only ? [only] : Object.keys(PROVIDER_BADGES);
+  const asked = wanted.filter(providerHasItsKeys);
+  for (const provider of wanted) {
+    if (!asked.includes(provider)) applyValidityBadge(document.getElementById(PROVIDER_BADGES[provider]), null);
+  }
+  if (asked.length === 0) return;
   try {
-    const result = await api("/api/settings/validate");
-    applyValidityBadge(igdbBadge, result.igdb_valid);
-    applyValidityBadge(sgdbBadge, result.steamgriddb_valid);
+    const result = await api(`/api/settings/validate${asked.length === 1 ? `?provider=${asked[0]}` : ""}`);
+    for (const provider of asked) {
+      applyValidityBadge(document.getElementById(PROVIDER_BADGES[provider]), result[provider === "igdb" ? "igdb_valid" : "steamgriddb_valid"]);
+    }
   } catch (_) {
-    applyValidityBadge(igdbBadge, null);
-    applyValidityBadge(sgdbBadge, null);
+    for (const provider of asked) applyValidityBadge(document.getElementById(PROVIDER_BADGES[provider]), null);
   }
 }
 
@@ -838,7 +853,7 @@ async function saveInstallDefaults() {
 
 // The keys are saved when a field is left or Enter is pressed in it (the browser's `change`), not by a button.
 let apiKeysSavedTimer = null;
-async function saveApiKeys() {
+async function saveApiKeys(provider) {
   const savedEl = document.getElementById("api-keys-saved");
   try {
     await api("/api/settings", {
@@ -852,14 +867,14 @@ async function saveApiKeys() {
     savedEl.textContent = "Saved.";
     clearTimeout(apiKeysSavedTimer);
     apiKeysSavedTimer = setTimeout(() => (savedEl.textContent = ""), 2500);
-    await refreshProviderValidityBadges();
+    await refreshProviderValidityBadges(provider); // only the provider whose field this is, and only if it has all its keys
   } catch (err) {
     savedEl.textContent = `Could not save: ${err.message}`;
   }
 }
 
-for (const id of ["setting-igdb-id", "setting-igdb-secret", "setting-sgdb-key"]) {
-  document.getElementById(id).addEventListener("change", saveApiKeys);
+for (const [provider, ids] of Object.entries(PROVIDER_FIELDS)) {
+  for (const id of ids) document.getElementById(id).addEventListener("change", () => saveApiKeys(provider));
 }
 
 document.getElementById("save-download-workers-btn").addEventListener("click", async () => {

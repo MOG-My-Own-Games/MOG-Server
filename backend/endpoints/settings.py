@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter
 from starlette.concurrency import run_in_threadpool
 
@@ -38,14 +40,25 @@ async def update_settings(user: AdminUser, data: SettingsUpdateForm) -> Settings
 
 
 @router.get("/validate")
-async def validate_settings(user: AdminUser) -> SettingsValidationSchema:
+async def validate_settings(
+    user: AdminUser, provider: Literal["igdb", "steamgriddb"] | None = None
+) -> SettingsValidationSchema:
     """Live check of the configured provider keys - a green/red indicator
     next to each field in Settings, not a gate on anything (a request with a
-    bad key already just fails closed with an empty result on its own)."""
+    bad key already just fails closed with an empty result on its own).
+
+    With `provider` only that one is asked, so saving one field does not call the other provider. A provider
+    with a key missing (IGDB needs both its values) or switched off is not called at all."""
     settings = db_settings_handler.get_settings()
     # A provider switched off is not checked: its credentials stay saved but nothing uses them.
-    igdb_configured = bool(settings.igdb_client_id and settings.igdb_client_secret) and igdb_handler.enabled_in(settings)
-    sgdb_configured = bool(settings.steamgriddb_api_key) and sgdb_handler.enabled_in(settings)
+    igdb_configured = (
+        provider in (None, "igdb")
+        and bool(settings.igdb_client_id and settings.igdb_client_secret)
+        and igdb_handler.enabled_in(settings)
+    )
+    sgdb_configured = (
+        provider in (None, "steamgriddb") and bool(settings.steamgriddb_api_key) and sgdb_handler.enabled_in(settings)
+    )
     return SettingsValidationSchema(
         igdb_valid=await run_in_threadpool(igdb_handler.validate_credentials) if igdb_configured else None,
         steamgriddb_valid=await run_in_threadpool(sgdb_handler.validate_key) if sgdb_configured else None,

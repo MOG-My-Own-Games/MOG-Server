@@ -105,3 +105,38 @@ def test_a_provider_that_is_off_is_not_validated(stored, monkeypatch):
     result = asyncio.run(settings_endpoint.validate_settings(SimpleNamespace()))
 
     assert (result.igdb_valid, result.steamgriddb_valid) == (None, True) and checked == ["sgdb"]
+
+
+# --- saving a key does not call a provider for nothing ---------------------------------------------
+
+
+def _watch_calls(monkeypatch):
+    called = []
+    monkeypatch.setattr(igdb_handler, "validate_credentials", lambda: called.append("igdb") or True)
+    monkeypatch.setattr(sgdb_handler, "validate_key", lambda: called.append("sgdb") or True)
+    return called
+
+
+def test_asking_for_one_provider_does_not_call_the_other(stored, monkeypatch):
+    called = _watch_calls(monkeypatch)
+    result = asyncio.run(settings_endpoint.validate_settings(SimpleNamespace(), provider="igdb"))
+    assert called == ["igdb"] and (result.igdb_valid, result.steamgriddb_valid) == (True, None)
+    called.clear()
+    result = asyncio.run(settings_endpoint.validate_settings(SimpleNamespace(), provider="steamgriddb"))
+    assert called == ["sgdb"] and (result.igdb_valid, result.steamgriddb_valid) == (None, True)
+
+
+def test_igdb_with_only_one_of_its_two_values_is_not_called(stored, monkeypatch):
+    called = _watch_calls(monkeypatch)
+    for missing in ({"igdb_client_secret": None}, {"igdb_client_id": ""}):
+        stored["row"] = row(**missing)
+        result = asyncio.run(settings_endpoint.validate_settings(SimpleNamespace(), provider="igdb"))
+        assert result.igdb_valid is None
+    assert called == []
+
+
+def test_a_provider_with_no_key_is_not_called_whoever_asks(stored, monkeypatch):
+    called = _watch_calls(monkeypatch)
+    stored["row"] = row(steamgriddb_api_key=None, igdb_client_id=None)
+    result = asyncio.run(settings_endpoint.validate_settings(SimpleNamespace()))
+    assert called == [] and (result.igdb_valid, result.steamgriddb_valid) == (None, None)

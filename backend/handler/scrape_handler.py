@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from handler.database import db_game_handler
 from handler.notifications import notify_games_added
 from handler import media as media_handler
+from handler import video_handler
 from handler.metadata import hltb_handler, igdb_handler, sgdb_handler
 from logger.logger import log
 from handler.name_matching import best_match, query_variants
@@ -291,7 +292,24 @@ def scrape_library(library_id: int, refresh: bool = False) -> ScrapeResult:
             scraped += fetch(game)
         except Exception as e:  # noqa: BLE001 - one bad game must not stop the rest
             log.warning(f"Scrape of {game.name!r} failed: {e}")
+    warm_videos([g for g in db_game_handler.get_games_for_library(library_id) if not g.missing_from_fs])
     return ScrapeResult(total=len(games), scraped=scraped)
+
+
+def warm_videos(games: list[Game]) -> None:
+    """Have the videos of these games looked up in the background, from the metadata as it is now, so their
+    pages do not wait for a search the first time they are opened."""
+    try:
+        video_handler.prefetch_in_background(
+            (g.id, g.name, (g.igdb_metadata or {}).get("videos")) for g in games
+        )
+    except Exception as e:  # noqa: BLE001 - the scrape is done; this is only a head start
+        log.warning(f"Could not start the video lookups: {e}")
+
+
+def warm_all_videos() -> None:
+    """The same for the whole library, at start: the games that were scanned before this existed."""
+    warm_videos([g for g in db_game_handler.get_all_games() if not g.missing_from_fs])
 
 
 _scraping: set[int] = set()

@@ -1,5 +1,7 @@
 """A game's intro and gameplay videos: the ones IGDB lists (YouTube ids) when it has them, else found by
-searching YouTube when the page is opened. The page embeds them; nothing is downloaded here.
+searching YouTube. The search happens in the background after a scan or a scrape (and at start), so the page
+finds the answer waiting; opening a page that has none yet still searches. The page embeds the videos; nothing
+is downloaded here.
 
 RomM only takes IGDB's first video. The search is the extra step, so it is strict: a result has to be about
 the game, say in its title what it is (an intro or trailer, a gameplay), and not be music, a commented or
@@ -9,10 +11,14 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import time
+from collections.abc import Callable, Iterable
+from pathlib import Path
 from typing import Any, NamedTuple
 
 import httpx
+from config import MOG_BASE_PATH
 from logger.logger import log
 
 KINDS = ("intro", "gameplay")
@@ -57,6 +63,15 @@ MIN_GAMEPLAY_SECONDS = 90  # a shorter "gameplay" is a clip
 
 # (game id, kind) -> (when it was looked up, the entry or None for a miss)
 _searched: dict[tuple[int, str], tuple[float, dict[str, Any] | None]] = {}
+
+# Kept next to the database (never in the resources folder, which is served without a login), so a restart
+# does not ask YouTube about the whole library again.
+CACHE_FILE = Path(MOG_BASE_PATH) / "video_cache.json"
+PREFETCH_PAUSE = 2.0  # seconds between two games that went to YouTube
+_cache_lock = threading.Lock()
+_cache_loaded = False
+_prefetching = threading.Lock()
+searches_made = 0  # lookups that went to YouTube, for the tests and the log
 
 
 class Result(NamedTuple):
@@ -211,12 +226,43 @@ def search_video(game_name: str, kind: str) -> dict[str, Any] | None:
     return None
 
 
+def _load_cache() -> None:
+    """Read the saved answers once, the first time they are needed."""
+    global _cache_loaded
+    with _cache_lock:
+        if _cache_loaded:
+            return
+        _cache_loaded = True
+        try:
+            raw = json.loads(CACHE_FILE.read_text())
+        except (OSError, ValueError):
+            return
+        for key, value in (raw if isinstance(raw, dict) else {}).items():
+            game_id, _, kind = key.partition(":")
+            if game_id.isdigit() and kind in KINDS and isinstance(value, list) and len(value) == 2:
+                _searched.setdefault((int(game_id), kind), (float(value[0]), value[1]))
+
+
+def _save_cache() -> None:
+    with _cache_lock:
+        data = {f"{game_id}:{kind}": [when, entry] for (game_id, kind), (when, entry) in _searched.items()}
+        try:
+            tmp = CACHE_FILE.with_suffix(".tmp")
+            tmp.write_text(json.dumps(data))
+            tmp.replace(CACHE_FILE)
+        except OSError as e:
+            log.warning(f"Could not keep the video lookups: {e}")
+
+
 def find_videos(
     game_id: int, game_name: str, igdb_videos: list[dict[str, Any]] | None, search=search_video, now=time.time
 ) -> list[dict]:
     """The game's videos in the order the page shows them: intro first, then gameplay. A kind IGDB does not
     have is searched for, and the answer (a miss too) is remembered for a while."""
+    global searches_made
+    _load_cache()
     found = from_igdb(igdb_videos)
+    searched = False
     for kind in KINDS:
         if kind in found:
             continue
@@ -230,6 +276,55 @@ def find_videos(
                 log.warning(f"Video search for {game_name!r} ({kind}) failed: {e}")
                 continue  # not remembered: the next visit tries again
             _searched[(game_id, kind)] = (now(), entry)
+            searches_made += 1
+            searched = True
         if entry:
             found[kind] = entry
+    if searched:
+        _save_cache()
     return [found[kind] for kind in KINDS if kind in found]
+
+
+def prefetch(
+    games: Iterable[tuple[int, str, list[dict[str, Any]] | None]],
+    search=search_video,
+    now=time.time,
+    sleep: Callable[[float], None] = time.sleep,
+    pause: float = PREFETCH_PAUSE,
+) -> int:
+    """Look up the videos of each (id, name, IGDB's videos) so the page finds them waiting. A game that went to
+    YouTube is followed by a pause, so a whole library is a trickle of requests and not a burst. Returns how
+    many games went to YouTube."""
+    asked = 0
+    for game_id, name, igdb_videos in games:
+        before = searches_made
+        try:
+            find_videos(game_id, name, igdb_videos, search, now)
+        except Exception as e:  # noqa: BLE001 - one game must not stop the rest
+            log.warning(f"Video lookup for {name!r} failed: {e}")
+            continue
+        if searches_made > before:
+            asked += 1
+            sleep(pause)
+    return asked
+
+
+def prefetch_in_background(games: Iterable[tuple[int, str, list[dict[str, Any]] | None]]) -> bool:
+    """`prefetch` on a thread of its own, one pass at a time: while one runs, a second request is left to
+    the next scan (a page opened meanwhile still searches for itself). False when it was left."""
+    games = list(games)
+    if not _prefetching.acquire(blocking=False):
+        return False
+
+    def run() -> None:
+        try:
+            asked = prefetch(games)
+            if asked:
+                log.info(f"Looked up videos for {asked} game(s)")
+        except Exception as e:  # noqa: BLE001 - a background pass must never take anything down
+            log.warning(f"Video lookup pass failed: {e}")
+        finally:
+            _prefetching.release()
+
+    threading.Thread(target=run, daemon=True, name="video-prefetch").start()
+    return True

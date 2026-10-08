@@ -7,6 +7,8 @@ from endpoints import games
 from fastapi import HTTPException
 from handler import video_handler as vh
 
+real_prefetch_in_background = vh.prefetch_in_background  # the conftest swaps the module's own out
+
 
 @pytest.fixture(autouse=True)
 def _fresh_cache():
@@ -202,3 +204,73 @@ def test_the_endpoint_returns_the_videos_and_404s_for_an_unknown_game(monkeypatc
     with pytest.raises(HTTPException) as err:
         asyncio.run(games.get_game_videos(SimpleNamespace(), 99))
     assert err.value.status_code == 404
+
+
+def _games(*names):
+    return [(i + 1, name, None) for i, name in enumerate(names)]
+
+
+def test_a_prefetch_looks_games_up_and_pauses_only_after_those_that_went_to_youtube():
+    asked, pauses = [], []
+
+    def search(name, kind):
+        asked.append((name, kind))
+        return vh._entry(kind, C, "t", "youtube")
+
+    games = [(1, "Alpha", None), (2, "Beta", igdb(("Trailer", A), ("Gameplay", B))), (3, "Gamma", None)]
+    assert vh.prefetch(games, search, sleep=pauses.append, pause=2.0) == 2  # Beta had all from IGDB
+    assert [n for n, _ in asked] == ["Alpha", "Alpha", "Gamma", "Gamma"] and pauses == [2.0, 2.0]
+
+    asked.clear()
+    pauses.clear()
+    assert vh.prefetch(games, search, sleep=pauses.append) == 0  # remembered: nothing asked, nothing waited
+    assert asked == [] and pauses == []
+
+
+def test_a_game_that_cannot_be_looked_up_does_not_stop_the_rest():
+    def search(name, kind):
+        if name == "Alpha":
+            raise httpx.ConnectError("offline")
+        return vh._entry(kind, C, "t", "youtube")
+
+    assert vh.prefetch(_games("Alpha", "Beta"), search, sleep=lambda s: None) == 1
+    assert (2, "intro") in vh._searched and (1, "intro") not in vh._searched
+
+
+def test_the_lookups_survive_a_restart():
+    vh.find_videos(1, "Alpha", None, lambda n, k: vh._entry(k, C, "t", "youtube") if k == "intro" else None)
+    assert vh.CACHE_FILE.is_file()
+
+    vh._searched.clear()
+    vh._cache_loaded = False  # a new process
+    asked = []
+    videos = vh.find_videos(1, "Alpha", None, lambda n, k: asked.append(k))
+    assert asked == [] and [v["video_id"] for v in videos] == [C]  # the find and the miss both came back
+
+
+def test_a_damaged_cache_file_is_ignored(tmp_path):
+    vh.CACHE_FILE.write_text("not json{")
+    vh._cache_loaded = False
+    assert vh.find_videos(1, "Alpha", None, lambda n, k: None) == []
+    vh.CACHE_FILE.write_text('{"x:intro": 3, "1:intro": [1.0, null], "2:bogus": [1.0, null]}')
+    vh._searched.clear()
+    vh._cache_loaded = False
+    vh.find_videos(9, "Other", None, lambda n, k: None)
+    assert (1, "intro") in vh._searched and (2, "bogus") not in vh._searched
+
+
+def test_only_one_background_pass_runs_at_a_time(monkeypatch):
+    import threading
+
+    gate = threading.Event()
+    monkeypatch.setattr(vh, "prefetch", lambda games: gate.wait(5) or 0)
+    assert real_prefetch_in_background(_games("Alpha")) is True
+    assert real_prefetch_in_background(_games("Beta")) is False  # left to the next scan
+    gate.set()
+    for _ in range(100):
+        if vh._prefetching.acquire(blocking=False):
+            vh._prefetching.release()
+            break
+        threading.Event().wait(0.02)
+    assert real_prefetch_in_background(_games("Gamma")) is True
+    gate.wait(0.1)

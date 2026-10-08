@@ -15,6 +15,17 @@ def _no_provider_calls_from_scrapes(monkeypatch, request):
 
 
 @pytest.fixture(autouse=True)
+def _no_video_lookups_in_the_background(monkeypatch, tmp_path):
+    """A scrape starts the background video lookups; no test may reach YouTube or write the real cache file."""
+    from handler import video_handler
+
+    monkeypatch.setattr(video_handler, "prefetch_in_background", lambda games: False)
+    monkeypatch.setattr(video_handler, "CACHE_FILE", tmp_path / "video_cache.json")
+    monkeypatch.setattr(video_handler, "_cache_loaded", False)
+    video_handler._searched.clear()
+
+
+@pytest.fixture(autouse=True)
 def _default_settings_row(monkeypatch, request):
     """Handlers read the provider switches from the settings row; without the `db` fixture there is no table, so
     they read an untouched row (every switch at its default)."""

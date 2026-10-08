@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 from config import DEV_MODE, MOG_VERSION, RESOURCES_BASE_PATH
 from endpoints import devices, games, install, libraries, notifications, saves, settings, users
-from handler import library_watcher
+from handler import library_watcher, scrape_handler
 from handler.metadata import ludusavi_handler
 from logger.logger import log
 from startup import run_startup_tasks
@@ -21,6 +21,7 @@ async def lifespan(app: FastAPI):
     run_startup_tasks()
     stop_watching = library_watcher.start()
     stop_ludusavi = ludusavi_handler.start()
+    scrape_handler.warm_all_videos()
     log.info("MOG Server started")
     yield
     if stop_watching is not None:

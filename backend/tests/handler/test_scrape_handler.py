@@ -558,3 +558,44 @@ class TestHltb:
 
         by_id.assert_called_once_with(7)
         assert not any("hltb_id" in c.args[1] or "hltb_metadata" in c.args[1] for c in db.update_game.call_args_list)
+
+
+class TestVideosAfterAScrape:
+    @patch("handler.scrape_handler.scrape_game", return_value=False)
+    @patch("handler.scrape_handler.db_game_handler")
+    def test_a_scrape_has_the_videos_of_the_library_looked_up_in_the_background(self, db, _scrape, monkeypatch):
+        from handler import video_handler
+
+        videos = [{"name": "Trailer", "video_id": "aaaaaaaaaaa"}]
+        db.get_games_for_library.return_value = [
+            _game(id=1, name="Alpha", igdb_metadata={"videos": videos}),
+            _game(id=2, name="Gone", missing_from_fs=True),
+        ]
+        seen = []
+        monkeypatch.setattr(video_handler, "prefetch_in_background", lambda games: seen.append(list(games)) or True)
+
+        scrape_handler.scrape_library(1)
+
+        assert seen == [[(1, "Alpha", videos)]]
+
+    def test_the_whole_library_can_be_warmed_at_start(self, monkeypatch):
+        from handler import video_handler
+
+        seen = []
+        monkeypatch.setattr(video_handler, "prefetch_in_background", lambda games: seen.append(list(games)))
+        monkeypatch.setattr(
+            scrape_handler.db_game_handler,
+            "get_all_games",
+            lambda: [_game(id=1, name="Here"), _game(id=2, name="Gone", missing_from_fs=True)],
+        )
+        scrape_handler.warm_all_videos()
+        assert seen == [[(1, "Here", None)]]
+
+    def test_a_failure_to_start_the_lookups_never_fails_the_scrape(self, monkeypatch):
+        from handler import video_handler
+
+        def boom(games):
+            raise RuntimeError("no thread")
+
+        monkeypatch.setattr(video_handler, "prefetch_in_background", boom)
+        scrape_handler.warm_videos([_game()])

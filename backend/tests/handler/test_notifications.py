@@ -133,3 +133,22 @@ def test_a_zipped_mod_notifies_whoever_asked_for_it_and_a_failed_one_says_why(ga
     notifications.notify_mod_zipped(3, 5, "mod1", "disk full")
     failed = store.add_notification.call_args.args[0]
     assert failed.kind == KIND_MOD_FAILED and "disk full" in failed.body
+
+
+@patch("handler.notifications.db_notification_handler")
+@patch("handler.notifications.db_game_handler")
+def test_a_restored_save_notifies_its_user_and_says_where_it_came_from(games, store):
+    from models.notification import KIND_SAVE_RESTORED
+
+    games.get_game.return_value = SimpleNamespace(name="Some Game")
+
+    notifications.notify_save_restored(3, 5, "deck", "karasu", 2)
+    note = store.add_notification.call_args.args[0]
+    assert (note.user_id, note.kind, note.game_id) == (3, KIND_SAVE_RESTORED, 5)
+    assert note.title == "Saves restored: Some Game" and note.body == "On deck from karasu, 2 files."
+
+    notifications.notify_save_restored(3, 5, "deck", None, 1)
+    assert store.add_notification.call_args.args[0].body == "On deck, 1 file."
+
+    store.add_notification.side_effect = RuntimeError("db down")
+    notifications.notify_save_restored(3, 5, "deck", None, 1)  # never fails the request

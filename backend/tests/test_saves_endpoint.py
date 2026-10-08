@@ -203,3 +203,17 @@ def test_a_new_version_notifies_but_the_same_content_again_does_not(api, monkeyp
     _upload(api, device["id"], trigger="quit")  # nothing new: no second notification
 
     assert sent == [(1, 5, "karasu", "quit", 1)]
+
+
+def test_a_client_that_put_a_version_back_notifies_the_user(api, monkeypatch):
+    sent = []
+    monkeypatch.setattr(saves_endpoints, "notify_save_restored", lambda *args: sent.append(args))
+    a = _register(api).json()
+    b = _register(api, UID_B, name="deck").json()
+    version = _upload(api, a["id"]).json()["version"]
+
+    done = api.post(f"/api/saves/{version['id']}/restored", params={"device_id": b["id"], "files": 3})
+
+    assert done.status_code == 200 and sent == [(1, 5, "deck", "karasu", 3)]
+    assert api.post("/api/saves/999/restored", params={"device_id": b["id"]}).status_code == 404
+    assert api.post(f"/api/saves/{version['id']}/restored", params={"device_id": 999}).status_code == 404

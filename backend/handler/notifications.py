@@ -13,6 +13,7 @@ from models.notification import (
     KIND_MOD_DOWNLOADED,
     KIND_MOD_FAILED,
     KIND_MOD_READY,
+    KIND_SAVE_RESTORED,
     KIND_SAVE_SYNCED,
     TITLE_MAX_LENGTH,
     Notification,
@@ -92,6 +93,24 @@ def notify_save_synced(user_id: int, game_id: int, device_name: str, trigger: st
         )
     except Exception as e:  # noqa: BLE001 - a notification must never fail the upload
         log.warning(f"Could not create the save sync notification: {e}")
+
+
+def notify_save_restored(
+    user_id: int, game_id: int, device_name: str, from_device_name: str | None, file_count: int
+) -> None:
+    """A device finished putting a saved version back: the counterpart of the backup notice, so the user sees
+    on any of their machines that the download went through."""
+    try:
+        source = f" from {from_device_name}" if from_device_name else ""
+        notify(
+            user_id,
+            KIND_SAVE_RESTORED,
+            f"Saves restored: {_game_name(game_id)}",
+            f"On {device_name}{source}, {file_count} file{'' if file_count == 1 else 's'}.",
+            game_id=game_id,
+        )
+    except Exception as e:  # noqa: BLE001 - a notification must never fail the request
+        log.warning(f"Could not create the save restore notification: {e}")
 
 
 def notify_games_added(library: Library, added: tuple[tuple[int, str], ...]) -> None:

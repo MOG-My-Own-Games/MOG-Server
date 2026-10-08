@@ -18,7 +18,7 @@ from endpoints.responses.save import (
 )
 from handler.auth import CurrentUser
 from handler.database import db_device_handler, db_game_handler, db_saves_handler
-from handler.notifications import notify_save_synced
+from handler.notifications import notify_save_restored, notify_save_synced
 from handler.saves import UploadTooLarge, receive_upload, remove_version, resolve_path, store_version
 from models.device import Device
 from models.game import Game
@@ -119,6 +119,23 @@ async def download_save(user: CurrentUser, id: Annotated[int, Path(ge=1)]) -> Fi
     stamp = version.created_at.strftime("%Y-%m-%d_%H-%M-%S")
     filename = re.sub(r'[\\/:*?"<>|\r\n]+', "_", f"{label} - {stamp}.zip")
     return FileResponse(path, filename=filename, media_type="application/zip")
+
+
+@router.post("/saves/{id}/restored")
+async def save_restored(
+    user: CurrentUser,
+    id: Annotated[int, Path(ge=1)],
+    device_id: Annotated[int, Query(ge=1)],
+    files: Annotated[int, Query(ge=0)] = 0,
+) -> None:
+    """A client says it has put this version back on one of the user's devices: the user finds that in their
+    notifications, next to the one that told them it was backed up."""
+    version = _own_version(user, id)
+    device = _own_device(user, device_id)
+    source = db_device_handler.get_device(version.device_id)
+    await run_in_threadpool(
+        notify_save_restored, user.id, version.game_id, device.name, source.name if source else None, files
+    )
 
 
 @router.delete("/saves/{id}")

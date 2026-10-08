@@ -63,8 +63,7 @@
           <h2>Libraries</h2>
           <ul id="library-list" class="library-list"></ul>
 
-          <a href="#settings/cache" class="cache-size-link admin-only">Install cache: <span id="total-cache-size">...</span></a>
-
+          <h2>Sort by</h2>
           <div class="sort-box">
             <div class="toggle-row sort-toggle">
               <label for="sort-last-played">Last played first</label>
@@ -77,6 +76,8 @@
               <option value="za">Z to A</option>
             </select>
           </div>
+
+          <a href="#settings/cache" class="cache-size-link admin-only">Install cache: <span id="total-cache-size">...</span></a>
         </div>
       </aside>
       <button id="sidebar-toggle" class="sidebar-toggle" title="Collapse sidebar">&laquo;</button>
@@ -356,6 +357,13 @@
               <ul id="settings-library-list" class="library-list"></ul>
             </div>
             <div class="card">
+              <h3>Library folders</h3>
+              <div class="toggle-row">
+                <div><strong>Watch the library folders</strong><p class="muted small">A game added, removed or renamed on disk is picked up by itself: its library is scanned and the new games are matched with the metadata providers. No need to press Scan.</p></div>
+                <label class="switch"><input type="checkbox" id="setting-watch-libraries" aria-label="Watch the library folders" /><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="card">
               <h3>Display</h3>
               <div class="toggle-row">
                 <div><strong>Group duplicate games</strong><p class="muted small">Games sharing the same IGDB match show as one entry with its versions (this browser only).</p></div>
@@ -506,8 +514,8 @@
 
             <p class="muted small">A provider that is switched off is not asked anything. Its saved keys stay, so switching it on again needs nothing typed in.</p>
 
-            <button id="save-api-keys-btn" type="button">Save API keys</button>
-            <p id="api-keys-saved" class="muted small"></p>
+            <p class="muted small">Keys are saved as you finish typing (when you leave a field or press Enter).</p>
+            <p id="api-keys-saved" class="muted small" role="status"></p>
           </div>
 
           <div id="settings-tab-users" class="tab-panel" hidden>

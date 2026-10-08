@@ -8,6 +8,20 @@
 // rather than popup modals, so each has its own URL/back-button/reload
 // behavior like a normal page.
 
+// The sidebar sticks right under the top bar, so it needs the bar's real height: the buttons in it and the
+// font decide that, not a fixed number. Measured now and whenever the bar changes size.
+function watchTopbarHeight() {
+  const bar = document.querySelector(".topbar");
+  if (!bar || !("ResizeObserver" in window)) return;
+  const apply = () => {
+    const height = bar.offsetHeight;
+    if (height > 0) document.documentElement.style.setProperty("--topbar-h", `${height}px`);
+  };
+  new ResizeObserver(apply).observe(bar);
+  apply();
+}
+watchTopbarHeight();
+
 const POLL_INTERVAL_MS = 2000;
 const ACTIVE_INSTALL_STATES = ["detecting", "awaiting_installer", "installing", "streaming"];
 
@@ -461,6 +475,7 @@ async function openSettingsPage(subTab) {
     document.getElementById("setting-sgdb-key").value = apiSettings.steamgriddb_api_key || "";
     document.getElementById("setting-cache-ttl").value = apiSettings.install_cache_ttl_days ?? "";
     applyProviderToggles(apiSettings);
+    document.getElementById("setting-watch-libraries").checked = apiSettings.watch_libraries !== false;
     document.getElementById("proton-default-saved").textContent = "";
     await refreshProtonBuildsTable(apiSettings.install_default_proton_build || "");
   } catch (_) {
@@ -472,6 +487,18 @@ async function openSettingsPage(subTab) {
   await refreshProviderValidityBadges();
   await refreshUsersTable();
 }
+
+// --- Watching the library folders (Settings > Libraries) ---
+
+document.getElementById("setting-watch-libraries").addEventListener("change", async (e) => {
+  const box = e.target;
+  try {
+    await api("/api/settings", { method: "PUT", body: JSON.stringify({ watch_libraries: box.checked }) });
+  } catch (err) {
+    box.checked = !box.checked;
+    alert(`Could not save: ${err.message}`);
+  }
+});
 
 // --- Metadata provider switches ---
 
@@ -809,7 +836,9 @@ async function saveInstallDefaults() {
   }
 }
 
-document.getElementById("save-api-keys-btn").addEventListener("click", async () => {
+// The keys are saved when a field is left or Enter is pressed in it (the browser's `change`), not by a button.
+let apiKeysSavedTimer = null;
+async function saveApiKeys() {
   const savedEl = document.getElementById("api-keys-saved");
   try {
     await api("/api/settings", {
@@ -821,11 +850,17 @@ document.getElementById("save-api-keys-btn").addEventListener("click", async () 
       }),
     });
     savedEl.textContent = "Saved.";
+    clearTimeout(apiKeysSavedTimer);
+    apiKeysSavedTimer = setTimeout(() => (savedEl.textContent = ""), 2500);
     await refreshProviderValidityBadges();
   } catch (err) {
     savedEl.textContent = `Could not save: ${err.message}`;
   }
-});
+}
+
+for (const id of ["setting-igdb-id", "setting-igdb-secret", "setting-sgdb-key"]) {
+  document.getElementById(id).addEventListener("change", saveApiKeys);
+}
 
 document.getElementById("save-download-workers-btn").addEventListener("click", async () => {
   const savedEl = document.getElementById("download-workers-saved");
@@ -2529,7 +2564,8 @@ async function startInstall(candidate) {
   if (archive) {
     const answer = await askExtractAsIs(archive);
     if (answer === null) return;
-    if (answer === "extract") body.extract_only = true;
+    // "Try to install" is said outright: left out, the server extracts an archive that has no installer in it.
+    body.extract_only = answer === "extract";
   }
 
   const session = await api(`/api/games/${activeGame.id}/install`, { method: "POST", body: JSON.stringify(body) });

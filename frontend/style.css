@@ -25,7 +25,7 @@
   --space-sm: 0.5em;
   --space-md: 1em;
   --space-lg: 1.5em;
-  --topbar-h: 57px;
+  --topbar-h: 57px; /* until the top bar is measured (see watchTopbarHeight in app.js) */
 }
 
 * { box-sizing: border-box; }
@@ -156,23 +156,22 @@ code {
   top: 0;
   z-index: 60;
   background: var(--bg);
-  min-height: var(--topbar-h);
 }
 .topbar h1 { margin: 0; font-size: 1.2em; }
 .topbar-brand { display: flex; align-items: center; gap: 0.6em; text-decoration: none; }
 .brand-icon { height: 32px; }
 .brand-title { height: 28px; }
 .topbar-actions { display: flex; gap: 0.75em; align-items: center; }
-/* Refresh, notifications and the user menu share one bordered pill, split by thin dividers. */
+/* Refresh, notifications and the user menu share one pill in the highlight gradient, split by thin dividers. */
 .topbar-group {
   gap: 0;
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   border-radius: var(--radius);
-  background: var(--bg-elevated);
+  background: var(--accent-gradient);
 }
-.topbar-group > * + * { border-left: 1px solid var(--border); }
-.topbar-group button { background: transparent; border-radius: 0; color: var(--text); }
-.topbar-group button:hover { background: var(--bg-elevated-2); filter: none; }
+.topbar-group > * + * { border-left: 1px solid rgba(255, 255, 255, 0.28); }
+.topbar-group button { background: transparent; border-radius: 0; color: #fff; }
+.topbar-group button:hover { background: rgba(255, 255, 255, 0.16); filter: none; }
 .topbar-group > :first-child, .topbar-group > :first-child button { border-radius: var(--radius) 0 0 var(--radius); }
 .topbar-group > :last-child, .topbar-group > :last-child button { border-radius: 0 var(--radius) var(--radius) 0; }
 
@@ -264,14 +263,11 @@ code {
 .search-clear:hover { filter: brightness(1.12); }
 .search-clear[hidden] { display: none; }
 
-/* The sort controls sit at the bottom of the sidebar, as in the client. */
+/* The sort controls sit under the libraries, as in the client. */
 .sort-box {
   display: flex;
   flex-direction: column;
   gap: 0.4em;
-  margin-top: auto;
-  padding-top: 0.8em;
-  border-top: 1px solid var(--border);
 }
 .sort-box select { width: 100%; }
 .sort-toggle { padding: 0.1em 0.2em; border-bottom: none; font-size: 0.85em; color: var(--muted); }

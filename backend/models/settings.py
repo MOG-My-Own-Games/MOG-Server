@@ -29,6 +29,11 @@ class Settings(BaseModel):
     igdb_client_id: Mapped[str | None] = mapped_column(String(length=255), default=None)
     igdb_client_secret: Mapped[str | None] = mapped_column(String(length=255), default=None)
     steamgriddb_api_key: Mapped[str | None] = mapped_column(String(length=255), default=None)
+    # Per-provider switch, so a provider can be turned off while its credentials stay saved. NULL means on
+    # (HowLongToBeat: whatever config.HLTB_ENABLED says, see handler/metadata/hltb_handler.py).
+    igdb_enabled: Mapped[bool | None] = mapped_column(Boolean, default=None)
+    steamgriddb_enabled: Mapped[bool | None] = mapped_column(Boolean, default=None)
+    hltb_enabled: Mapped[bool | None] = mapped_column(Boolean, default=None)
     # Days an install cache survives before auto-eviction. NULL falls back to
     # config.INSTALL_CACHE_DEFAULT_TTL_DAYS; 0 means unlimited (see
     # utils/install_cache.py's resolve_expires_at).

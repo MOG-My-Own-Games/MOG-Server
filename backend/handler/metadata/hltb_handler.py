@@ -18,6 +18,7 @@ from urllib.parse import urljoin
 import httpx
 
 import config
+from handler.database import db_settings_handler
 from logger.logger import log
 from utils.hltb_search import (
     HLTB_BASE_URL,
@@ -70,8 +71,13 @@ class HLTBUnavailable(Exception):
     """HowLongToBeat could not be asked: blocked, down, or its pages changed shape."""
 
 
+def enabled_in(settings) -> bool:
+    """The switch in Settings, or the HLTB_ENABLED environment default while it has not been touched."""
+    return config.HLTB_ENABLED if settings.hltb_enabled is None else settings.hltb_enabled
+
+
 def is_enabled() -> bool:
-    return config.HLTB_ENABLED
+    return enabled_in(db_settings_handler.get_settings())
 
 
 def _pace() -> None:

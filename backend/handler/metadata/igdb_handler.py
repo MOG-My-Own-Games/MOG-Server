@@ -50,10 +50,21 @@ _token: str | None = None
 _token_expires_at: float = 0.0
 
 
+def enabled_in(settings) -> bool:
+    return settings.igdb_enabled is not False
+
+
+def is_enabled() -> bool:
+    return enabled_in(db_settings_handler.get_settings())
+
+
 def _credentials() -> tuple[str | None, str | None]:
     """DB-stored keys (set via Settings in the web UI) take priority over
-    the env vars, which stay as the bootstrap/.env-only fallback."""
+    the env vars, which stay as the bootstrap/.env-only fallback. A provider
+    switched off in Settings has none, whatever is saved."""
     settings = db_settings_handler.get_settings()
+    if not enabled_in(settings):
+        return None, None
     client_id = settings.igdb_client_id or IGDB_CLIENT_ID
     client_secret = settings.igdb_client_secret or IGDB_CLIENT_SECRET
     return client_id, client_secret

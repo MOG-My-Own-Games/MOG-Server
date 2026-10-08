@@ -14,6 +14,18 @@ def _no_provider_calls_from_scrapes(monkeypatch, request):
     monkeypatch.setattr(scrape_handler, "_store_media", lambda *args, **kwargs: False)
 
 
+@pytest.fixture(autouse=True)
+def _default_settings_row(monkeypatch, request):
+    """Handlers read the provider switches from the settings row; without the `db` fixture there is no table, so
+    they read an untouched row (every switch at its default)."""
+    if "db" in request.fixturenames:
+        return
+    from handler.database import db_settings_handler
+    from models.settings import Settings
+
+    monkeypatch.setattr(db_settings_handler, "get_settings", lambda: Settings())
+
+
 @pytest.fixture
 def db(monkeypatch, tmp_path):
     """The real handlers on a throwaway SQLite file with the whole schema created."""

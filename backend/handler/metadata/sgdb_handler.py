@@ -17,10 +17,22 @@ from logger.logger import log
 _API_BASE = "https://www.steamgriddb.com/api/v2"
 
 
+def enabled_in(settings) -> bool:
+    return settings.steamgriddb_enabled is not False
+
+
+def is_enabled() -> bool:
+    return enabled_in(db_settings_handler.get_settings())
+
+
 def _api_key() -> str | None:
     """DB-stored key (set via Settings in the web UI) takes priority over
-    the env var, which stays as the bootstrap/.env-only fallback."""
-    return db_settings_handler.get_settings().steamgriddb_api_key or STEAMGRIDDB_API_KEY
+    the env var, which stays as the bootstrap/.env-only fallback. A provider
+    switched off in Settings has none, whatever is saved."""
+    settings = db_settings_handler.get_settings()
+    if not enabled_in(settings):
+        return None
+    return settings.steamgriddb_api_key or STEAMGRIDDB_API_KEY
 
 
 def validate_key() -> bool:

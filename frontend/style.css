@@ -9,6 +9,9 @@
   --muted: #8b909c;
   --accent: #2859f9;
   --accent-hover: #1f47d1;
+  /* Text links: lighter than the accent, which is too dark to read on the cards. */
+  --link: #9db4ff;
+  --link-hover: #cbd7ff;
   /* The highlight color is always this gradient, never the flat --accent. */
   --accent-gradient: linear-gradient(90deg, #9e3bf7, var(--accent));
   --danger: #e2574c;
@@ -66,6 +69,11 @@ body {
 .screen { min-height: 100vh; }
 
 .muted { color: var(--muted); }
+
+/* A plain link (no class of its own) and those in tables: readable on the dark cards, visited or not. */
+a:not([class]), .data-table a { color: var(--link); text-decoration: underline; text-underline-offset: 2px; }
+a:not([class]):visited, .data-table a:visited { color: var(--link); }
+a:not([class]):hover, .data-table a:hover { color: var(--link-hover); }
 .muted.small { font-size: 0.8em; margin: 0.2em 0 0.8em; }
 .error { color: var(--danger); min-height: 1.2em; }
 

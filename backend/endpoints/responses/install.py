@@ -59,7 +59,8 @@ class InstallStartForm(BaseModel):
     ttl_seconds: int | None = None
     auto_mode: bool | None = None
     manual_mode: bool | None = None
-    # Extract the source archive as it is into the install cache instead of running an installer from it.
+    # Extract the source archive (or, with none, the game's own files) as it is into the install cache instead of
+    # running an installer. Left out, an archive with no installer inside is extracted; false runs it anyway.
     extract_only: bool | None = None
 
 

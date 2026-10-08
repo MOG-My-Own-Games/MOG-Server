@@ -284,6 +284,7 @@ def start(monkeypatch, tmp_path):
         "get_installer_candidates",
         lambda game: [cand("Hearthlands.rar", 4, "archive")],
     )
+    monkeypatch.setattr(endpoint, "list_source_candidates", lambda path: [cand("setup.exe", 0, "known installer")])
     monkeypatch.setattr(endpoint, "purge_superseded_sessions", lambda *a: None)
     monkeypatch.setattr(endpoint, "enqueue_install", lambda sid: enqueued.append(sid))
     monkeypatch.setattr(endpoint, "default_auto_mode", lambda: False)
@@ -386,3 +387,56 @@ def test_a_folder_with_nothing_runnable_is_suggested_to_be_extracted_too(monkeyp
 def test_a_folder_with_an_installer_is_not(monkeypatch):
     answer = _candidates_of(monkeypatch, [cand("setup.exe", 0, "known installer"), cand("game.exe", 1)])
     assert answer.extract_suggested is False
+
+
+# --- an archive that holds the game itself (Metroid Prime Origins) ----------------------------------
+
+
+def test_metroid_prime_origins_an_archive_with_the_game_exe_at_its_top_level_needs_no_installer():
+    """The zip held MetroidPrimeOrigins.exe next to its data: a top-level executable was taken for the installer,
+    so the server ran the game itself in the sandbox instead of keeping the archive's contents as the install."""
+    found = [c for c in listing("MetroidPrimeOrigins.exe", "data/rooms.pak", "readme.txt") if c.rank <= 2]
+    assert [c.path for c in found] == ["MetroidPrimeOrigins.exe"]
+    assert archive_prescan.extract_suggested(found) is True
+
+
+def test_a_top_level_executable_named_like_an_installer_still_means_there_is_one():
+    found = [c for c in listing("Game_Installer.exe", "data.bin") if c.rank <= 2]
+    assert archive_prescan.extract_suggested(found) is False
+
+
+def test_nobody_deciding_an_archive_with_no_installer_is_extracted_not_run(start, monkeypatch):
+    monkeypatch.setattr(endpoint, "list_source_candidates", lambda path: [cand("Game.exe", 1, "executable (top level)")])
+    session = start.go()
+    assert session.extract_only is True and session.source_path == "Hearthlands.rar" and session.installer_path is None
+    assert session.state == InstallSessionState.INSTALLING and start.enqueued == [7]
+
+
+def test_saying_no_to_extracting_runs_the_installer_found_inside_as_before(start, monkeypatch):
+    monkeypatch.setattr(endpoint, "list_source_candidates", lambda path: [cand("Game.exe", 1, "executable (top level)")])
+    session = start.go(extract_only=False)
+    assert session.extract_only is False and session.source_path == "Hearthlands.rar"
+
+
+def test_an_archive_with_an_installer_inside_is_still_run(start):
+    session = start.go()
+    assert session.extract_only is False and session.source_path == "Hearthlands.rar"
+
+
+def test_an_archive_that_cannot_be_listed_is_run_as_before(start, monkeypatch):
+    def broken(path):
+        raise RuntimeError("7-Zip: cannot open")
+
+    monkeypatch.setattr(endpoint, "list_source_candidates", broken)
+    session = start.go()
+    assert session.extract_only is False and start.enqueued == [7]
+
+
+def test_a_plain_executable_is_never_looked_into(start, monkeypatch):
+    def looked(path):
+        raise AssertionError("not an archive")
+
+    monkeypatch.setattr(endpoint, "list_source_candidates", looked)
+    session = start.go(installer_path="setup.exe")
+    assert session.extract_only is False and session.installer_path == "setup.exe"
+

@@ -30,14 +30,18 @@ from handler.filesystem.installer_detection import (
     DetectedFile,
     InstallerCandidate,
     detect_installer_candidates,
+    looks_portable,
 )
 from logger.logger import log
 from models.install_session import InstallPhase
-from utils.archives import extract_archive_tree, list_archive_members
+from utils.archives import extract_archive_member, extract_archive_tree, list_archive_members, try_list_archive_members
 
 _NESTED_RANKS = (RANK_DISC_IMAGE, RANK_ARCHIVE)
 # Archives inside archives are unpacked at most this many levels deep.
 MAX_NESTING = 3
+# An archive inside the archive is looked into before anything is unpacked, by taking just that file out; a bigger
+# one than this is not worth it, and is unpacked and looked at as before.
+PEEK_MAX_BYTES = 2 * 1024**3
 
 _PRE_SCAN_EXTENSIONS = ARCHIVE_EXTENSIONS | DISC_IMAGE_EXTENSIONS
 
@@ -69,9 +73,10 @@ def list_source_candidates(source: Path) -> list[InstallerCandidate]:
 
 def extract_suggested(candidates: list[InstallerCandidate]) -> bool:
     """Whether what a listing of an archive found says the game inside needs no installer: nothing that looks
-    like one (a known installer name, or an executable at the top level) and no archive or disc image to unpack
-    further, only executables buried in folders (the game itself, its tools) or nothing runnable at all."""
-    return all(c.rank >= RANK_NESTED_EXECUTABLE and c.rank not in _NESTED_RANKS for c in candidates)
+    like one (a known installer name, or a name with setup or install in it) and no archive or disc image to
+    unpack further. Executables with any other name, at the top level or buried in folders, are the game itself
+    and its tools; so is an archive with nothing runnable at all. The same rule as for a game's own folder."""
+    return looks_portable(candidates)
 
 
 def _list_files_flat(root: Path) -> list[DetectedFile]:
@@ -87,11 +92,30 @@ def _list_files_flat(root: Path) -> list[DetectedFile]:
     return detected
 
 
+def _detect_listing(members: list[tuple[str, int]]) -> list[InstallerCandidate]:
+    return detect_installer_candidates([DetectedFile(path=name, size_bytes=size) for name, size in members])
+
+
+def _peek_inside(archive_path: Path, member: str, extract_root: Path) -> list[InstallerCandidate] | None:
+    """What a nested archive holds, read before the archive around it is unpacked: just that file is taken out, into
+    its place in `extract_root`, and listed. None when it could not be looked into (it is then found out the long
+    way, by unpacking)."""
+    if not extract_archive_member(archive_path, member, extract_root):
+        return None
+    inside = try_list_archive_members(extract_root / member)
+    return None if inside is None else _detect_listing(inside)
+
+
 def extract_and_rescan(
     archive_path: Path,
     installer_path: str | None = None,
 ) -> tuple[tempfile.TemporaryDirectory[str], Path, InstallerCandidate] | None:
     """Extract `archive_path` and rank installer candidates inside it.
+
+    Before anything is unpacked its member listing is read: an archive with no installer in it, or without the
+    one asked for, is turned down at once instead of after unpacking all of it. The same is done for the archive
+    inside it that would be unpacked next, looking at just that file. An archive that cannot be listed is
+    unpacked and searched as before.
 
     Returns `(temp_dir, extract_root, chosen)` on success - the caller owns
     `temp_dir` and must clean it up once done with it; the installer to run
@@ -103,22 +127,44 @@ def extract_and_rescan(
     temp_dir = tempfile.TemporaryDirectory(prefix="mog-install-extract-")
     extract_root = Path(temp_dir.name)
 
-    if not extract_archive_tree(archive_path, extract_root):
-        log.error(f"Failed to extract archive contents from {archive_path}")
+    def give_up(why: str) -> None:
+        log.error(why)
         temp_dir.cleanup()
+
+    skip: list[str] = []
+    listed = try_list_archive_members(archive_path)
+    if listed is not None:
+        before = _detect_listing(listed)
+        if not before:
+            give_up(f"No installer found inside archive {archive_path} (listed, not extracted)")
+            return None
+        first = next((c for c in before if c.path == installer_path), None) if installer_path else before[0]
+        if first is None:
+            give_up(f"Installer {installer_path} not found inside {archive_path} (listed, not extracted)")
+            return None
+        if first.rank in _NESTED_RANKS and first.file_size_bytes <= PEEK_MAX_BYTES:
+            inner = _peek_inside(archive_path, first.path, extract_root)
+            if inner is not None and not inner:
+                give_up(f"No installer found inside {first.path} in {archive_path} (looked into it, not unpacked)")
+                return None
+            if inner is not None:
+                skip.append(first.path)  # already out: the rest is unpacked around it
+
+    # Nothing left to unpack when the file taken out was all there was.
+    rest = [name for name, _size in (listed or []) if name not in skip]
+    if not (skip and not rest) and not extract_archive_tree(archive_path, extract_root, skip):
+        give_up(f"Failed to extract archive contents from {archive_path}")
         return None
 
     candidates = detect_installer_candidates(_list_files_flat(extract_root))
     if not candidates:
-        log.error(f"No installer found inside extracted archive {archive_path}")
-        temp_dir.cleanup()
+        give_up(f"No installer found inside extracted archive {archive_path}")
         return None
 
     if installer_path:
         picked = next((c for c in candidates if c.path == installer_path), None)
         if picked is None:
-            log.error(f"Installer {installer_path} not found inside {archive_path}")
-            temp_dir.cleanup()
+            give_up(f"Installer {installer_path} not found inside {archive_path}")
             return None
     else:
         picked = candidates[0]
@@ -133,8 +179,7 @@ def extract_and_rescan(
         picked = nested
     else:
         if picked.rank in _NESTED_RANKS:
-            log.error(f"Archive {archive_path} is nested too deeply")
-            temp_dir.cleanup()
+            give_up(f"Archive {archive_path} is nested too deeply")
             return None
 
     return temp_dir, extract_root, picked

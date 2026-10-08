@@ -165,6 +165,23 @@ async def get_install_candidates(
     )
 
 
+async def _archive_needs_no_installer(game, installer_path: str | None, source_path: str | None) -> bool:
+    """Whether the archive or disc image about to be run holds no installer (a game that needs none): then, when
+    nobody said otherwise, it is extracted into the install cache as it is, and its executable is not run as if
+    it were an installer. False when it is not an archive or its listing cannot be read."""
+    named = source_path or installer_path
+    if named is None:
+        return False
+    try:
+        abs_path = Path(fs_game_handler.resolve_installer_abs_path(game, named))
+        if not is_archive_candidate(abs_path):
+            return False
+        return extract_suggested(await asyncio.to_thread(list_source_candidates, abs_path))
+    except Exception as e:  # noqa: BLE001 - a listing that cannot be read never stops an install from starting
+        log.warning(f"Could not look inside {named} for an installer: {e}")
+        return False
+
+
 @router.post("/{id}/install")
 async def start_install_session(
     user: CurrentUser, id: Annotated[int, PathVar(ge=1)], data: InstallStartForm
@@ -203,7 +220,10 @@ async def start_install_session(
                 source_path = default.path
             else:
                 installer_path = default.path
-    extract_only = bool(data.extract_only)
+    extract_only = data.extract_only
+    if extract_only is None:
+        extract_only = await _archive_needs_no_installer(game, installer_path, source_path)
+    extract_only = bool(extract_only)
     if extract_only:
         # An archive named (or the default pick) is unpacked as it is; with none, the game's own files are taken.
         if source_path is None and installer_path is not None:

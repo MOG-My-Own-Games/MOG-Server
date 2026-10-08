@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
 
 from config import INSTALL_TIMEOUT
@@ -22,7 +23,13 @@ _ENTRY_RE = re.compile(r"^(Path|Size|Attributes) = (.*)$")
 
 def list_archive_members(file_path: Path) -> list[tuple[str, int]]:
     """List `(member_path, size)` for every file in an archive or disc image
-    without extracting anything."""
+    without extracting anything. Empty when it holds no files or cannot be read."""
+    return try_list_archive_members(file_path) or []
+
+
+def try_list_archive_members(file_path: Path) -> list[tuple[str, int]] | None:
+    """Like `list_archive_members`, but None when the archive could not be read at all, so an unreadable one is
+    told apart from one that is empty."""
     try:
         result = subprocess.run(
             ["7z", "l", "-slt", "-ba", str(file_path)],
@@ -33,7 +40,7 @@ def list_archive_members(file_path: Path) -> list[tuple[str, int]]:
         )
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as e:
         log.error(f"Error listing archive {file_path}: {e}")
-        return []
+        return None
 
     members: list[tuple[str, int]] = []
     path: str | None = None
@@ -74,14 +81,16 @@ def _why_extraction_failed(file_path: Path, output: str) -> str:
     return text
 
 
-def extract_archive(file_path: Path, dest_dir: Path) -> str | None:
+def extract_archive(file_path: Path, dest_dir: Path, exclude: Sequence[str] = ()) -> str | None:
     """Extract every member of an archive/disc image into `dest_dir`, preserving its internal directory
-    structure. Returns None when it worked, else why it did not."""
+    structure, except the members named in `exclude`. Returns None when it worked, else why it did not."""
     dest_dir = dest_dir.resolve()
     dest_dir.mkdir(parents=True, exist_ok=True)
+    # -spd: the names are names, not patterns (a member may be called "Game [GOG] (1).iso").
+    skipped = ["-spd", *(f"-x!{name}" for name in exclude)] if exclude else []
     try:
         subprocess.run(
-            ["7z", "x", f"-o{dest_dir}", "-y", str(file_path)],
+            ["7z", "x", f"-o{dest_dir}", "-y", *skipped, str(file_path)],
             capture_output=True,
             text=True,
             errors="replace",
@@ -103,10 +112,31 @@ def extract_archive(file_path: Path, dest_dir: Path) -> str | None:
     return None
 
 
-def extract_archive_tree(file_path: Path, dest_dir: Path) -> bool:
+def extract_archive_member(file_path: Path, member: str, dest_dir: Path) -> bool:
+    """Extract one member of an archive/disc image into `dest_dir`, keeping its path inside the archive. True when
+    the file is there afterwards. Used to look inside an archive that is itself in an archive without unpacking
+    everything around it."""
+    dest_dir = dest_dir.resolve()
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        subprocess.run(
+            ["7z", "x", f"-o{dest_dir}", "-y", "-spd", str(file_path), member],
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=INSTALL_TIMEOUT,
+            check=True,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as e:
+        log.warning(f"Could not extract {member} from {file_path}: {e}")
+        return False
+    return (dest_dir / member).is_file()
+
+
+def extract_archive_tree(file_path: Path, dest_dir: Path, exclude: Sequence[str] = ()) -> bool:
     """Extract every member of an archive/disc image into `dest_dir`,
-    preserving its internal directory structure.
+    preserving its internal directory structure, except those in `exclude`.
 
     Returns True if extraction succeeded and wrote at least one file.
     """
-    return extract_archive(file_path, dest_dir) is None
+    return extract_archive(file_path, dest_dir, exclude) is None

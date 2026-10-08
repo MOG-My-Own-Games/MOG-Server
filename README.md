@@ -1,4 +1,4 @@
-<p align="center"><img src="frontend/assets/mascotte.png" width="200" alt="MOG" /></p>
+<p align="center"><img src="docs/logo.png" width="220" alt="MOG Server" /></p>
 
 # MOG Server
 

@@ -1,8 +1,8 @@
-"""Buttons drawn as flat rectangles: find them by their shape and read only what is inside.
+"""Buttons and tiles drawn as flat shapes: find them by their shape and read only what is inside.
 
-A skinned installer often puts small captions in plain dark (or light) boxes over a full-window picture. OCR of the whole
-page loses them in the artwork, but a box of one single colour is easy to find, and the text inside it, alone on an even
-ground, is easy to read.
+A skinned installer often puts its captions in plain boxes (a dark rectangle with a word in it, a coloured tile with an icon
+and a label) over a full-window picture. OCR of the whole page loses them in the artwork, but a region of one single colour
+is easy to find, and the text inside it, on an even ground, is easy to read.
 """
 
 from __future__ import annotations
@@ -15,19 +15,22 @@ from PIL import Image, ImageOps
 from .matcher import Word
 from .ocr import ocr_words
 
-# What a button looks like, in pixels of the screen.
+# What a button or tile looks like, in pixels of the screen.
 MIN_WIDTH, MAX_WIDTH = 36, 360
-MIN_HEIGHT, MAX_HEIGHT = 16, 72
-# Rows of the box's own colour that run its whole width; the rows through the text do not, so only these count.
-MIN_FULL_ROWS = 5
-# Rows through the text are missing from a box's own colour; a gap longer than a line of text means a second box that
-# happens to have the same place and colour (a stack of buttons).
-MAX_TEXT_GAP = 20
+MIN_HEIGHT, MAX_HEIGHT = 16, 170
+# Shorter runs than this are the grain of a picture, not a flat region (and there are far too many of them to follow).
+MIN_RUN = 6
+# A box is not a tall strip: at least this wide for its height.
+MIN_ASPECT = 0.6
+# How much of its own bounding box a region fills. The text and the icon in it take the rest.
+MIN_FILL = 0.45
 # Text in the box needs a little room to be read, and a button has a border of its own to leave out.
 INSET = 2
 PAD = 8
-# A screen with more flat boxes than this is not a wizard's buttons (a table, a form): the lowest ones are tried.
+# A screen with more flat regions than this is not a wizard's buttons (a table, a form): the lowest ones are tried.
 MAX_BOXES = 12
+# A box this short and wide holds one line of text; a taller one (a tile) has an icon, and its label is looked for.
+LINE_MAX_HEIGHT, LINE_MIN_ASPECT = 40, 2.5
 # Added to the block ids of what is read inside the boxes, so it never joins the words of the whole-page passes.
 _BOX_TAG = 400_000
 
@@ -48,46 +51,60 @@ class Box:
     def bottom(self) -> int:
         return self.top + self.height
 
+    @property
+    def one_line(self) -> bool:
+        return self.height <= LINE_MAX_HEIGHT and self.width >= self.height * LINE_MIN_ASPECT
+
 
 def find_flat_boxes(image: Image.Image) -> list[Box]:
-    """The rectangles of one grey level that are the size of a button, the lowest on the screen first."""
+    """The regions of one grey level that are the size of a button or a tile, the lowest on the screen first."""
     gray = image.convert("L")
     width, height = gray.size
     data = gray.tobytes()
-    rows: dict[tuple[int, int, int], list[int]] = {}
+
+    parent: list[int] = []
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    runs: list[tuple[int, int, int, int]] = []  # (y, x0, x1, level)
+    previous: list[tuple[int, int, int, int]] = []  # the last row's runs, as (x0, x1, level, index)
     for y in range(height):
+        current: list[tuple[int, int, int, int]] = []
         x = 0
         for level, run in groupby(data[y * width : (y + 1) * width]):
             length = sum(1 for _ in run)
-            if MIN_WIDTH <= length <= MAX_WIDTH:
-                rows.setdefault((x, x + length, level), []).append(y)
+            if length >= MIN_RUN:
+                index = len(runs)
+                runs.append((y, x, x + length, level))
+                parent.append(index)
+                current.append((x, x + length, level, index))
             x += length
-    boxes: list[Box] = []
-    for (left, right, level), ys in rows.items():
-        for cluster in _clusters(ys):
-            span = cluster[-1] - cluster[0] + 1
-            if len(cluster) < MIN_FULL_ROWS or not MIN_HEIGHT <= span <= MAX_HEIGHT or len(cluster) < span * 0.4:
-                continue
-            if (right - left) < span * 1.6:  # a button is wider than it is tall
-                continue
-            box = Box(left, cluster[0], right - left, span, level)
-            if not any(_overlap(box, other) for other in boxes):
-                boxes.append(box)
+        for x0, x1, level, index in current:  # join what touches a run of the same level in the row above
+            for px0, px1, plevel, pindex in previous:
+                if plevel == level and px0 < x1 and x0 < px1:
+                    parent[find(index)] = find(pindex)
+        previous = current
+
+    regions: dict[int, list[int]] = {}  # root -> [left, top, right, bottom, pixels, level]
+    for index, (y, x0, x1, level) in enumerate(runs):
+        stats = regions.setdefault(find(index), [x0, y, x1, y + 1, 0, level])
+        stats[0], stats[1], stats[2], stats[3] = min(stats[0], x0), min(stats[1], y), max(stats[2], x1), max(stats[3], y + 1)
+        stats[4] += x1 - x0
+    boxes = []
+    for left, top, right, bottom, pixels, level in regions.values():
+        w, h = right - left, bottom - top
+        if MIN_WIDTH <= w <= MAX_WIDTH and MIN_HEIGHT <= h <= MAX_HEIGHT and w >= h * MIN_ASPECT and pixels >= w * h * MIN_FILL:
+            boxes.append(Box(left, top, w, h, level))
+    boxes = [b for b in boxes if not any(o is not b and _inside(b, o) for o in boxes)]  # an icon in its tile is not a box
     return sorted(boxes, key=lambda b: (-b.bottom, b.left))[:MAX_BOXES]
 
 
-def _clusters(ys: list[int]) -> list[list[int]]:
-    """Rows in runs, a new run starting after a gap longer than a line of text."""
-    runs: list[list[int]] = [[ys[0]]]
-    for y in ys[1:]:
-        if y - runs[-1][-1] > MAX_TEXT_GAP:
-            runs.append([])
-        runs[-1].append(y)
-    return runs
-
-
-def _overlap(a: Box, b: Box) -> bool:
-    return a.left < b.right and b.left < a.right and a.top < b.bottom and b.top < a.bottom
+def _inside(inner: Box, outer: Box) -> bool:
+    return outer.left <= inner.left and outer.top <= inner.top and inner.right <= outer.right and inner.bottom <= outer.bottom
 
 
 def ocr_boxes(image: Image.Image, boxes: list[Box] | None = None) -> list[Word]:
@@ -99,7 +116,7 @@ def ocr_boxes(image: Image.Image, boxes: list[Box] | None = None) -> list[Word]:
             crop = ImageOps.invert(crop)
         ground = 255 - box.fill if box.fill < 128 else box.fill
         padded = ImageOps.expand(crop, PAD, fill=ground)
-        for w in ocr_words(padded, psm=7, line_tag=_BOX_TAG + index * 10):
+        for w in ocr_words(padded, psm=7 if box.one_line else 11, line_tag=_BOX_TAG + index * 10):
             words.append(
                 Word(w.text, w.left - PAD + box.left + INSET, w.top - PAD + box.top + INSET, w.width, w.height, w.conf, w.line_id)
             )

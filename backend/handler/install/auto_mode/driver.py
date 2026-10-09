@@ -168,7 +168,9 @@ def _needs_deep_pass(words: list[Word], catalog: Catalog) -> bool:
     """Whole-page OCR often misses the wizard's bottom strip. Look closer
     when no advance button was read, or on a license page whose accept
     checkbox was not."""
-    categories = {m.entry.category for m in find_matches(words, catalog)}
+    # A "late" button (Exit) is not one to press before the install has written files, so reading it is no way forward:
+    # a skinned installer's title bar says EXIT on every page.
+    categories = {m.entry.category for m in find_matches(words, catalog) if not m.entry.late}
     if not categories & {"next", "install", "finish"}:
         return True
     return is_license_page(screen_lines(words), catalog) and "agree" not in categories

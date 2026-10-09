@@ -1,5 +1,6 @@
-"""Buttons drawn as flat boxes over artwork, which a read of the whole page loses (caught live: a skinned installer whose
-"Proceed" sat in a dark box over a full-window picture, so auto mode reported "no known button" and stopped)."""
+"""Buttons and tiles drawn as flat shapes over artwork, which a read of the whole page loses (caught live: a skinned
+installer whose "Proceed" sat in a dark box over a full-window picture, and another whose Install, Uninstall and Exit were
+coloured tiles with an icon and a label: auto mode reported "no known button" and stopped)."""
 
 import random
 
@@ -74,6 +75,52 @@ def test_more_boxes_than_a_wizard_has_buttons_keeps_the_lowest():
     found = find_flat_boxes(image)
     assert len(found) == boxes_module.MAX_BOXES and found[0].top > found[-1].top
     assert {b.top for b in found} == {400, 250}  # the lowest row of the three goes first, then the next
+
+
+def tile(image, left, top, size=108, fill=(0, 168, 168)):
+    """A coloured tile with an icon in the middle and a label at the bottom, as a start menu draws them."""
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((left, top, left + size - 1, top + size - 1), fill=fill)
+    draw.ellipse((left + 30, top + 20, left + 78, top + 68), fill=(255, 255, 255))  # the icon breaks every row through it
+    draw.text((left + 4, top + size - 20), "Install", fill=(255, 255, 255))
+
+
+def test_a_square_tile_with_an_icon_and_a_label_is_a_box_too():
+    image = artwork()
+    tile(image, 216, 143)
+    tile(image, 216, 255)
+
+    found = find_flat_boxes(image)
+
+    assert [(round(b.left, -1), b.top, round(b.width, -1), b.height) for b in found] == [(220, 255, 110, 108), (220, 143, 110, 108)]
+    assert not found[0].one_line  # it has an icon: its label is looked for, not one line of text
+
+
+def test_a_tile_is_read_as_a_page_of_scattered_text_and_a_button_as_one_line(monkeypatch):
+    image = artwork()
+    tile(image, 216, 143)
+    button(image, 693, 464)
+    modes = []
+
+    def fake_ocr(padded, psm, line_tag, **kwargs):
+        modes.append(psm)
+        return []
+
+    monkeypatch.setattr(boxes_module, "ocr_words", fake_ocr)
+    ocr_boxes(image)
+
+    assert sorted(modes) == [7, 11]
+
+
+def test_reading_a_late_button_is_no_way_forward_so_the_boxes_are_still_looked_at():
+    """Caught live: a skinned installer's title bar says EXIT on every page. Exit is never pressed before the install has
+    written files, but reading it counted as a button found, so the deeper passes (and the boxes) never ran."""
+    catalog = load_catalog()
+    exit_only = [Word("Exit", 700, 20, 40, 14, 95.0, (1, 1, 1))]
+    next_too = exit_only + [Word("Next", 700, 470, 40, 14, 95.0, (2, 1, 1))]
+
+    assert driver._needs_deep_pass(exit_only, catalog) is True
+    assert driver._needs_deep_pass(next_too, catalog) is False
 
 
 def test_what_is_read_inside_a_box_is_put_back_where_it_is_on_the_screen(monkeypatch):

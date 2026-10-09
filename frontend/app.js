@@ -159,9 +159,18 @@ let notificationData = { notifications: [], unread: 0 };
 let newestNotificationId = null;
 let notificationTimer = null;
 
+// Red is for errors and yellow for warnings; every other notification carries the highlight colour.
+const ERROR_NOTIFICATION_KINDS = new Set(["auto_mode_failed", "mod_failed"]);
+const WARN_NOTIFICATION_KINDS = new Set(["auto_mode_stuck"]);
+
+function notificationLevel(n) {
+  if (ERROR_NOTIFICATION_KINDS.has(n.kind)) return " level-error";
+  return WARN_NOTIFICATION_KINDS.has(n.kind) ? " level-warn" : "";
+}
+
 function showToast(n) {
   const toast = document.createElement("div");
-  toast.className = "toast";
+  toast.className = `toast${notificationLevel(n)}`;
   toast.innerHTML = `<strong>${escapeHtml(n.title)}</strong>${n.body ? `<span class="muted small">${escapeHtml(n.body)}</span>` : ""}`;
   toast.addEventListener("click", () => {
     toast.remove();
@@ -251,7 +260,7 @@ async function renderNotificationList() {
   document.getElementById("notifications-empty").hidden = items.length > 0;
   for (const [index, n] of items.entries()) {
     const li = document.createElement("li");
-    li.className = `notification-item${n.read ? "" : " unread"}`;
+    li.className = `notification-item${n.read ? "" : " unread"}${notificationLevel(n)}`;
     const game = n.game_id ? `<a href="#game/${n.game_id}">Open game</a> &middot; ` : "";
     li.innerHTML = `
       <div class="notification-main">

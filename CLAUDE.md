@@ -106,6 +106,9 @@ in `endpoints/responses/`.
 - **Keep comments short, focused on why, not what.** A comment earns its
   place by explaining a non-obvious constraint or a bug it's guarding
   against, not by restating the line below it.
+- **Keep `docs/INTEGRATION.md` current.** It is what other clients are built from. When a change to the server
+  alters what a client can see or call (an endpoint, a field of a response, a status code, a setting that changes
+  behaviour a client relies on, a state or its meaning), update that document in the same change.
 - **Tests travel with code.** New logic gets a test in `backend/tests/`,
   mirroring the module it covers (`handler/foo.py` ->
   `tests/handler/test_foo.py`). Prioritize pure-logic modules (no DB/network/

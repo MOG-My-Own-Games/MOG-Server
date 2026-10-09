@@ -14,7 +14,10 @@ from logger.logger import log
 # Kept around the active window so a wrongly reported frame offset still
 # leaves its buttons inside the crop.
 WINDOW_PAD = 60
-MIN_WINDOW_SIDE = 80
+# Wine's helper windows are tiny and square-ish; a message box is smaller than a wizard but wide (the client area of an
+# "installed" box with one line and an OK button is about 270x63, which an 80 px floor on both sides sent to a
+# whole-screen read that missed the OK).
+MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT = 80, 40
 XDOTOOL_TIMEOUT = 5
 FOCUS_CLICK_SETTLE = 0.5
 MOVE_CANCEL_SETTLE = 0.3
@@ -52,16 +55,25 @@ def grab_screen(display: str) -> Image.Image | None:
     return image
 
 
-def active_window_box(display: str, screen: tuple[int, int]) -> tuple[int, int, int, int]:
-    """Padded box of the focused window, or the whole screen when unknown."""
+def active_window_rect(display: str) -> tuple[int, int, int, int] | None:
+    """(x, y, width, height) of the focused window, or None when it is unknown or one of Wine's tiny helper windows."""
     out = _xdotool(display, "getactivewindow", "getwindowgeometry", "--shell")
     dims = dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
     try:
         x, y, w, h = (int(dims[k]) for k in ("X", "Y", "WIDTH", "HEIGHT"))
     except (KeyError, ValueError):
+        return None
+    if w < MIN_WINDOW_WIDTH or h < MIN_WINDOW_HEIGHT:
+        return None
+    return x, y, w, h
+
+
+def active_window_box(display: str, screen: tuple[int, int]) -> tuple[int, int, int, int]:
+    """Padded box of the focused window, or the whole screen when unknown."""
+    rect = active_window_rect(display)
+    if rect is None:
         return 0, 0, screen[0], screen[1]
-    if w < MIN_WINDOW_SIDE or h < MIN_WINDOW_SIDE:
-        return 0, 0, screen[0], screen[1]
+    x, y, w, h = rect
     return (
         max(0, x - WINDOW_PAD),
         max(0, y - WINDOW_PAD),

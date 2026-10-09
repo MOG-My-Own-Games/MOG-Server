@@ -75,3 +75,70 @@ class TestStuckReport:
         words = [_word("x" * 80, n) for n in range(40)]
         _, detail = self._stuck(words)
         assert len(detail) <= 900
+
+
+class TestDialogInFocus:
+    """Caught live: an installer said "HAS BEEN INSTALLED." in a small box with an OK, over its wizard. The wizard behind a
+    modal box takes no click, but a group-box title reading INSTALL sat in the margin of the read and ranked above the OK."""
+
+    SCREEN = (800, 600)
+    BOX = (266, 264, 267, 63)
+
+    def test_only_what_is_on_the_dialog_is_kept(self):
+        from handler.install.auto_mode.driver import restrict_to_dialog
+
+        on_box = Word("OK", 390, 300, 24, 14, 95.0, (1, 1, 1))
+        title_bar = Word("PATAPON", 280, 246, 60, 12, 95.0, (2, 1, 1))  # above the reported geometry, inside the margin
+        behind = Word("INSTALL", 222, 323, 60, 12, 95.0, (3, 1, 1))  # the wizard's own, beside the box
+        far = Word("EXIT", 540, 450, 40, 12, 95.0, (4, 1, 1))
+
+        words, dialog = restrict_to_dialog([on_box, title_bar, behind, far], self.BOX, self.SCREEN)
+
+        assert dialog is True and [w.text for w in words] == ["OK", "PATAPON"]
+
+    def test_a_wizard_sized_window_is_not_restricted(self):
+        from handler.install.auto_mode.driver import restrict_to_dialog
+
+        words = [Word("INSTALL", 222, 323, 60, 12, 95.0, (3, 1, 1))]
+        assert restrict_to_dialog(words, (0, 60, 800, 450), self.SCREEN) == (words, False)
+        assert restrict_to_dialog(words, None, self.SCREEN) == (words, False)
+
+    def test_the_ok_of_the_box_is_what_gets_pressed(self):
+        from handler.install.auto_mode.driver import restrict_to_dialog
+        from handler.install.auto_mode.engine import ScreenMemory, plan_action
+
+        page = [
+            Word("PATAPON", 280, 246, 60, 12, 95.0, (2, 1, 1)),
+            Word("OK", 390, 300, 24, 14, 95.0, (1, 1, 1)),
+            Word("INSTALL", 222, 323, 60, 12, 95.0, (3, 1, 1)),
+        ]
+        words, _ = restrict_to_dialog(page, self.BOX, self.SCREEN)
+
+        action, _ = plan_action(words, load_catalog(), ScreenMemory(), installing=True)
+
+        assert action is not None and action.match.text == "OK" and (action.x, action.y) == (402, 307)
+        # and without the restriction the wizard's INSTALL would have been chosen over it
+        wrong, _ = plan_action(page, load_catalog(), ScreenMemory(), installing=True)
+        assert wrong.match.text == "INSTALL"
+
+    def test_a_key_prompt_elsewhere_on_the_screen_is_still_pressed_with_a_dialog_in_focus(self):
+        """Skinned installers ask for "Press up to unlock this screen" from a screen of their own; a small window that has the
+        focus at that moment must not make auto mode forget the Up key."""
+        from handler.install.auto_mode.driver import key_prompts
+        from handler.install.auto_mode.engine import ScreenMemory, plan_action
+
+        whole_screen = [
+            Word("Press", 300, 560, 40, 14, 95.0, (9, 1, 1)),
+            Word("up", 345, 560, 20, 14, 95.0, (9, 1, 1)),
+            Word("to", 370, 560, 20, 14, 95.0, (9, 1, 1)),
+            Word("unlock", 395, 560, 50, 14, 95.0, (9, 1, 1)),
+            Word("this", 450, 560, 30, 14, 95.0, (9, 1, 1)),
+            Word("screen", 485, 560, 50, 14, 95.0, (9, 1, 1)),
+            Word("INSTALL", 222, 323, 60, 12, 95.0, (3, 1, 1)),  # something else, which is not lifted
+        ]
+
+        prompts = key_prompts(whole_screen, load_catalog())
+        action, _ = plan_action(prompts, load_catalog(), ScreenMemory())
+
+        assert [w.text.lower() for w in prompts] == ["press up to unlock"]  # the catalog's own label
+        assert action is not None and action.kind == "key" and action.key == "Up"

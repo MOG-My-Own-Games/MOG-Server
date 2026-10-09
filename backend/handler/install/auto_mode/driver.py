@@ -18,7 +18,7 @@ from PIL import Image
 from config import INSTALL_AUTO_STUCK_SECONDS
 from logger.logger import log
 
-from .capture import active_window_box, click, grab_screen, press_key
+from .capture import active_window_box, active_window_rect, click, grab_screen, press_key
 from .catalog import Catalog
 from .engine import (
     MAX_ATTEMPTS_PER_BUTTON,
@@ -195,20 +195,62 @@ def _ocr_region(image: Image.Image, catalog: Catalog) -> list[Word]:
     return words
 
 
+# A focused window smaller than this share of the screen is a message box or a dialog, not the wizard.
+DIALOG_SCREEN_SHARE = 0.3
+# What is kept around such a window: its title bar above (the reported geometry leaves it out) and a thin frame.
+DIALOG_TITLE_BAR = 30
+DIALOG_FRAME = 6
+# Added to the block ids of the key prompts lifted from a whole-screen read (see key_prompts).
+_PROMPT_TAG = 500_000
+
+
+def restrict_to_dialog(
+    words: list[Word], rect: tuple[int, int, int, int] | None, screen: tuple[int, int]
+) -> tuple[list[Word], bool]:
+    """With a dialog in focus only what is on the dialog counts: the wizard behind a modal box takes no click, so its buttons
+    (an INSTALL that ranks above the box's OK) must not be pressed. Returns the words and whether a dialog was seen."""
+    if rect is None or rect[2] * rect[3] >= DIALOG_SCREEN_SHARE * screen[0] * screen[1]:
+        return words, False
+    x, y, w, h = rect
+    kept = [
+        word
+        for word in words
+        if x - DIALOG_FRAME <= word.left + word.width // 2 <= x + w + DIALOG_FRAME
+        and y - DIALOG_TITLE_BAR <= word.top + word.height // 2 <= y + h + DIALOG_FRAME
+    ]
+    return kept, True
+
+
+def key_prompts(words: list[Word], catalog: Catalog) -> list[Word]:
+    """The key prompts on a whole-screen read ("Press up to unlock this screen"), as words of their own. A skinned installer
+    asks for that key from a screen of its own, which a small window in focus must not hide."""
+    return [
+        Word(m.text, m.left, m.top, m.width, m.height, 100.0, (_PROMPT_TAG + index, 0, 0))
+        for index, m in enumerate(find_matches(words, catalog))
+        if m.entry.category == "key"
+    ]
+
+
 def make_x11_observer(display: str, catalog: Catalog) -> Callable[[], list[Word] | None]:
     """OCR the focused window of ``display``, or the whole screen when nothing
     usable is found there (an overlay such as "Press up to unlock" can sit
-    outside the focused window). Words come back in screen coordinates."""
+    outside the focused window). Words come back in screen coordinates. A
+    dialog in focus is read alone (see restrict_to_dialog)."""
 
     def observe() -> list[Word] | None:
         screen = grab_screen(display)
         if screen is None:
             return None
+        rect = active_window_rect(display)
         left, top, right, bottom = active_window_box(display, screen.size)
         words = _ocr_region(screen.crop((left, top, right, bottom)), catalog)
         words = [Word(w.text, w.left + left, w.top + top, w.width, w.height, w.conf, w.line_id) for w in words]
+        words, dialog = restrict_to_dialog(words, rect, screen.size)
         covers_screen = (right - left, bottom - top) == screen.size
-        if not covers_screen and not find_matches(words, catalog):
+        if dialog:
+            if not find_matches(words, catalog):  # nothing to press on the box: a key prompt elsewhere may still be asked
+                words += key_prompts(_ocr_region(screen, catalog), catalog)  # the full read: that prompt is small
+        elif not covers_screen and not find_matches(words, catalog):
             words += ocr_words(screen)
         return words
 

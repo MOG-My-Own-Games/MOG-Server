@@ -20,8 +20,16 @@ from logger.logger import log
 
 from .capture import active_window_box, click, grab_screen, press_key
 from .catalog import Catalog
-from .engine import Action, ScreenMemory, is_license_page, is_progress_page, plan_action, same_screen
-from .matcher import Word, find_matches, screen_lines
+from .engine import (
+    MAX_ATTEMPTS_PER_BUTTON,
+    Action,
+    ScreenMemory,
+    is_license_page,
+    is_progress_page,
+    plan_action,
+    same_screen,
+)
+from .matcher import Match, Word, find_matches, screen_lines, screen_text
 from .ocr import ocr_words
 
 STATUS_RUNNING = "running"
@@ -37,6 +45,9 @@ SETTLE_SECONDS = 1.5
 RETRY_AFTER_SECONDS = 25.0
 # Hard cap so an OCR jitter loop can never click forever.
 MAX_ACTIONS = 300
+# What the "stuck" message may carry of the screen: enough to see which page it was, short enough for a notification.
+STUCK_SCREEN_LINES = 14
+STUCK_DETAIL_MAX = 900
 
 
 @dataclass
@@ -110,7 +121,10 @@ class AutoModeDriver:
             self._last_action_at = now
 
         if now - self._idle_since >= self.stuck_seconds:
-            self._set(STATUS_NEEDS_MANUAL, "No known button on screen")
+            if self._status != STATUS_NEEDS_MANUAL:
+                detail = self._stuck_detail(words, matches)
+                log.warning(f"Install auto mode: needs help. {detail}")
+                self._set(STATUS_NEEDS_MANUAL, detail)
         elif is_progress_page(list(lines), self.catalog):
             self._set(STATUS_WAITING, "Installer is working (progress screen), waiting for it to finish")
         elif matches:
@@ -118,6 +132,26 @@ class AutoModeDriver:
         elif self._status != STATUS_NEEDS_MANUAL:
             self._set(STATUS_SCANNING, f"Reading the screen ({len(lines)} text lines), no known button yet")
         return False
+
+    def _stuck_detail(self, words: list[Word], matches: list[Match]) -> str:
+        """Why it gave up, and what the screen said, so the person (or whoever fixes the catalog) does not have to guess:
+        a button read but pressed with no effect is a different problem from one that was never read."""
+        tried = sorted(
+            {
+                m.text
+                for m in matches
+                if self.memory.attempts.get(f"{m.entry.category}:{m.label}", 0) >= MAX_ATTEMPTS_PER_BUTTON
+            }
+        )
+        if tried:
+            head = f"Pressed {', '.join(tried)} but the page did not change"
+        elif matches:
+            head = f"Read {', '.join(sorted({m.text for m in matches}))} but it is not one to press on this page"
+        else:
+            head = "No known button on screen"
+        seen = screen_text(words)[:STUCK_SCREEN_LINES]
+        detail = f"{head}. On screen: {' | '.join(seen)}" if seen else f"{head}. Nothing could be read on screen"
+        return detail[:STUCK_DETAIL_MAX]
 
     def run(self, stop: threading.Event) -> None:
         while not stop.is_set():

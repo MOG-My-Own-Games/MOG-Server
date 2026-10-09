@@ -109,6 +109,11 @@ def screen_lines(words: list[Word]) -> list[str]:
     return [n for n in (normalize("".join(w.text for w in ws)) for ws in _group_lines(words)) if n]
 
 
+def screen_text(words: list[Word]) -> list[str]:
+    """The text of every OCR line as it was read (case and spacing kept), for telling a person what is on screen."""
+    return [" ".join(w.text for w in ws) for ws in _group_lines(words)]
+
+
 def _is_isolated(line: list[Word], start: int, end: int) -> bool:
     if start == 0 and end == len(line):
         return True

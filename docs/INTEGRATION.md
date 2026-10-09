@@ -106,6 +106,8 @@ A game object carries, among others:
   when it is empty: a game that has not been matched simply has no times;
 - `cover_path` and `media`: the artwork the server chose for each kind (`cover`, `banner`, `hero`, `logo`,
   `icon`);
+- `size_bytes`: what the game's own folder (or file) takes on the server's disk, `null` until the server has measured it
+  (a scan does, and `GET /api/games/{id}/size` refreshes it). Sort by it with `null` last;
 - `installed` (this user has a finished install whose cache is still on the server), `last_played` and
   `last_played_on` (from the user's save uploads), `missing_from_fs`, `saves_only`, `addons_only`, `fs_tags`.
 
@@ -153,7 +155,7 @@ done" is only one of the two conditions for finishing (see [6.5](#65-when-is-it-
 | `auto_mode` | Let the server drive the installer's windows by itself (OCR driven). Left out: the server's default (`GET /api/games/install/defaults`). |
 | `manual_mode` | Do not pick an installer; wait for a person to ([5.4](#54-a-person-has-to-choose)). |
 | `proton_build` | Which Proton build to use; left out, the server's default. |
-| `ttl_seconds` | How long the install cache lives; left out, the server's default (7 days unless changed); `0` or less means never. |
+| `ttl_seconds` | How long the install cache lives; left out, the server's default (7 days unless an admin changed it in Settings; a default of `0` means never); `0` or less means never. An admin who sets a default of days gives every cache that never expires that expiry, counted from then; `POST /api/games/install/cache/{session_id}/reset` (admin) starts one cache's expiry over from the default in force at that moment. The admin cache listing, `GET /api/games/install/cache`, carries each cache's `expires_at` (`null`: never). |
 
 The call is **idempotent while it runs**: if a session for the game is already `installing` or `streaming`, it is
 returned as it is, so a second client asking for the same game finds the first one's work.
@@ -383,7 +385,14 @@ Two cases need the user:
   `adopt_device_id`) or a new machine (register again with a `name` of its own).
 - `409` with `detail.code == "name_taken"`: the name you asked for is used.
 
-`GET /api/devices` lists them; `PATCH /api/devices/{id}` with `{"name": "..."}` renames one.
+`GET /api/devices` lists them (each with `log_at`, when it last sent its log, or `null`); `PATCH /api/devices/{id}` with `{"name": "..."}` renames one.
+
+**Device log (optional, opt-in).** A client whose user allowed it can send its own log, so a problem on a machine out of
+reach can be read: `PUT /api/devices/{id}/log` with the log as a plain-text body (`Content-Type: text/plain`; `204`).
+It replaces the one sent before, and only the newest 1 MiB is kept; a body over twice that is refused with `413`. It
+is a request of its own, not part of a save archive, and it is stored apart from the saves. `GET /api/devices/{id}/log`
+returns it as plain text (`404` when none was sent). Only the device's own user can use either. An older server
+answers `404`: treat that as "not supported" and carry on, the log is never a reason to fail a save sync.
 
 ### 8.2 Versions
 

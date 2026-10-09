@@ -249,6 +249,8 @@ off for a running session.
 | `streaming` | The installer is done and the files are being sealed. | Keep downloading. |
 | `done` | Finished; the final list is available. | Finish the download, verify. |
 | `failed` | Something went wrong: read `error` (a cancelled session also ends here, with `error: "Cancelled"`). | Show `error`. |
+
+An installer that stops before its install (it exits with a non-zero code after writing next to nothing, or leaves only empty files) is never `done`: an auto mode session is run again by the server, up to 3 runs in all, with `bytes_written`/`bytes_total` back to `0` for each; after the last one the session is `failed` and `error` says the installer stopped before its install. A client must still not trust a `done` session without checking that the final list has files with content.
 | `expired` | The cache's time ran out and was deleted. | Start again. |
 
 `bytes_written` and `bytes_total` are the server-side progress where it knows one (unpacking, hashing the result), and are

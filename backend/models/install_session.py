@@ -31,6 +31,9 @@ class InstallSessionState(enum.StrEnum):
     DETECTING = "detecting"
     # No installer could be auto-detected; waiting for the client to pick one.
     AWAITING_INSTALLER = "awaiting_installer"
+    # Ready to run, waiting for a free place: the server runs INSTALL_MAX_CONCURRENCY installs at a time and starts
+    # the others in the order they asked (see handler/install/runner.py, dispatch_queue).
+    QUEUED = "queued"
     # Sandbox is running the installer (X/VNC available).
     INSTALLING = "installing"
     # Installer finished; installed files are being streamed to clients.
@@ -61,6 +64,7 @@ ACTIVE_INSTALL_STATES = frozenset(
     {
         InstallSessionState.DETECTING,
         InstallSessionState.AWAITING_INSTALLER,
+        InstallSessionState.QUEUED,
         InstallSessionState.INSTALLING,
         InstallSessionState.STREAMING,
     }

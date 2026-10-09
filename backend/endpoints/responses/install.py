@@ -47,6 +47,8 @@ class InstallSessionSchema(BaseModel):
     bytes_written: int
     bytes_total: int
     error: str | None
+    # For a `queued` session: where it stands, 1 being the next to start. None otherwise.
+    queue_position: int | None = None
 
 
 class InstallStartForm(BaseModel):

@@ -23,7 +23,7 @@ function watchTopbarHeight() {
 watchTopbarHeight();
 
 const POLL_INTERVAL_MS = 2000;
-const ACTIVE_INSTALL_STATES = ["detecting", "awaiting_installer", "installing", "streaming"];
+const ACTIVE_INSTALL_STATES = ["detecting", "awaiting_installer", "queued", "installing", "streaming"];
 
 // IGDB's age_ratings category/rating enums (confirmed against the official
 // Game endpoint docs - https://api-docs.igdb.com/#age-rating). Only the
@@ -2734,7 +2734,8 @@ function renderAutoIndicator(session) {
 function renderInstallState(session) {
   const statusEl = document.getElementById("install-status");
   statusEl.hidden = false;
-  document.getElementById("install-state").textContent = session.state;
+  document.getElementById("install-state").textContent =
+    session.state === "queued" ? `queued (${session.queue_position ? `number ${session.queue_position}` : "waiting"} for a place)` : session.state;
   const extracting = session.extract_only && session.phase === "extracting";
   document.getElementById("install-detail").textContent = extracting
     ? `Extracting ${session.phase_detail || "the archive"} as it is`

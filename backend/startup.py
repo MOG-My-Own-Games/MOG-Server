@@ -13,6 +13,7 @@ from config import (
 )
 from handler.auth import hash_password, verify_password
 from handler.database import db_install_session_handler, db_user_handler
+from handler.install.runner import dispatch_queue
 from logger.logger import log
 from models.install_session import InstallSessionState
 from models.user import Role, User
@@ -90,3 +91,4 @@ def run_startup_tasks() -> None:
     _run_migrations()
     _ensure_default_admin()
     _fail_orphaned_installs()
+    dispatch_queue()  # what was waiting for a place before the restart still waits its turn

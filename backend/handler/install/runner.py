@@ -117,6 +117,38 @@ def enqueue_install(install_session_id: int) -> None:
     _EXECUTOR.submit(run_install, install_session_id)
 
 
+# Count-then-start must not interleave, or two requests can both see room and together exceed INSTALL_MAX_CONCURRENCY.
+_QUEUE_LOCK = threading.Lock()
+
+
+def start_or_queue(install_session_id: int) -> bool:
+    """Start the session now when there is room for another install, else put it in the queue (state `queued`) to be
+    started, in order, as places free up. True when it started."""
+    with _QUEUE_LOCK:
+        if db_install_session_handler.count_running_sessions() >= INSTALL_MAX_CONCURRENCY:
+            db_install_session_handler.update_session(install_session_id, {"state": InstallSessionState.QUEUED})
+            return False
+        db_install_session_handler.update_session(install_session_id, {"state": InstallSessionState.INSTALLING})
+        enqueue_install(install_session_id)
+        return True
+
+
+def dispatch_queue() -> int:
+    """Start the queued sessions, longest waiting first, while there are places. Run whenever one frees up (an install
+    ended, was cancelled, or the server started). Returns how many were started."""
+    started = 0
+    with _QUEUE_LOCK:
+        while db_install_session_handler.count_running_sessions() < INSTALL_MAX_CONCURRENCY:
+            waiting = db_install_session_handler.get_next_queued()
+            if waiting is None:
+                break
+            db_install_session_handler.update_session(waiting.id, {"state": InstallSessionState.INSTALLING})
+            enqueue_install(waiting.id)
+            log.info(f"Install session {hl(str(waiting.id))} left the queue")
+            started += 1
+    return started
+
+
 def cancel_install(install_session_id: int) -> bool:
     """Kill a running session's sandboxed process group, if any."""
     with _RUNNING_LOCK:
@@ -394,6 +426,10 @@ def run_install(install_session_id: int) -> None:
         _run_install(install_session_id)
     finally:
         _log_install_end(install_session_id)
+        try:
+            dispatch_queue()  # this install's place is free now
+        except Exception as e:  # noqa: BLE001 - the queue must never turn a finished install into an error
+            log.warning(f"Could not start the next queued install: {e}")
 
 
 def _log_install_end(install_session_id: int) -> None:

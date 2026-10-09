@@ -55,6 +55,25 @@ class DBInstallSessionsHandler(DBBaseHandler):
         )
 
     @begin_session
+    def get_next_queued(self, session: Session = None) -> InstallSession | None:  # type: ignore
+        """The session that has waited longest for a free place."""
+        return session.scalars(
+            select(InstallSession)
+            .where(InstallSession.state == InstallSessionState.QUEUED)
+            .order_by(InstallSession.updated_at.asc(), InstallSession.id.asc())
+        ).first()
+
+    @begin_session
+    def queue_position(self, install_session_id: int, session: Session = None) -> int | None:  # type: ignore
+        """Where a queued session stands, 1 being the next to start; None when it is not queued."""
+        queued = session.scalars(
+            select(InstallSession.id)
+            .where(InstallSession.state == InstallSessionState.QUEUED)
+            .order_by(InstallSession.updated_at.asc(), InstallSession.id.asc())
+        ).all()
+        return queued.index(install_session_id) + 1 if install_session_id in queued else None
+
+    @begin_session
     def get_installing_sessions(self, session: Session = None) -> list[InstallSession]:  # type: ignore
         return list(
             session.scalars(
@@ -156,6 +175,7 @@ class DBInstallSessionsHandler(DBBaseHandler):
                     InstallSession.expires_at.is_not(None),
                     InstallSession.expires_at < now,
                     InstallSession.state != InstallSessionState.EXPIRED,
+                    InstallSession.state != InstallSessionState.QUEUED,  # nothing of it is on disk yet
                     InstallSession.state.not_in(RUNNING_INSTALL_STATES),
                 )
             ).all()

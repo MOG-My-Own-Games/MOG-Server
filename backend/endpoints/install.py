@@ -4,7 +4,7 @@ install, then stream or download the result.
 
 Unlike RomM (install worker is a separate container behind Redis/RQ, gated on
 `has_install_worker()`), MOG runs everything in this one process: starting a
-session just submits to runner.enqueue_install's thread pool directly, and the
+session just submits to runner.start_or_queue's thread pool directly, and the
 VNC proxy below talks to 127.0.0.1 instead of a worker hostname.
 """
 
@@ -13,7 +13,6 @@ from __future__ import annotations
 import asyncio
 import os
 import tempfile
-import threading
 import zipfile
 from pathlib import Path
 from typing import Annotated
@@ -61,7 +60,7 @@ from handler.install.manifest import (
 from handler.install.proton_builds import get_download_progress, is_extracting, list_proton_builds, remove_build
 from handler.install.proton_builds import enqueue_download as enqueue_proton_download
 from handler.install.runner import cancel_install as runner_cancel_install
-from handler.install.runner import enqueue_install
+from handler.install.runner import dispatch_queue, start_or_queue
 from logger.logger import log
 from models.install_session import ACTIVE_INSTALL_STATES, RUNNING_INSTALL_STATES, InstallSession, InstallSessionState
 from utils.install_cache import (
@@ -78,11 +77,11 @@ router = APIRouter(prefix="/games", tags=["install"])
 # VNC proxy only ever talks to this same process/container.
 _VNC_HOST = "127.0.0.1"
 
-_CONCURRENCY_LOCK = threading.Lock()
-
-
 def _session_schema(session: InstallSession) -> InstallSessionSchema:
-    return InstallSessionSchema.model_validate(session)
+    schema = InstallSessionSchema.model_validate(session)
+    if session.state == InstallSessionState.QUEUED:
+        schema.queue_position = db_install_session_handler.queue_position(session.id)
+    return schema
 
 
 def _resolve_session(game_id: int, user_id: int, session_id: int | None) -> InstallSession | None:
@@ -201,7 +200,7 @@ async def start_install_session(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
 
     game_sessions = db_install_session_handler.get_sessions_for_game(game.id)
-    running = next((x for x in game_sessions if x.state in RUNNING_INSTALL_STATES), None)
+    running = next((x for x in game_sessions if x.state in RUNNING_INSTALL_STATES | {InstallSessionState.QUEUED}), None)
     if running:
         return _session_schema(running)
 
@@ -292,21 +291,10 @@ async def start_install_session(
     if needs_manual_pick:
         return _session_schema(session)
 
-    # A short critical section around count-then-transition, so two
-    # concurrent start requests can't both see room under
-    # INSTALL_MAX_CONCURRENCY and together exceed it.
-    if not _CONCURRENCY_LOCK.acquire(timeout=10.0):
-        _abandon()
-        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many concurrent installs")
-    try:
-        if db_install_session_handler.count_running_sessions() >= INSTALL_MAX_CONCURRENCY:
-            _abandon()
-            raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many concurrent installs")
-        session = db_install_session_handler.update_session(session.id, {"state": InstallSessionState.INSTALLING})
-        assert session is not None
-        enqueue_install(session.id)
-    finally:
-        _CONCURRENCY_LOCK.release()
+    # With every place taken the session waits in the queue (state `queued`) and starts by itself, in order.
+    start_or_queue(session.id)
+    session = db_install_session_handler.get_session(session.id)
+    assert session is not None
 
     return _session_schema(session)
 
@@ -353,6 +341,7 @@ async def cancel_install(
         },
     )
     assert updated is not None
+    dispatch_queue()  # a place may have been freed by this
     return _session_schema(updated)
 
 

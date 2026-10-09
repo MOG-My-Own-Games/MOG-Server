@@ -1479,11 +1479,18 @@ const SORT_ORDERS = {
   oldest: (a, b) => releaseOf(a, Infinity) - releaseOf(b, Infinity) || a.game.name.localeCompare(b.game.name),
   az: (a, b) => a.game.name.localeCompare(b.game.name),
   za: (a, b) => b.game.name.localeCompare(a.game.name),
+  largest: (a, b) => sizeOf(b, -Infinity) - sizeOf(a, -Infinity) || a.game.name.localeCompare(b.game.name),
+  smallest: (a, b) => sizeOf(a, Infinity) - sizeOf(b, Infinity) || a.game.name.localeCompare(b.game.name),
 };
 const DEFAULT_SORT_ORDER = "newest";
 
 function releaseOf(entry, missing = -Infinity) {
   return ((entry.game.igdb_metadata || {}).first_release_date ?? missing);
+}
+
+// A game not measured yet goes after the rest, whichever way the sizes run.
+function sizeOf(entry, missing) {
+  return entry.game.size_bytes ?? missing;
 }
 
 function sortSettings() {

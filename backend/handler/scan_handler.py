@@ -34,6 +34,23 @@ def has_files(path: Path) -> bool:
     return any(files for _, _, files in os.walk(path))
 
 
+def size_of(path: Path) -> int:
+    """Bytes in a file, or in every file under a folder."""
+    if not path.is_dir():
+        try:
+            return path.stat().st_size
+        except OSError:
+            return 0
+    total = 0
+    for dirpath, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                total += os.stat(os.path.join(dirpath, name)).st_size
+            except OSError:
+                continue
+    return total
+
+
 def only_addons(path: Path) -> bool:
     """A folder with add-on folders (mods, DLC, ...) and nothing that installs the base game.
 
@@ -74,7 +91,13 @@ def _scan_library(library: Library) -> ScanResult:
     new_games = []
     for fs_name in sorted(on_disk - existing.keys()):
         game = db_game_handler.add_game(
-            Game(library_id=library.id, fs_name=fs_name, name=fs_name, addons_only=only_addons(root / fs_name))
+            Game(
+                library_id=library.id,
+                fs_name=fs_name,
+                name=fs_name,
+                addons_only=only_addons(root / fs_name),
+                size_bytes=size_of(root / fs_name),
+            )
         )
         new_games.append((game.id, fs_name))
 
@@ -89,6 +112,8 @@ def _scan_library(library: Library) -> ScanResult:
         addons = not is_missing and only_addons(root / fs_name)
         if addons != bool(game.addons_only):
             changes["addons_only"] = addons
+        if not is_missing and game.size_bytes is None:  # measured once; handler/sizes.py keeps it current
+            changes["size_bytes"] = size_of(root / fs_name)
         if changes:
             db_game_handler.update_game(game.id, changes)
         missing += is_missing

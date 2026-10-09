@@ -96,6 +96,8 @@ def game_sizes(game: Game) -> GameSizes:
         known = _Remembered(time.monotonic(), fingerprint, sum(f.size_bytes for f in listed), cache, len(listed))
         with _lock:
             _remembered[game.id] = known
+        if game.size_bytes != known.installer:
+            db_game_handler.update_game(game.id, {"size_bytes": known.installer})
     _versions, saves = db_saves_handler.summary(game_id=game.id)
     return GameSizes(known.installer, known.cache, saves, known.files)
 

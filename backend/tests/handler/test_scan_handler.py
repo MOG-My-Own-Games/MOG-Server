@@ -6,7 +6,7 @@ from models.library import Library
 
 
 def _game(id: int, fs_name: str, missing: bool = False) -> Game:
-    return Game(id=id, library_id=1, fs_name=fs_name, name=fs_name, missing_from_fs=missing)
+    return Game(id=id, library_id=1, fs_name=fs_name, name=fs_name, missing_from_fs=missing, size_bytes=1)
 
 
 @patch("handler.scan_handler.db_game_handler")
@@ -142,3 +142,18 @@ def test_a_scan_lists_the_games_it_added(db, tmp_path):
     result = scan_library(Library(id=1, name="L", root_path=str(tmp_path)))
 
     assert result.new_games == ((41, "A"), (42, "B")) and result.added == 2
+
+    def test_measures_a_new_game_and_one_never_measured(self, db, tmp_path):
+        (tmp_path / "New").mkdir()
+        (tmp_path / "New" / "a.bin").write_bytes(b"xxx")
+        (tmp_path / "New" / "sub").mkdir()
+        (tmp_path / "New" / "sub" / "b.bin").write_bytes(b"yy")
+        (tmp_path / "Old").mkdir()
+        (tmp_path / "Old" / "c.bin").write_bytes(b"z")
+        db.get_games_for_library.return_value = [Game(id=2, library_id=1, fs_name="Old", name="Old")]
+        db.add_game.side_effect = lambda game: game
+
+        scan_library(Library(id=1, name="L", root_path=str(tmp_path)))
+
+        assert db.add_game.call_args.args[0].size_bytes == 5
+        db.update_game.assert_called_once_with(2, {"size_bytes": 1})

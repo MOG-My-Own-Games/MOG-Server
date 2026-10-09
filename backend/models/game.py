@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
+from sqlalchemy import BigInteger, Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from models.base import BaseModel
@@ -50,6 +50,10 @@ class Game(BaseModel):
     # Set by a scan when the folder holds add-on folders (mods, DLC, ...) and nothing that installs
     # the base game (see installer_detection.only_addons).
     addons_only: Mapped[bool] = mapped_column(Boolean(), default=False, server_default="0")
+
+    # What the game's own folder (or file) takes on disk, set by a scan and refreshed whenever the size is
+    # measured again (handler/sizes.py). NULL until measured.
+    size_bytes: Mapped[int | None] = mapped_column(BigInteger(), default=None)
 
     # Plain lazy loading for Phase 1 simplicity (RomM uses lazy="raise" + explicit
     # eager-loading everywhere to catch N+1s; worth adopting once this grows).

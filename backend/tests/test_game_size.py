@@ -16,8 +16,11 @@ def world(monkeypatch, tmp_path: Path):
     cache = tmp_path / "cache" / "9"
     cache.mkdir(parents=True)
     (cache / "files.bin").write_bytes(b"z" * 400)
-    game = SimpleNamespace(id=1, fs_name="Game", library=SimpleNamespace(root_path=str(tmp_path)))
-    state = SimpleNamespace(saves=70)
+    game = SimpleNamespace(id=1, fs_name="Game", size_bytes=None, library=SimpleNamespace(root_path=str(tmp_path)))
+    state = SimpleNamespace(saves=70, stored=[])
+    monkeypatch.setattr(
+        sizes, "db_game_handler", SimpleNamespace(update_game=lambda gid, data: state.stored.append((gid, data)))
+    )
     monkeypatch.setattr(sizes, "_remembered", {})
     monkeypatch.setattr(sizes, "session_cache_dir", lambda session_id: tmp_path / "cache" / str(session_id))
     monkeypatch.setattr(
@@ -37,6 +40,7 @@ def test_size_sums_every_file_under_the_game_folder(world):
     result = asyncio.run(games.get_game_size(SimpleNamespace(), 1))
 
     assert (result.size_bytes, result.file_count) == (3500, 2)
+    assert world.state.stored == [(1, {"size_bytes": 3500})]
 
 
 def test_sizes_split_the_folder_the_caches_and_the_saves(world):

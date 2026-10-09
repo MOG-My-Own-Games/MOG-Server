@@ -23,6 +23,8 @@ class GameSchema(BaseModel):
     hltb_id: int | None = None
     hltb_metadata: dict[str, Any] | None = None
     cover_path: str | None
+    # What the game's folder takes on the server's disk; None until measured.
+    size_bytes: int | None = None
     missing_from_fs: bool = False
     # Gone from disk, but some user still has saves of it, so it is kept (not "missing").
     saves_only: bool = False

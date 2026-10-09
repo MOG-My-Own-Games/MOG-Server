@@ -3176,13 +3176,32 @@ async function loadDevicesTable() {
         <td>${escapeHtml(d.hostname || "")}</td>
         <td>${escapeHtml(d.platform || "")}</td>
         <td>${escapeHtml(fmtWhen(d.last_seen))}</td>
-        <td><button type="button" data-device="${d.id}" data-name="${escapeHtml(d.name)}">Rename</button></td>
+        <td>
+          <button type="button" data-device="${d.id}" data-name="${escapeHtml(d.name)}">Rename</button>
+          ${d.log_at ? `<button type="button" data-log="${d.id}" data-name="${escapeHtml(d.name)}" title="Sent ${escapeHtml(fmtWhen(d.log_at))}">Log</button>` : ""}
+        </td>
       </tr>`
     )
     .join("");
 }
 
+async function showDeviceLog(button) {
+  const box = document.getElementById("device-log");
+  try {
+    const resp = await fetch(`/api/devices/${button.dataset.log}/log`, { headers: { Authorization: authHeader() } });
+    if (!resp.ok) throw new Error(`${resp.status} ${resp.statusText}`);
+    document.getElementById("device-log-text").textContent = await resp.text();
+    document.getElementById("device-log-title").textContent = `Log of ${button.dataset.name}`;
+    box.hidden = false;
+    box.scrollIntoView({ behavior: "smooth" });
+  } catch (err) {
+    document.getElementById("devices-status").textContent = `Could not read the log: ${err.message}`;
+  }
+}
+
 document.getElementById("devices-table-body").addEventListener("click", async (e) => {
+  const logButton = e.target.closest("button[data-log]");
+  if (logButton) return showDeviceLog(logButton);
   const button = e.target.closest("button[data-device]");
   if (!button) return;
   const name = prompt("New name for this device", button.dataset.name);

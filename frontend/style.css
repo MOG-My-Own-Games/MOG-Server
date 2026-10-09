@@ -945,3 +945,15 @@ a.chip { color: inherit; text-decoration: none; }
 .client-panel .modal-footer { position: static; gap: var(--space-sm); padding-top: var(--space-md); }
 .button-secondary { background: var(--bg-elevated-2); border: 1px solid var(--border); }
 .button-secondary:hover { filter: brightness(1.2); }
+
+.log-view {
+  max-height: 420px;
+  overflow: auto;
+  padding: 0.8em 1em;
+  background: var(--bg-elevated-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 0.8em;
+  white-space: pre-wrap;
+  word-break: break-all;
+}

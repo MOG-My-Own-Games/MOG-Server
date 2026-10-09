@@ -755,6 +755,10 @@ a.chip { color: inherit; text-decoration: none; }
 .validity-badge.valid { color: var(--success); }
 .validity-badge.invalid { color: var(--danger); }
 
+/* Settings sections are wider than the 640px of a card elsewhere, with a margin kept to the right. */
+#view-settings .tab-panel .card { max-width: min(1000px, calc(100% - 3rem)); }
+#view-settings .tab-panel .card .data-table { max-width: none; }
+
 /* Settings form fields outside a .toggle-row/.provider-card (plain label +
    input pairs, e.g. the cache TTL / proton default fields) */
 #view-settings > .tab-panel > .card > label {

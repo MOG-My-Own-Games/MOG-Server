@@ -77,7 +77,7 @@ from "wrong password", and to read the server's version.
 (the `409` of device registration, see [8](#8-saves-optional)). The statuses you will meet are `401` (login),
 `404` (no such game, session, file, or an endpoint an older server does not have), `409` (a conflict you can
 resolve), `416` (a range is not available yet, see [6](#6-downloading-the-result)), `422` and `413` (a rejected
-upload) and `429` (too many installs running at once).
+upload) and, from an older server only, `429` (too many installs running at once: they are queued now).
 
 **Newer and older servers.** Optional features appear over time. A client should treat a `404` or `405` on an
 optional endpoint (game sizes, the library revision, mods, save sync, save paths, download workers) as "this
@@ -157,15 +157,18 @@ done" is only one of the two conditions for finishing (see [6.5](#65-when-is-it-
 | `proton_build` | Which Proton build to use; left out, the server's default. |
 | `ttl_seconds` | How long the install cache lives; left out, the server's default (7 days unless an admin changed it in Settings; a default of `0` means never); `0` or less means never. An admin who sets a default of days gives every cache that never expires that expiry, counted from then; `POST /api/games/install/cache/{session_id}/reset` (admin) starts one cache's expiry over from the default in force at that moment. The admin cache listing, `GET /api/games/install/cache`, carries each cache's `expires_at` (`null`: never). |
 
-The call is **idempotent while it runs**: if a session for the game is already `installing` or `streaming`, it is
-returned as it is, so a second client asking for the same game finds the first one's work.
+The call is **idempotent while it runs**: if a session for the game is already `queued`, `installing` or `streaming`,
+it is returned as it is, so a second client asking for the same game finds the first one's work.
 
 > **Check for a finished install before you start another.** A start for a game whose last session is already
 > `done` would run the installer again. MOG Client first does `GET /api/games/{id}/install`: when the answer is
 > `done`, it downloads from that session and does not start anything. A `404` means there is no session.
 
-A start can fail with `429` when the server is already running as many installs as it was told to
-(`INSTALL_MAX_CONCURRENCY`, one by default). Tell the user and offer to try again later.
+The server runs as many installs at once as it was told to (`INSTALL_MAX_CONCURRENCY`, one by default). A start made
+while every place is taken is **not refused**: the session is created in the `queued` state, with `queue_position`
+(1 is the next to start), and it starts by itself, in the order the starts came, as installs end or are cancelled.
+Keep polling it like any other. An older server answers such a start with `429` instead: treat it as "wait and ask
+again" (MOG Client asks again every 15 seconds).
 
 The response is the **session**:
 
@@ -241,6 +244,7 @@ off for a running session.
 | --- | --- | --- |
 | `detecting` | The server is looking at the files. | Keep polling. |
 | `awaiting_installer` | Waiting for a decision ([5.4](#54-a-person-has-to-choose)). | Ask the user. Stop waiting for files. |
+| `queued` | Ready, waiting for a free place (see [5.2](#52-starting-a-session)). `queue_position` says where it stands. | Show "waiting". Keep polling; there are no files yet. Cancel works. |
 | `installing` | The installer (or the extraction) is running. `phase` and `phase_detail` say what: `extracting`, `mounting`, `downloading` (a Proton build), `preparing`, `launching`. | Show it; download what is already there ([6](#6-downloading-the-result)). |
 | `streaming` | The installer is done and the files are being sealed. | Keep downloading. |
 | `done` | Finished; the final list is available. | Finish the download, verify. |
@@ -493,7 +497,7 @@ standard-library Python.
 1. **Sign in.** `GET /api/users/me` with Basic auth. Keep the credentials safe on your side.
 2. **List the games.** `GET /api/games`. Show `name`, the cover from `/api/games/{id}/cover`, the summary.
 3. **Check for an install that is already there.** `GET /api/games/{id}/install`.
-4. **Start one.** `POST /api/games/{id}/install` with `{}`. Handle `429`.
+4. **Start one.** `POST /api/games/{id}/install` with `{}`. It may come back `queued`; an older server may answer `429`.
 5. **Poll** the session and the manifest every 3 s. Stop on `failed` or `expired`; ask the user on
    `awaiting_installer`.
 6. **Download** every file with Range, as the manifest grows, writing as the body arrives.

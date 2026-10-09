@@ -265,11 +265,14 @@ def start(monkeypatch, tmp_path):
                 setattr(made[-1], key, value)
             return made[-1]
 
+        def get_session(self, _id):
+            return made[-1]
+
+        def queue_position(self, _id):
+            return None
+
         def delete_session(self, _id):
             pass
-
-        def count_running_sessions(self):
-            return 0
 
     paths = {"Hearthlands.rar": archive, "setup.exe": plain}
     monkeypatch.setattr(endpoint, "db_install_session_handler", Handler())
@@ -286,7 +289,12 @@ def start(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(endpoint, "list_source_candidates", lambda path: [cand("setup.exe", 0, "known installer")])
     monkeypatch.setattr(endpoint, "purge_superseded_sessions", lambda *a: None)
-    monkeypatch.setattr(endpoint, "enqueue_install", lambda sid: enqueued.append(sid))
+    def start_now(sid):  # what runner.start_or_queue does with a free place
+        made[-1].state = InstallSessionState.INSTALLING
+        enqueued.append(sid)
+        return True
+
+    monkeypatch.setattr(endpoint, "start_or_queue", start_now)
     monkeypatch.setattr(endpoint, "default_auto_mode", lambda: False)
     monkeypatch.setattr(endpoint, "default_manual_mode", lambda: False)
     monkeypatch.setattr(endpoint, "resolve_expires_at", lambda ttl: None)

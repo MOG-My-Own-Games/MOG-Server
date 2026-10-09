@@ -420,10 +420,23 @@ def _mark_d_drive_as_cdrom(
         log.warning(f"Could not mark d: as a cdrom drive, leaving it untyped: {e}")
 
 
+class InstallStoppedEarly(RuntimeError):
+    """The installer exited before its install: it wrote nothing, or only empty files. Not a finished install, whatever its
+    exit code says; the first run in a fresh prefix often does this, and running it again usually works."""
+
+
+# How often a run is made for one session (its first and the repeats after it stopped early).
+INSTALL_ATTEMPTS = 3
+# A run that exits with a non-zero code after writing less than this did not install anything.
+EARLY_STOP_BYTES = 1024 * 1024
+
+
 def run_install(install_session_id: int) -> None:
     """Entry point submitted to the thread pool for one install session."""
     try:
-        _run_install(install_session_id)
+        attempt = 1
+        while _run_install(install_session_id, attempt):  # True: it stopped early and is to be run again
+            attempt += 1
     finally:
         _log_install_end(install_session_id)
         try:
@@ -448,20 +461,22 @@ def _set_phase(install_session_id: int, phase: InstallPhase | None, detail: str 
     )
 
 
-def _run_install(install_session_id: int) -> None:
+def _run_install(install_session_id: int, attempt: int = 1) -> bool:
+    """Run the install once. True when it stopped early on an auto mode session that has runs left: the caller runs it again."""
+    retry = False
     session = db_install_session_handler.get_session(install_session_id)
     if session is None:
         log.error(f"Install session {install_session_id} not found; aborting")
-        return
+        return False
 
     game = db_game_handler.get_game(session.game_id)
     if game is None:
         _fail(install_session_id, "Game no longer exists")
-        return
+        return False
 
     if not session.installer_path and not session.source_path and not session.extract_only:
         _fail(install_session_id, "No installer selected for this session")
-        return
+        return False
 
     # An archive/disc image holding the installer: either picked explicitly
     # (`source_path`, with `installer_path` naming the executable inside it) or
@@ -475,13 +490,13 @@ def _run_install(install_session_id: int) -> None:
             probe = fs_game_handler.resolve_installer_abs_path(game, inner_installer)
         except (ValueError, FileNotFoundError) as e:
             _fail(install_session_id, str(e))
-            return
+            return False
         if is_archive_candidate(Path(probe)):
             source_rel, inner_installer = inner_installer, None
 
     if session.extract_only:
         _run_extract_only(install_session_id, game, source_rel)
-        return
+        return False
 
     extract_temp_dir: TemporaryDirectory[str] | None = None
     try:
@@ -500,7 +515,7 @@ def _run_install(install_session_id: int) -> None:
                     f"Nothing recognizable as an installer inside {source_abs.name}. Start the install again "
                     "and choose to extract its contents as they are.",
                 )
-                return
+                return False
             extract_temp_dir, extract_root, chosen = result
             installer_abs = str(extract_root / chosen.path)
             db_install_session_handler.update_session(
@@ -514,7 +529,7 @@ def _run_install(install_session_id: int) -> None:
             )
     except (ValueError, FileNotFoundError) as e:
         _fail(install_session_id, str(e))
-        return
+        return False
 
     # InstallShield-based multi-part installers (their ISArcExtract/ISDone.dll
     # archive extractor) look for sibling data files (setup-N.bin, Data1.cab,
@@ -669,8 +684,9 @@ def _run_install(install_session_id: int) -> None:
             live_manifest_thread.start()
         _set_phase(install_session_id, InstallPhase.LAUNCHING, f"Launching {Path(installer_abs).name}, waiting for its first window")
         timed_out = False
+        exit_code: int | None = None
         try:
-            _run_installer(argv, vnc.display, auto_mode_session=(install_session_id, work_dir))
+            exit_code = _run_installer(argv, vnc.display, auto_mode_session=(install_session_id, work_dir))
         except subprocess.TimeoutExpired:
             timed_out = True
         finally:
@@ -682,7 +698,7 @@ def _run_install(install_session_id: int) -> None:
             # Genuinely stuck (something was still mid-write, or nothing
             # was ever produced) - not safe to trust as a finished install.
             _fail(install_session_id, "Installer timed out")
-            return
+            return False
         if timed_out:
             log.warning(
                 f"Install session {install_session_id} hit its timeout, but every "
@@ -701,8 +717,17 @@ def _run_install(install_session_id: int) -> None:
             _finalize_native_install(install_session_id, work_dir)
         else:
             _finalize_install(
-                install_session_id, _wine_drive_c_root(prefix_dir, proton_or_wine), work_dir, windows_baseline
+                install_session_id, _wine_drive_c_root(prefix_dir, proton_or_wine), work_dir, windows_baseline, exit_code
             )
+    except InstallStoppedEarly as e:
+        session = db_install_session_handler.get_session(install_session_id)
+        if attempt < INSTALL_ATTEMPTS and session is not None and session.auto_mode:
+            log.warning(f"Install session {install_session_id}: {e} Running it again ({attempt + 1} of {INSTALL_ATTEMPTS}).")
+            _reset_for_another_run(install_session_id)
+            retry = True
+        else:
+            log.error(f"Install session {install_session_id} failed: {e}")
+            _fail(install_session_id, str(e))
     except Exception as e:  # noqa: BLE001 - surface any runner failure to the UI
         log.error(f"Install session {install_session_id} failed: {e}")
         _fail(install_session_id, str(e))
@@ -715,6 +740,27 @@ def _run_install(install_session_id: int) -> None:
         delete_live_manifest(work_dir)
         if extract_temp_dir is not None:
             extract_temp_dir.cleanup()
+    return retry
+
+
+def _reset_for_another_run(install_session_id: int) -> None:
+    """The session as a fresh run finds it: running, with nothing of the last run's screen, counts or error."""
+    db_install_session_handler.update_session(
+        install_session_id,
+        {
+            "state": InstallSessionState.INSTALLING,
+            "error": None,
+            "bytes_written": 0,
+            "bytes_total": 0,
+            "vnc_url": None,
+            "vnc_web_port": None,
+            "vnc_token": None,
+            "phase": None,
+            "phase_detail": None,
+            "auto_status": None,
+            "auto_detail": None,
+        },
+    )
 
 
 NATIVE_HOME = "home"
@@ -1011,12 +1057,17 @@ def _enter_streaming(install_session_id: int, vnc: VncSession) -> None:
 
 
 def _finalize_install(
-    install_session_id: int, prefix_dir: Path, work_dir: Path, windows_baseline: frozenset[Path] = frozenset()
+    install_session_id: int,
+    prefix_dir: Path,
+    work_dir: Path,
+    windows_baseline: frozenset[Path] = frozenset(),
+    exit_code: int | None = None,
 ) -> None:
     """Hash whatever the installer produced and mark the session DONE.
 
     Raises if nothing was found, so the caller's except-block routes it to
-    FAILED instead of finishing "successfully" with an empty manifest.
+    FAILED instead of finishing "successfully" with an empty manifest. The same
+    when the installer stopped before its install (see check_not_stopped_early).
     """
     files = collect_windows_install_files(prefix_dir, windows_baseline)
 
@@ -1030,6 +1081,7 @@ def _finalize_install(
             "Installer finished but no files were found under drive_c or work_dir "
             "(it may have installed to a blacklisted or unrecognized path)"
         )
+    check_not_stopped_early(files, exit_code)
 
     report = ThrottledProgress(
         lambda hashed: db_install_session_handler.update_session(install_session_id, {"bytes_written": hashed})
@@ -1046,6 +1098,24 @@ def _finalize_install(
             "bytes_total": manifest_total_bytes(entries),
         },
     )
+
+
+def check_not_stopped_early(files: list[Path], exit_code: int | None) -> None:
+    """Raise InstallStoppedEarly when what the installer left is not an install: only empty files, or next to nothing from
+    a run that ended with a non-zero code. (Caught live: an installer exited with 253 seconds after "Install", leaving one
+    empty file, and the session was marked done, so the client downloaded it and asked for an executable in an empty folder.)"""
+    sizes = []
+    for path in files:
+        try:
+            sizes.append(path.stat().st_size)
+        except OSError:
+            continue
+    total = sum(sizes)
+    how = f"exited with code {exit_code}" if exit_code not in (None, 0) else "ended"
+    if total == 0:
+        raise InstallStoppedEarly(f"The installer {how} having written only empty files ({len(sizes)}): it stopped before its install.")
+    if exit_code not in (None, 0) and total < EARLY_STOP_BYTES:
+        raise InstallStoppedEarly(f"The installer {how} after writing only {total} bytes in {len(sizes)} files: it stopped before its install.")
 
 
 def _wrap_for_sandbox(
@@ -1091,7 +1161,7 @@ def _wrap_for_sandbox(
     return build_bwrap_command(spec, inner)
 
 
-def _run_installer(argv: list[str], display: str, auto_mode_session: tuple[int, Path] | None = None) -> None:
+def _run_installer(argv: list[str], display: str, auto_mode_session: tuple[int, Path] | None = None) -> int:
     """Run the installer argv with a hard timeout, keeping it usable meanwhile.
 
     The user drives the installer themselves through the VNC session - this
@@ -1105,7 +1175,7 @@ def _run_installer(argv: list[str], display: str, auto_mode_session: tuple[int, 
     Started in its own process group (`start_new_session=True`) so
     `cancel_install` can kill the whole sandboxed tree (bwrap + Wine/Proton +
     the installer) without sending a signal to the thread running this
-    function.
+    function. Returns the installer's exit code.
     """
     install_session_id = auto_mode_session[0] if auto_mode_session is not None else None
     proc = subprocess.Popen(argv, start_new_session=True)
@@ -1133,6 +1203,7 @@ def _run_installer(argv: list[str], display: str, auto_mode_session: tuple[int, 
                 "(not necessarily a failure - some installers use this for "
                 "e.g. 'reboot needed')"
             )
+        return proc.returncode
     except subprocess.TimeoutExpired:
         proc.kill()
         proc.wait()

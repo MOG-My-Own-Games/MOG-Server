@@ -61,8 +61,9 @@ def test_a_run_that_ends_starts_the_next_one_by_itself(queue, monkeypatch):
     runner.start_or_queue(first)
     runner.start_or_queue(second)
 
-    def finish(session_id):
+    def finish(session_id, attempt=1):
         sessions.update_session(session_id, {"state": S.DONE})
+        return False
 
     monkeypatch.setattr(runner, "_run_install", finish)
     runner.run_install(first)

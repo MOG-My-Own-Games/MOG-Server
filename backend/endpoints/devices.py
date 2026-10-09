@@ -2,12 +2,16 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Path, status
+from fastapi import APIRouter, HTTPException, Path, Request, status
 from starlette.concurrency import run_in_threadpool
+from starlette.responses import PlainTextResponse
+
+from config import MAX_DEVICE_LOG_BYTES
 
 from endpoints.responses.save import DeviceSchema, DeviceUpdateForm, RegisterDeviceForm
 from handler.auth import CurrentUser
 from handler.database import db_device_handler
+from handler import device_logs
 from handler.devices import DeviceNotFound, HostnameTaken, NameTaken, register_device, rename_device
 
 router = APIRouter(prefix="/devices", tags=["devices"])
@@ -15,7 +19,10 @@ router = APIRouter(prefix="/devices", tags=["devices"])
 
 @router.get("")
 async def list_devices(user: CurrentUser) -> list[DeviceSchema]:
-    return [DeviceSchema.model_validate(d) for d in db_device_handler.get_for_user(user.id)]
+    return [
+        DeviceSchema.model_validate(d).model_copy(update={"log_at": device_logs.uploaded_at(user.id, d.id)})
+        for d in db_device_handler.get_for_user(user.id)
+    ]
 
 
 @router.post("/register")
@@ -60,3 +67,28 @@ async def update_device(
     except DeviceNotFound as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND) from e
     return DeviceSchema.model_validate(device)
+
+
+def _own_device(user_id: int, id: int):
+    device = db_device_handler.get_device(id)
+    if device is None or device.user_id != user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    return device
+
+
+@router.put("/{id}/log", status_code=status.HTTP_204_NO_CONTENT)
+async def put_device_log(user: CurrentUser, id: Annotated[int, Path(ge=1)], request: Request) -> None:
+    """The client's log as plain text, replacing the one sent before. Only the newest part is kept."""
+    _own_device(user.id, id)
+    if int(request.headers.get("content-length") or 0) > 2 * MAX_DEVICE_LOG_BYTES:
+        raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE)
+    await run_in_threadpool(device_logs.store, user.id, id, await request.body())
+
+
+@router.get("/{id}/log")
+async def get_device_log(user: CurrentUser, id: Annotated[int, Path(ge=1)]) -> PlainTextResponse:
+    _own_device(user.id, id)
+    text = await run_in_threadpool(device_logs.read, user.id, id)
+    if text is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    return PlainTextResponse(text)

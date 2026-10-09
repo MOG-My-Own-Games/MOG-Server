@@ -47,6 +47,10 @@ SAVES_BASE_PATH: Final[str] = f"{MOG_BASE_PATH}/saves"
 # Versions kept per (user, game, device); the oldest are dropped on upload.
 SAVES_KEEP_VERSIONS: Final[int] = min(20, max(1, safe_int(_get_env("SAVES_KEEP_VERSIONS"), 3)))
 
+# What a client sends of its own log, when its user turned that on: the newest one per device, kept as a plain file.
+DEVICE_LOGS_PATH: Final[str] = f"{MOG_BASE_PATH}/logs/devices"
+MAX_DEVICE_LOG_BYTES: Final[int] = 1024 * 1024
+
 MAX_SAVE_UPLOAD_BYTES: Final[int] = max(1, safe_int(_get_env("MAX_SAVE_UPLOAD_BYTES"), 512 * 1024 * 1024))
 
 AUTH_SECRET_KEY: Final[str] = _get_env("AUTH_SECRET_KEY") or "dev-insecure-secret-key"

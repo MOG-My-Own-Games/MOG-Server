@@ -25,6 +25,8 @@ class DeviceSchema(BaseModel):
     platform: str | None
     last_seen: UtcDatetime | None
     created_at: UtcDatetime
+    # When the client last sent its log (only clients whose user turned that on do); None when it never did.
+    log_at: UtcDatetime | None = None
 
 
 class RegisterDeviceForm(BaseModel):

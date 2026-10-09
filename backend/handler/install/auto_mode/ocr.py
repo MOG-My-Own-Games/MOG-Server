@@ -58,8 +58,12 @@ def ocr_words(
     image: Image.Image,
     langs: str = INSTALL_AUTO_OCR_DEEP_LANGS,
     mode: Mode = "plain",
+    psm: int = 11,
+    line_tag: int = 0,
 ) -> list[Word]:
-    """OCR ``image`` and return words in the image's own pixel coordinates."""
+    """OCR ``image`` and return words in the image's own pixel coordinates. `psm` is tesseract's page mode (11 looks for
+    scattered text on a page, 7 reads one line); `line_tag` is added to the words' block ids, to keep the words of
+    separate calls from being taken for one line."""
     gray = _preprocess(image, mode)
     scale = upscale_factor(gray.width, gray.height)
     # An edge mask is a thin, aliased line; BICUBIC keeps a small glyph's
@@ -70,7 +74,7 @@ def ocr_words(
     big.save(buf, format="PNG")
     try:
         result = subprocess.run(
-            ["tesseract", "stdin", "stdout", "-l", langs, "--psm", "11", "tsv"],
+            ["tesseract", "stdin", "stdout", "-l", langs, "--psm", str(psm), "tsv"],
             input=buf.getvalue(),
             capture_output=True,
             timeout=OCR_TIMEOUT,
@@ -85,7 +89,7 @@ def ocr_words(
             f"{result.returncode}: {result.stderr.decode(errors='replace')[:200]}"
         )
     words = parse_tsv(result.stdout.decode("utf-8", errors="replace"), scale)
-    tag = _MODE_TAG[mode]
+    tag = _MODE_TAG[mode] + line_tag
     if tag:
         words = [
             Word(w.text, w.left, w.top, w.width, w.height, w.conf, (w.line_id[0] + tag, w.line_id[1], w.line_id[2]))

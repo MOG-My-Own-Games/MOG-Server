@@ -30,6 +30,7 @@ from .engine import (
     same_screen,
 )
 from .matcher import Match, Word, find_matches, screen_lines, screen_text
+from .boxes import ocr_boxes
 from .ocr import ocr_words
 
 STATUS_RUNNING = "running"
@@ -176,12 +177,15 @@ def _needs_deep_pass(words: list[Word], catalog: Catalog) -> bool:
 def _ocr_region(image: Image.Image, catalog: Catalog) -> list[Word]:
     """Read ``image``, looking closer while no usable button was found.
 
-    Three preprocessing modes, cheapest first: plain dark-on-light text,
-    then a bright-on-dark mask (a white tile caption), then an edge mask
-    (everything else - a mid-brightness "ghost button" drawn over artwork,
-    or text on a solid colored tile, that neither of the first two reads).
+    Cheapest first: plain dark-on-light text; then the flat boxes (a button
+    drawn as a plain rectangle over artwork, which a whole-page read loses),
+    each read on its own; then a bright-on-dark mask (a white tile caption);
+    then an edge mask (everything else - a mid-brightness "ghost button" drawn
+    over artwork, or text on a solid colored tile, that none of those reads).
     """
     words = ocr_words(image)
+    if _needs_deep_pass(words, catalog):
+        words += ocr_boxes(image)
     if _needs_deep_pass(words, catalog):
         words += ocr_words(image, mode="light")
     if _needs_deep_pass(words, catalog):

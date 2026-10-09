@@ -138,3 +138,32 @@ def test_cancelling_a_queued_install_takes_it_out_of_the_queue(endpoint, monkeyp
 
     assert cancelled.state == S.FAILED and cancelled.error == "Cancelled"
     assert sessions.queue_position(queued.id) is None
+
+
+# --- the list of active installs: those running first, the queued ones below; a restarted session counts from zero ---
+
+
+def test_active_installs_list_the_running_ones_first_and_the_queued_below_in_order(endpoint, monkeypatch):
+    first = endpoint.start(1)
+    second = endpoint.start(2)
+    third = endpoint.start(3)
+    monkeypatch.setattr(install_endpoint.db_install_session_handler, "get_dashboard_sessions_for_user", lambda uid: [
+        sessions.get_session(third.id), sessions.get_session(second.id), sessions.get_session(first.id)
+    ])  # the database's own order puts the newest first
+
+    listed = asyncio.run(install_endpoint.get_active_installs(endpoint.user))
+
+    assert [(s.id, s.state, s.queue_position) for s in listed] == [
+        (first.id, S.INSTALLING, None),
+        (second.id, S.QUEUED, 1),
+        (third.id, S.QUEUED, 2),
+    ]
+
+
+def test_a_session_started_again_does_not_keep_the_counts_of_its_earlier_run(endpoint, monkeypatch):
+    done = sessions.add_session(InstallSession(game_id=9, user_id=1, state=S.DONE, bytes_written=451_426, bytes_total=451_426))
+    monkeypatch.setattr(install_endpoint, "_pick_reusable_session", lambda own: sessions.get_session(done.id))  # its cache is reused
+
+    again = endpoint.start(9)
+
+    assert again.id == done.id and (again.bytes_written, again.bytes_total) == (0, 0)

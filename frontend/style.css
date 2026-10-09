@@ -319,6 +319,10 @@ code {
   margin-top: 0.3em;
 }
 .active-installs-list .ai-progress-fill { height: 100%; background: var(--accent-gradient); }
+/* No figure to show: a short stretch of the bar drifts to and fro, so it does not look frozen or finished. */
+.active-installs-list .ai-progress-unknown { width: 30%; animation: ai-drift 2.4s ease-in-out infinite alternate; }
+@keyframes ai-drift { from { transform: translateX(0); } to { transform: translateX(233%); } }
+@media (prefers-reduced-motion: reduce) { .active-installs-list .ai-progress-unknown { animation: none; width: 100%; opacity: 0.35; } }
 
 .cache-size-link {
   display: block;

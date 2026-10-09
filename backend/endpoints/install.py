@@ -117,7 +117,9 @@ async def get_active_installs(user: CurrentUser) -> list[InstallSessionSchema]:
     """This user's installs currently in progress - backs the "active
     installs" widget above the library list."""
     sessions = db_install_session_handler.get_dashboard_sessions_for_user(user.id)
-    return [_session_schema(s) for s in sessions if s.state in ACTIVE_INSTALL_STATES]
+    active = [_session_schema(s) for s in sessions if s.state in ACTIVE_INSTALL_STATES]
+    # Those running first; the queued ones below them, in the order they will start.
+    return sorted(active, key=lambda s: (s.state == InstallSessionState.QUEUED, s.queue_position or 0))
 
 
 @router.get("/install/defaults")
@@ -256,6 +258,8 @@ async def start_install_session(
                 "auto_status": None,
                 "auto_detail": None,
                 "state": initial_state,
+                "bytes_written": 0,  # what an earlier run of this session counted is not this run's
+                "bytes_total": 0,
                 "error": None,
                 "vnc_url": None,
                 "vnc_web_port": None,

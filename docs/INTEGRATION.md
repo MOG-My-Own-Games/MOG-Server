@@ -251,12 +251,14 @@ off for a running session.
 | `failed` | Something went wrong: read `error` (a cancelled session also ends here, with `error: "Cancelled"`). | Show `error`. |
 | `expired` | The cache's time ran out and was deleted. | Start again. |
 
-`bytes_written` and `bytes_total` are the server-side progress where it knows one (unpacking, hashing the result).
-They are not your download's progress: compute that from what you have on disk.
+`bytes_written` and `bytes_total` are the server-side progress where it knows one (unpacking, hashing the result), and are
+`0` while the installer itself runs: show a percentage only when `bytes_total` is above zero, and none otherwise. They are
+not your download's progress: compute that from what you have on disk.
 
 Poll about every **3 seconds**. Cancel with `POST /api/games/{id}/install/cancel` (the session fails with
 "Cancelled" and its cache is cleared), and forget a finished one with `DELETE /api/games/{id}/install`.
-`GET /api/games/install/active` lists the user's running installs, for a dashboard.
+`GET /api/games/install/active` lists the user's installs in progress, for a dashboard: the running ones first, then the
+`queued` ones in the order they will start.
 
 ## 6. Downloading the result
 

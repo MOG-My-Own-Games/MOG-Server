@@ -1229,18 +1229,29 @@ async function refreshSidebarWidgets() {
     const list = document.getElementById("active-installs-list");
     widget.hidden = sessions.length === 0;
     list.innerHTML = "";
+    // Running installs first, the queued ones below them in the order they start (the server sorts them, this keeps it so).
+    sessions.sort((a, b) => (a.state === "queued") - (b.state === "queued") || (a.queue_position || 0) - (b.queue_position || 0));
     for (const s of sessions) {
       const game = await gameById(s.game_id);
       const li = document.createElement("li");
-      const pct = s.bytes_total ? (s.bytes_written / s.bytes_total) * 100 : 0;
+      const queued = s.state === "queued";
+      // A percentage only where the server knows one; otherwise none is written and the bar just moves a little.
+      const pct = !queued && s.bytes_total ? Math.min(100, (s.bytes_written / s.bytes_total) * 100) : null;
       const icon = gameIconUrl(game);
-      const state = s.state.charAt(0).toUpperCase() + s.state.slice(1).replace(/_/g, " ");
+      const state = queued
+        ? `Queued${s.queue_position ? `, number ${s.queue_position}` : ""}`
+        : `${s.state.charAt(0).toUpperCase() + s.state.slice(1).replace(/_/g, " ")}...${pct ? ` ${Math.round(pct)}%` : ""}`;
+      const fill = queued
+        ? ""
+        : pct === null
+          ? '<div class="ai-progress-fill ai-progress-unknown"></div>'
+          : `<div class="ai-progress-fill" style="width:${pct}%"></div>`;
       li.innerHTML = `
         ${icon ? `<img class="ai-icon" src="${escapeHtml(icon)}" alt="" />` : '<span class="ai-icon ai-icon-none">&#127918;</span>'}
         <div class="ai-text">
           <span class="ai-name">${escapeHtml(game ? game.name : `Game ${s.game_id}`)}</span>
-          <span class="muted small">${escapeHtml(state)}...${pct ? ` ${Math.round(pct)}%` : ""}</span>
-          <div class="ai-progress"><div class="ai-progress-fill" style="width:${pct}%"></div></div>
+          <span class="muted small">${escapeHtml(state)}</span>
+          <div class="ai-progress">${fill}</div>
         </div>
       `;
       li.addEventListener("click", () => {

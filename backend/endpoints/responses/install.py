@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
 
+from endpoints.responses.save import UtcDatetime
 from models.install_session import InstallSessionState
 
 
@@ -114,6 +115,8 @@ class InstallCacheEntrySchema(BaseModel):
     game_id: int | None
     state: InstallSessionState | None
     size_bytes: int
+    # None: the cache never expires.
+    expires_at: UtcDatetime | None = None
 
 
 class ModCacheEntrySchema(BaseModel):
@@ -127,6 +130,10 @@ class InstallCacheSchema(BaseModel):
     entries: list[InstallCacheEntrySchema]
     # The zipped mods kept for download, apart from the installers' caches above.
     mods: list[ModCacheEntrySchema] = []
+
+
+class InstallCacheExpirySchema(BaseModel):
+    expires_at: UtcDatetime | None
 
 
 class InstallCacheClearSchema(BaseModel):

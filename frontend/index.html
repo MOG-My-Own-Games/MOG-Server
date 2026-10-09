@@ -424,6 +424,7 @@
               <label class="field-label">Days (0 = unlimited)<input type="number" id="setting-cache-ttl" min="0" /></label>
               <button id="save-cache-ttl-btn" type="button">Save</button>
               <p id="cache-ttl-saved" class="muted small"></p>
+              <p class="muted small">Saving a number of days gives every cache that never expires that expiry, counted from now. Reset on a cache starts its expiry over from the default in force at that moment (never, when it is 0).</p>
             </div>
 
             <div class="card">
@@ -435,7 +436,7 @@
                 </div>
               </div>
               <table id="cache-table" class="data-table">
-                <thead><tr><th>Session</th><th>Game</th><th>State</th><th>Size</th><th></th></tr></thead>
+                <thead><tr><th>Session</th><th>Game</th><th>State</th><th>Size</th><th>Expires</th><th></th></tr></thead>
                 <tbody id="cache-table-body"></tbody>
               </table>
             </div>

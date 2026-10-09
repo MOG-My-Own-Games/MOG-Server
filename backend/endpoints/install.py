@@ -29,6 +29,7 @@ from endpoints.responses.install import (
     InstallAutoModeForm,
     InstallCacheClearSchema,
     InstallCacheEntrySchema,
+    InstallCacheExpirySchema,
     InstallCacheSchema,
     InstallCandidateSchema,
     InstallCandidatesSchema,
@@ -599,6 +600,7 @@ async def list_install_cache(user: AdminUser) -> InstallCacheSchema:
                 game_id=session.game_id if session else None,
                 state=session.state if session else None,
                 size_bytes=dir_size_bytes(path),
+                expires_at=session.expires_at if session else None,
             )
         )
     mod_zips = await asyncio.to_thread(mods_handler.cached_zips)
@@ -646,6 +648,18 @@ async def clear_one_mod_cache(
     removed = await asyncio.to_thread(mods_handler.remove_cached_zip, game_id, file_name)
     if not removed:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No such cached mod, or it is being zipped")
+
+
+@router.post("/install/cache/{session_id}/reset")
+async def reset_install_cache_expiry(
+    user: AdminUser, session_id: Annotated[int, PathVar(ge=1)]
+) -> InstallCacheExpirySchema:
+    """Start the cache's expiry over from the default TTL in force now (never, when that is 0)."""
+    session = db_install_session_handler.get_session(session_id)
+    if session is None or session.state == InstallSessionState.EXPIRED:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No such cached install")
+    updated = db_install_session_handler.update_session(session_id, {"expires_at": resolve_expires_at(None)})
+    return InstallCacheExpirySchema(expires_at=updated.expires_at)
 
 
 @router.delete("/install/cache/{session_id}")

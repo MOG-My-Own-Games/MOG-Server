@@ -40,6 +40,16 @@ def resolve_expires_at(ttl_seconds: int | None) -> datetime | None:
     return datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
 
 
+def apply_default_ttl() -> int:
+    """Put the default TTL on the caches that never expire. A default of 0 leaves them be."""
+    from handler.database import db_install_session_handler
+
+    expires_at = resolve_expires_at(None)
+    if expires_at is None:
+        return 0
+    return db_install_session_handler.set_expiry_where_unlimited(expires_at)
+
+
 def session_cache_dir(session_id: int) -> Path:
     """Absolute working directory for a single install session's files."""
     return Path(INSTALL_CACHE_PATH) / str(session_id)

@@ -948,14 +948,23 @@ document.getElementById("save-cache-ttl-btn").addEventListener("click", async ()
   }
 });
 
+function fmtExpiry(iso) {
+  if (!iso) return "never";
+  const at = new Date(iso);
+  const date = at.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  const days = Math.ceil((at - Date.now()) / 86400000);
+  if (days <= 0) return `${date} (due)`;
+  return `${date} (in ${days} ${days === 1 ? "day" : "days"})`;
+}
+
 async function refreshCacheTable() {
   const body = document.getElementById("cache-table-body");
-  body.innerHTML = "<tr><td colspan='5' class='muted'>Loading...</td></tr>";
+  body.innerHTML = "<tr><td colspan='6' class='muted'>Loading...</td></tr>";
   try {
     const data = await api("/api/games/install/cache");
     await renderModCacheTable(data.mods || []);
     if (data.entries.length === 0) {
-      body.innerHTML = "<tr><td colspan='5' class='muted'>No cached installs.</td></tr>";
+      body.innerHTML = "<tr><td colspan='6' class='muted'>No cached installs.</td></tr>";
       return;
     }
     body.innerHTML = "";
@@ -968,8 +977,22 @@ async function refreshCacheTable() {
         <td>${entry.game_id ? `<a href="#game/${entry.game_id}">${title}</a>` : title}</td>
         <td>${escapeHtml(entry.state || "")}</td>
         <td>${fmtBytes(entry.size_bytes)}</td>
+        <td class="cache-expiry">${entry.state ? fmtExpiry(entry.expires_at) : "-"}</td>
       `;
       const actionTd = document.createElement("td");
+      if (entry.state) {
+        const resetBtn = document.createElement("button");
+        resetBtn.textContent = "Reset";
+        resetBtn.addEventListener("click", async () => {
+          try {
+            const result = await api(`/api/games/install/cache/${entry.session_id}/reset`, { method: "POST" });
+            tr.querySelector(".cache-expiry").textContent = fmtExpiry(result.expires_at);
+          } catch (err) {
+            alert(`Could not reset: ${err.message}`);
+          }
+        });
+        actionTd.appendChild(resetBtn);
+      }
       const delBtn = document.createElement("button");
       delBtn.textContent = "Delete";
       delBtn.className = "danger";
@@ -986,7 +1009,7 @@ async function refreshCacheTable() {
       body.appendChild(tr);
     }
   } catch (err) {
-    body.innerHTML = `<tr><td colspan="5" class="error">${escapeHtml(err.message)}</td></tr>`;
+    body.innerHTML = `<tr><td colspan="6" class="error">${escapeHtml(err.message)}</td></tr>`;
   }
 }
 

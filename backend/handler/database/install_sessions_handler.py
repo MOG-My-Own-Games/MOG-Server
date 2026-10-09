@@ -88,6 +88,21 @@ class DBInstallSessionsHandler(DBBaseHandler):
         return session.get(InstallSession, install_session_id)
 
     @begin_session
+    def set_expiry_where_unlimited(
+        self, expires_at: datetime, session: Session = None  # type: ignore
+    ) -> int:
+        """Give every cache that never expires this expiry. Returns how many changed."""
+        result = session.execute(
+            update(InstallSession)
+            .where(
+                InstallSession.expires_at.is_(None),
+                InstallSession.state != InstallSessionState.EXPIRED,
+            )
+            .values(expires_at=expires_at)
+        )
+        return result.rowcount
+
+    @begin_session
     def delete_session(self, install_session_id: int, session: Session = None) -> None:  # type: ignore
         session.execute(delete(InstallSession).where(InstallSession.id == install_session_id))
 

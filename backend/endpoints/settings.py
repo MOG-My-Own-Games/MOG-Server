@@ -11,6 +11,7 @@ from handler.auth import AdminUser
 from handler.database import db_settings_handler
 from handler.metadata import hltb_handler, igdb_handler, sgdb_handler
 from models.settings import Settings
+from utils.install_cache import apply_default_ttl
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -35,7 +36,10 @@ async def update_settings(user: AdminUser, data: SettingsUpdateForm) -> Settings
     touched (exclude_unset) - every field here is independently Optional, so
     without this a client saving just one (e.g. the cache TTL) would send
     the rest as their Pydantic default (None) and silently wipe them."""
-    row = db_settings_handler.update_settings(data.model_dump(exclude_unset=True))
+    changes = data.model_dump(exclude_unset=True)
+    row = db_settings_handler.update_settings(changes)
+    if "install_cache_ttl_days" in changes:
+        apply_default_ttl()
     return _schema(row)
 
 

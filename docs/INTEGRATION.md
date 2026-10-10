@@ -109,7 +109,8 @@ A game object carries, among others:
 - `size_bytes`: what the game's own folder (or file) takes on the server's disk, `null` until the server has measured it
   (a scan does, and `GET /api/games/{id}/size` refreshes it). Sort by it with `null` last;
 - `installed` (this user has a finished install whose cache is still on the server), `last_played` and
-  `last_played_on` (from the user's save uploads), `missing_from_fs`, `saves_only`, `addons_only`, `fs_tags`.
+  `last_played_on` (from the user's save uploads), `missing_from_fs`, `saves_only`, `addons_only`, `has_mods` (something sits in the game's mods folder),
+  `created_at` (when a scan first saw the game), `fs_tags`.
 
 Artwork is served by the server so a client does not depend on the metadata providers' CDNs:
 `GET /api/games/{id}/cover`, `GET /api/games/{id}/media/{kind}`, `GET /api/games/{id}/screenshots/{index}` and
@@ -167,7 +168,11 @@ it is returned as it is, so a second client asking for the same game finds the f
 The server runs as many installs at once as it was told to (`INSTALL_MAX_CONCURRENCY`, one by default). A start made
 while every place is taken is **not refused**: the session is created in the `queued` state, with `queue_position`
 (1 is the next to start), and it starts by itself, in the order the starts came, as installs end or are cancelled.
-Keep polling it like any other. An older server answers such a start with `429` instead: treat it as "wait and ask
+Keep polling it like any other. A start that runs no installer (`extract_only`: the files are taken as they are) takes
+no place and never waits. `PUT /api/games/install/queue` with `{"session_ids": [..]}` puts the caller's waiting
+installs in that order (they keep the places they hold in the line; the answer is `GET /api/games/install/active`),
+and `POST /api/games/{id}/install/cancel?session_id=` takes one out of the queue. Saving games (`/api/games/{id}/saves`)
+has a channel of its own on the server and never waits for an install. An older server answers such a start with `429` instead: treat it as "wait and ask
 again" (MOG Client asks again every 15 seconds).
 
 The response is the **session**:
@@ -200,7 +205,7 @@ by default). The answer also has `needs_manual_pick` (nothing was found) and `ex
 in the archive you asked about) looks like an installer: the server looks for known installer names
 (`gog-*`, `setup*`, `install.exe`, and any name containing "setup" or "install", never an "uninstall"), archives and
 disc images to unpack further, and Linux installer scripts. If there is none, the files are probably the game
-itself. What MOG Client does with that:
+itself. What MOG Client does with that: A release packed once per system (a `-pc`, a `-mac` and a `-linux` archive inside the one you asked about, one of them for Windows) counts as a game to unpack too: extracting it keeps and unpacks the Windows build and drops the others.
 
 1. **A game that is an archive with no installer inside:** ask the user "no installer was found in X: extract its
    contents and use them as they are?". Yes starts with `extract_only: true`; No starts with `extract_only: false`

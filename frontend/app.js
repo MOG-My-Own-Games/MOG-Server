@@ -966,17 +966,19 @@ function fmtExpiry(iso) {
   return `${date} (in ${days} ${days === 1 ? "day" : "days"})`;
 }
 
-async function refreshCacheTable() {
+// With `silent` the rows stay where they are until the new ones are ready, so the list does not blink out.
+async function refreshCacheTable(silent = false) {
   const body = document.getElementById("cache-table-body");
-  body.innerHTML = "<tr><td colspan='6' class='muted'>Loading...</td></tr>";
+  if (!silent) body.innerHTML = "<tr><td colspan='6' class='muted'>Loading...</td></tr>";
   try {
     const data = await api("/api/games/install/cache");
+    renderCacheTotal(data);
     await renderModCacheTable(data.mods || []);
     if (data.entries.length === 0) {
       body.innerHTML = "<tr><td colspan='6' class='muted'>No cached installs.</td></tr>";
       return;
     }
-    body.innerHTML = "";
+    const rows = document.createDocumentFragment();
     for (const entry of data.entries) {
       const tr = document.createElement("tr");
       const game = await gameById(entry.game_id);
@@ -1008,15 +1010,17 @@ async function refreshCacheTable() {
       delBtn.addEventListener("click", async () => {
         try {
           await api(`/api/games/install/cache/${entry.session_id}`, { method: "DELETE" });
-          await refreshCacheTable();
+          tr.remove();
+          await refreshCacheTable(true);
         } catch (err) {
           alert(`Could not delete: ${err.message}`);
         }
       });
       actionTd.appendChild(delBtn);
       tr.appendChild(actionTd);
-      body.appendChild(tr);
+      rows.appendChild(tr);
     }
+    body.replaceChildren(rows);
   } catch (err) {
     body.innerHTML = `<tr><td colspan="6" class="error">${escapeHtml(err.message)}</td></tr>`;
   }
@@ -1029,7 +1033,7 @@ async function renderModCacheTable(mods) {
     body.innerHTML = "<tr><td colspan='5' class='muted'>No cached mod zips.</td></tr>";
     return;
   }
-  body.innerHTML = "";
+  const rows = document.createDocumentFragment();
   for (const entry of mods) {
     const game = await gameById(entry.game_id);
     const title = escapeHtml(game ? game.name : String(entry.game_id));
@@ -1047,15 +1051,17 @@ async function renderModCacheTable(mods) {
     delBtn.addEventListener("click", async () => {
       try {
         await api(`/api/games/install/cache/mods/${entry.game_id}/${encodeURIComponent(entry.file_name)}`, { method: "DELETE" });
-        await refreshCacheTable();
+        tr.remove();
+        await refreshCacheTable(true);
       } catch (err) {
         alert(`Could not delete: ${err.message}`);
       }
     });
     actionTd.appendChild(delBtn);
     tr.appendChild(actionTd);
-    body.appendChild(tr);
+    rows.appendChild(tr);
   }
+  body.replaceChildren(rows);
 }
 
 document.getElementById("clear-mod-cache-btn").addEventListener("click", async () => {
@@ -1063,20 +1069,20 @@ document.getElementById("clear-mod-cache-btn").addEventListener("click", async (
   try {
     const result = await api("/api/games/install/cache/mods", { method: "DELETE" });
     alert(`Cleared ${result.cleared} zip(s).`);
-    await refreshCacheTable();
+    await refreshCacheTable(true);
   } catch (err) {
     alert(`Could not clear: ${err.message}`);
   }
 });
 
-document.getElementById("refresh-cache-btn").addEventListener("click", refreshCacheTable);
+document.getElementById("refresh-cache-btn").addEventListener("click", () => refreshCacheTable());
 
 document.getElementById("clear-all-cache-btn").addEventListener("click", async () => {
   if (!confirm("Clear every install cache that isn't currently running?")) return;
   try {
     const result = await api("/api/games/install/cache", { method: "DELETE" });
     alert(`Cleared ${result.cleared} cache(s).`);
-    await refreshCacheTable();
+    await refreshCacheTable(true);
   } catch (err) {
     alert(`Could not clear: ${err.message}`);
   }
@@ -1222,13 +1228,21 @@ function pollWhileScraping() {
 
 // --- Sidebar widgets: active installs, total cache size ---
 
+// What the sidebar shows follows the server on its own: the installs every few seconds, the cache total less often.
+const SIDEBAR_POLL_MS = 3000;
+const CACHE_TOTAL_POLL_MS = 30000;
+
 async function refreshSidebarWidgets() {
+  await Promise.all([refreshActiveInstalls(), refreshCacheTotal()]);
+}
+
+async function refreshActiveInstalls() {
   try {
     const sessions = await api("/api/games/install/active");
     const widget = document.getElementById("active-installs-widget");
     const list = document.getElementById("active-installs-list");
     widget.hidden = sessions.length === 0;
-    list.innerHTML = "";
+    const items = document.createDocumentFragment();
     // Running installs first, the queued ones below them in the order they start (the server sorts them, this keeps it so).
     sessions.sort((a, b) => (a.state === "queued") - (b.state === "queued") || (a.queue_position || 0) - (b.queue_position || 0));
     for (const s of sessions) {
@@ -1253,24 +1267,129 @@ async function refreshSidebarWidgets() {
           <span class="muted small">${escapeHtml(state)}</span>
           <div class="ai-progress">${fill}</div>
         </div>
+        <button type="button" class="ai-cancel" title="Cancel this install" aria-label="Cancel this install">&times;</button>
       `;
-      li.addEventListener("click", () => {
+      li.addEventListener("click", (e) => {
+        if (e.target.closest(".ai-cancel")) {
+          e.stopPropagation();
+          cancelActiveInstall(s, game);
+          return;
+        }
         location.hash = `game/${s.game_id}`;
       });
-      list.appendChild(li);
+      items.appendChild(li);
     }
+    list.replaceChildren(items);
+    if (document.getElementById("queue-modal")) await renderQueueModal();
   } catch (_) {
     // Not fatal - the widget just stays hidden/stale.
   }
+}
 
+function renderCacheTotal(data) {
+  const total = data.entries.reduce((sum, e) => sum + e.size_bytes, 0);
+  document.getElementById("total-cache-size").textContent = fmtBytes(total);
+}
+
+async function refreshCacheTotal() {
   try {
-    const data = await api("/api/games/install/cache");
-    const total = data.entries.reduce((sum, e) => sum + e.size_bytes, 0);
-    document.getElementById("total-cache-size").textContent = fmtBytes(total);
+    renderCacheTotal(await api("/api/games/install/cache"));
   } catch (_) {
     document.getElementById("total-cache-size").textContent = "?";
   }
 }
+
+setInterval(() => {
+  if (!document.hidden && creds) refreshActiveInstalls();
+}, SIDEBAR_POLL_MS);
+setInterval(() => {
+  if (!document.hidden && creds) refreshCacheTotal();
+}, CACHE_TOTAL_POLL_MS);
+
+// Cancelling an install from a list: the same warning as the game page's own button, then the sidebar follows.
+async function cancelActiveInstall(session, game) {
+  const name = game ? game.name : `Game ${session.game_id}`;
+  const queued = session.state === "queued";
+  const sure = await confirmDanger({
+    title: queued ? `Take ${name} out of the queue?` : `Cancel the install of ${name}?`,
+    lines: queued
+      ? ["It will not be installed unless you start it again."]
+      : ["The installer is stopped and what it has made so far is deleted from the server."],
+    confirmLabel: "Cancel install",
+    cancelLabel: "Keep it",
+  });
+  if (!sure) return;
+  try {
+    await api(`/api/games/${session.game_id}/install/cancel?session_id=${session.id}`, { method: "POST" });
+  } catch (err) {
+    alert(`Could not cancel: ${err.message}`);
+  }
+  await refreshSidebarWidgets();
+  if (document.getElementById("queue-modal")) await renderQueueModal();
+}
+
+// The active installs in one place: the queue can be put in another order, and any install can be cancelled.
+async function renderQueueModal() {
+  let overlay = document.getElementById("queue-modal");
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.id = "queue-modal";
+    overlay.className = "modal";
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay || e.target.closest("[data-close]")) overlay.remove();
+    });
+    document.body.appendChild(overlay);
+  }
+  const sessions = await api("/api/games/install/active");
+  const queuedIds = sessions.filter((x) => x.state === "queued").map((x) => x.id);
+  const rows = [];
+  for (const x of sessions) {
+    const game = await gameById(x.game_id);
+    const name = game ? game.name : `Game ${x.game_id}`;
+    const queued = x.state === "queued";
+    const at = queuedIds.indexOf(x.id);
+    const status = queued
+      ? `Queued${x.queue_position ? `, number ${x.queue_position}` : ""}`
+      : `${x.state.charAt(0).toUpperCase() + x.state.slice(1).replace(/_/g, " ")}`;
+    rows.push(`
+      <li data-id="${x.id}">
+        <span class="queue-name">${escapeHtml(name)}<span class="muted small"> ${escapeHtml(status)}</span></span>
+        ${queued ? `<button type="button" data-move="-1" title="Start sooner" aria-label="Start sooner" ${at === 0 ? "disabled" : ""}>&#9650;</button>
+        <button type="button" data-move="1" title="Start later" aria-label="Start later" ${at === queuedIds.length - 1 ? "disabled" : ""}>&#9660;</button>` : ""}
+        <button type="button" class="ai-cancel" data-cancel title="Cancel this install" aria-label="Cancel this install">&times;</button>
+      </li>`);
+  }
+  overlay.innerHTML = `
+    <div class="modal-panel client-panel" role="dialog" aria-modal="true" aria-labelledby="queue-modal-title">
+      <h3 id="queue-modal-title">Active installs</h3>
+      ${rows.length ? `<ul class="queue-list">${rows.join("")}</ul>` : '<p class="muted">Nothing is installing.</p>'}
+      ${queuedIds.length > 1 ? '<p class="muted small">The queued installs start from the top down.</p>' : ""}
+      <div class="modal-footer"><button type="button" data-close>Close</button></div>
+    </div>`;
+  overlay.querySelector(".queue-list")?.addEventListener("click", async (e) => {
+    const button = e.target.closest("button");
+    if (!button) return;
+    const id = Number(button.closest("li").dataset.id);
+    if (button.hasAttribute("data-cancel")) {
+      const s = sessions.find((x) => x.id === id);
+      await cancelActiveInstall(s, await gameById(s.game_id));
+      return;
+    }
+    const from = queuedIds.indexOf(id);
+    const to = from + Number(button.dataset.move);
+    if (from < 0 || to < 0 || to >= queuedIds.length) return;
+    queuedIds.splice(to, 0, queuedIds.splice(from, 1)[0]);
+    try {
+      await api("/api/games/install/queue", { method: "PUT", body: JSON.stringify({ session_ids: queuedIds }) });
+    } catch (err) {
+      alert(`Could not reorder: ${err.message}`);
+    }
+    await renderQueueModal();
+    await refreshSidebarWidgets();
+  });
+}
+
+document.querySelector("#active-installs-widget h2").addEventListener("click", () => renderQueueModal());
 
 // --- Libraries ---
 
@@ -2677,6 +2796,7 @@ async function startInstall(candidate) {
   const session = await api(`/api/games/${activeGame.id}/install`, { method: "POST", body: JSON.stringify(body) });
   renderInstallState(session);
   startPolling();
+  refreshActiveInstalls();
 }
 
 document.getElementById("start-install-btn").addEventListener("click", async () => {
@@ -2694,6 +2814,7 @@ document.getElementById("cancel-install-btn").addEventListener("click", async ()
   stopPolling();
   const session = await api(`/api/games/${activeGame.id}/install`);
   renderInstallState(session);
+  refreshActiveInstalls();
 });
 
 document.getElementById("clear-game-cache-btn").addEventListener("click", async () => {

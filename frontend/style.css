@@ -309,6 +309,13 @@ code {
 .active-installs-list li { display: flex; gap: 0.6em; align-items: center; padding: 0.4em 0; border-bottom: 1px solid var(--border); cursor: pointer; }
 .active-installs-list .ai-icon { width: 32px; height: 32px; flex-shrink: 0; border-radius: 6px; object-fit: cover; }
 .active-installs-list .ai-icon-none { display: inline-flex; align-items: center; justify-content: center; background: var(--bg-elevated-2); }
+.active-installs-widget h2, #active-installs-widget h2 { cursor: pointer; }
+.active-installs-list .ai-cancel, .queue-list .ai-cancel { flex-shrink: 0; width: 1.6em; height: 1.6em; padding: 0; line-height: 1; background: transparent; border: 1px solid var(--border); border-radius: 50%; color: var(--text-muted, inherit); cursor: pointer; }
+.active-installs-list .ai-cancel:hover, .queue-list .ai-cancel:hover { color: #fff; background: var(--danger, #c0392b); border-color: transparent; }
+.queue-list { list-style: none; padding: 0; margin: 0 0 var(--space-md, 1em); }
+.queue-list li { display: flex; gap: 0.4em; align-items: center; padding: 0.5em 0; border-bottom: 1px solid var(--border); }
+.queue-list .queue-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.queue-list button[data-move] { padding: 0.15em 0.55em; }
 .active-installs-list .ai-text { min-width: 0; flex: 1; }
 .active-installs-list .ai-name { display: block; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .active-installs-list .ai-progress {

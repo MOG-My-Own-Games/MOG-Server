@@ -45,3 +45,28 @@ def test_run_install_repeats_a_run_that_stopped_early(monkeypatch):
     monkeypatch.setattr(runner, "dispatch_queue", lambda: None)
     runner.run_install(1)
     assert calls == [1, 2, 3]
+
+
+def test_every_repeat_starts_from_an_empty_cache(monkeypatch):
+    """A run over the files the stopped one left made an installer stop or skip past them; each repeat needs a clean cache."""
+    cleared = []
+    monkeypatch.setattr(runner, "_run_install", lambda _id, attempt=1: attempt < 3)
+    monkeypatch.setattr(runner, "clear_session_cache", cleared.append)
+    monkeypatch.setattr(runner, "_log_install_end", lambda _id: None)
+    monkeypatch.setattr(runner, "dispatch_queue", lambda: None)
+    runner.run_install(7)
+    assert cleared == [7, 7]
+
+
+def test_disc_games_folder_is_routed_to_the_writable_games_dir(tmp_path):
+    """Regression test: an installer defaulting to D:\\Games\\<title> wrote into the read-only disc, so the scan found
+    nothing and the install failed after reporting success."""
+    runner._route_disc_games_dir(tmp_path)
+    assert (tmp_path / "Games").is_symlink()
+    assert str((tmp_path / "Games").readlink()) == "/Games"
+
+
+def test_a_games_folder_already_on_the_disc_is_left_alone(tmp_path):
+    (tmp_path / "Games").mkdir()
+    runner._route_disc_games_dir(tmp_path)
+    assert not (tmp_path / "Games").is_symlink()

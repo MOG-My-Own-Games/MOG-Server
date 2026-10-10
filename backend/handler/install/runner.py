@@ -80,7 +80,7 @@ from handler.install.windows_output import (
 from logger.formatter import highlight as hl
 from logger.logger import log
 from models.install_session import InstallPhase, InstallSessionState
-from utils.install_cache import ensure_session_cache_dir
+from utils.install_cache import clear_session_cache, ensure_session_cache_dir
 
 # noVNC static assets shipped in the server image.
 NOVNC_WEB_ROOT = "/usr/share/novnc"
@@ -383,6 +383,14 @@ def _configure_drive_letters(
         source_link.symlink_to(installer_search_root)
 
 
+def _route_disc_games_dir(disc_root: Path) -> None:
+    """Some installers default to ``D:\\Games\\<title>``, which is inside the read-only disc. Pointing a missing
+    ``Games`` there at the sandbox's writable /Games lands the install where the output scan looks."""
+    link = disc_root / "Games"
+    if not link.exists() and not link.is_symlink():
+        link.symlink_to("/Games")
+
+
 def _mark_d_drive_as_cdrom(
     proton_or_wine: str,
     *,
@@ -436,6 +444,8 @@ def run_install(install_session_id: int) -> None:
     try:
         attempt = 1
         while _run_install(install_session_id, attempt):  # True: it stopped early and is to be run again
+            # An installer cannot resume over what the last run left: it stops on, or skips past, the files in its way.
+            clear_session_cache(install_session_id)
             attempt += 1
     finally:
         _log_install_end(install_session_id)
@@ -653,6 +663,8 @@ def _run_install(install_session_id: int, attempt: int = 1) -> bool:
         # SandboxSpec.games_fallback_dir).
         games_dir = work_dir / "Games"
         games_dir.mkdir(exist_ok=True)
+        if disc_source is not None:
+            _route_disc_games_dir(disc_source)
 
         inner = _build_inner_command(installer_arg, proton_or_wine)
         argv = _wrap_for_sandbox(

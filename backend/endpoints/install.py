@@ -243,6 +243,8 @@ async def start_install_session(
     auto_mode = data.auto_mode if data.auto_mode is not None else default_auto_mode()
 
     if existing:
+        if existing.state == InstallSessionState.FAILED:
+            clear_session_cache(existing.id)  # a failed install cannot be resumed: its leftovers would get in the way
         session = db_install_session_handler.update_session(
             existing.id,
             {

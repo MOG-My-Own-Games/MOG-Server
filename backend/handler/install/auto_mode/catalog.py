@@ -15,7 +15,7 @@ import yaml
 
 CATALOG_PATH = Path(__file__).with_name("buttons.yml")
 
-CATEGORIES = ("next", "agree", "install", "finish", "key", "deny", "option")
+CATEGORIES = ("next", "agree", "install", "finish", "key", "deny", "option", "decline")
 # Categories whose "toggle" checkboxes get selected before Next, same as the
 # EULA-accept radio (see ButtonEntry.toggle).
 _TOGGLE_CATEGORIES = ("agree", "option")
@@ -58,6 +58,8 @@ class Catalog:
     license_keywords: tuple[str, ...]
     confirm_keywords: tuple[str, ...]
     progress_keywords: tuple[str, ...]
+    complete_keywords: tuple[str, ...] = ()
+    abort_keywords: tuple[str, ...] = ()
 
     def entries(self, category: str) -> tuple[ButtonEntry, ...]:
         return tuple(b for b in self.buttons if b.category == category)
@@ -96,4 +98,6 @@ def load_catalog(extra_buttons: list[dict] | None = None) -> Catalog:
         license_keywords=_keywords(context, "license"),
         confirm_keywords=_keywords(context, "confirm"),
         progress_keywords=_keywords(context, "progress"),
+        complete_keywords=_keywords(context, "complete"),
+        abort_keywords=_keywords(context, "abort"),
     )

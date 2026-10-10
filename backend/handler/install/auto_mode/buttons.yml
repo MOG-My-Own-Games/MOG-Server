@@ -82,7 +82,58 @@ context_keywords:
       "剩余时间",
     ]
 
+  # The wizard's last page. Files are written by then, so the "late" Finish may be pressed even when the install wrote
+  # outside the folder the driver watches.
+  complete:
+    [
+      "has been installed successfully",
+      "installed successfully",
+      "finished installing",
+      "installation complete",
+      "installation is complete",
+      "installation completed",
+      "setup has finished",
+      "completing the",
+      "installazione completata",
+      "installazione terminata",
+      "installato correttamente",
+      "installato con successo",
+      "installation abgeschlossen",
+      "erfolgreich installiert",
+      "installation terminée",
+      "installé avec succès",
+      "instalación completada",
+      "instalado correctamente",
+      "インストールが完了",
+      "安装完成",
+      "安裝完成",
+    ]
+
+  # "Close the installer?" confirmations: Yes would end the install, so only their No is pressed.
+  abort:
+    [
+      "want to close",
+      "want to cancel",
+      "want to exit",
+      "want to quit",
+      "want to abort",
+      "setup is not complete",
+      "if you exit now",
+      "if you quit now",
+      "vuoi annullare",
+      "vuoi uscire",
+      "vuoi chiudere",
+      "wirklich abbrechen",
+      "wirklich beenden",
+      "voulez-vous vraiment quitter",
+      "desea cancelar",
+      "desea salir",
+    ]
+
 buttons:
+  - category: decline
+    mnemonic: n
+    labels: ["No", "Nein", "Non", "いいえ", "否"]
   - category: next
     mnemonic: n
     labels:

@@ -29,7 +29,7 @@ from .engine import (
     plan_action,
     same_screen,
 )
-from .matcher import Match, Word, find_matches, screen_lines, screen_text
+from .matcher import Match, Word, find_matches, is_exact, screen_lines, screen_text
 from .boxes import ocr_boxes
 from .ocr import ocr_words
 
@@ -170,8 +170,10 @@ def _needs_deep_pass(words: list[Word], catalog: Catalog) -> bool:
     checkbox was not."""
     # A "late" button (Exit) is not one to press before the install has written files, so reading it is no way forward:
     # a skinned installer's title bar says EXIT on every page.
-    categories = {m.entry.category for m in find_matches(words, catalog) if not m.entry.late}
-    if not categories & {"next", "install", "finish"}:
+    # A one-typo read ("instal" off a checkbox caption) is no proof of a button: it must not stop the closer passes
+    # that would read the real Next below it.
+    categories = {m.entry.category for m in find_matches(words, catalog) if not m.entry.late and is_exact(m)}
+    if not categories & {"next", "install", "finish", "decline"}:
         return True
     return is_license_page(screen_lines(words), catalog) and "agree" not in categories
 

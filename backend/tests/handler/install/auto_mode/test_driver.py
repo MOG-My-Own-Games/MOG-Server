@@ -142,3 +142,16 @@ class TestDialogInFocus:
 
         assert [w.text.lower() for w in prompts] == ["press up to unlock"]  # the catalog's own label
         assert action is not None and action.kind == "key" and action.key == "Up"
+
+
+def _caption(text: str, line: int, left: int = 0) -> Word:
+    return Word(text=text, left=left, top=0, width=60, height=14, conf=95.0, line_id=(line, 0, 0))
+
+
+def test_near_miss_read_does_not_stop_the_closer_passes():
+    """Regression test: a checkbox caption ("Install DirectX") read as "instal" counted as the page's advance button,
+    so the closer passes that would have read the real Next never ran and auto mode clicked the caption for an hour."""
+    from handler.install.auto_mode.driver import _needs_deep_pass
+
+    assert _needs_deep_pass([_caption("instal", 0)], load_catalog()) is True
+    assert _needs_deep_pass([_caption("Install", 0)], load_catalog()) is False

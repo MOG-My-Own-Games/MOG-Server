@@ -64,6 +64,11 @@ class Match:
         return self.left + self.width // 2, self.top + self.height // 2
 
 
+def is_exact(match: Match) -> bool:
+    """Whether the read text is the label itself, not a one-typo near miss."""
+    return normalize(match.text) == match.label
+
+
 def _edit_distance_at_most_one(a: str, b: str) -> bool:
     if a == b:
         return True

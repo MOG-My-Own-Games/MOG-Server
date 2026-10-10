@@ -6,7 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .catalog import Catalog
-from .matcher import Match, Word, find_matches, screen_lines
+from .matcher import Match, Word, find_matches, is_exact, screen_lines
 
 # Two OCR line sets at least this similar (Jaccard) are the same installer page.
 SAME_SCREEN_THRESHOLD = 0.7
@@ -14,6 +14,7 @@ MAX_ATTEMPTS_PER_BUTTON = 2
 
 # Lower is pressed first. Agree entries are only ever used on license pages.
 _PRIORITY = {
+    "decline": -2,
     "key": -1,
     "toggle": 0,
     "install": 1,
@@ -90,6 +91,17 @@ def is_progress_page(lines: list[str], catalog: Catalog) -> bool:
     return _phrase_present(lines, catalog.progress_keywords)
 
 
+def is_complete_page(lines: list[str], catalog: Catalog) -> bool:
+    """The wizard's last page ("... has been installed successfully"). The files are written by then, even when none landed
+    in the folder the driver watches, so a late button (Finish) is safe and the only way forward."""
+    return _phrase_present(lines, catalog.complete_keywords)
+
+
+def is_abort_page(lines: list[str], catalog: Catalog) -> bool:
+    """A "close the installer?" confirmation. Answering Yes there ends the install, so only its No may be pressed."""
+    return _phrase_present(lines, catalog.abort_keywords)
+
+
 def _priority(match: Match) -> int:
     entry = match.entry
     return _PRIORITY["toggle" if entry.toggle else entry.category]
@@ -115,12 +127,19 @@ def plan_action(
         return None, matches
     license_page = is_license_page(lines, catalog)
     agree_allowed = license_page or is_confirm_page(lines, catalog)
+    complete_page = is_complete_page(lines, catalog)
+    abort_page = is_abort_page(lines, catalog)
 
-    ranked: list[tuple[tuple[int, int], Match, str, int]] = []
+    ranked: list[tuple[tuple[int, int, int], Match, str, int]] = []
     for m in matches:
+        if abort_page != (m.entry.category == "decline"):
+            continue
         if m.entry.category == "agree" and not agree_allowed:
             continue
-        if m.entry.late and not installing:
+        if m.entry.late and not (installing or complete_page):
+            continue
+        # Nothing is left to install there: an "Install" read on that page is a garbled Uninstall, which rolls the install back.
+        if m.entry.category == "install" and complete_page:
             continue
         key = f"{m.entry.category}:{m.label}"
         attempts = memory.attempts.get(key, 0)
@@ -129,7 +148,8 @@ def plan_action(
         # A repeated checkbox click would undo the first, so a toggle only
         # gets its retry after every other button had its turn.
         penalty = 1 if m.entry.toggle and attempts >= 1 else 0
-        ranked.append(((penalty, _priority(m)), m, key, attempts))
+        # A near-miss read ("instal" off a checkbox caption) goes after every exact one.
+        ranked.append(((penalty, 0 if is_exact(m) else 1, _priority(m)), m, key, attempts))
     if not ranked:
         return None, matches
 

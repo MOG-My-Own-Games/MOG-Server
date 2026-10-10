@@ -66,3 +66,65 @@ class TestLanguagePicker:
 
         assert action is not None
         assert (action.kind, action.key, action.alt) == ("key", "Return", False)
+
+
+class TestCompletePage:
+    def _final_page(self) -> list[Word]:
+        return [
+            _word("Persona 3 Reload has been installed successfully.", line=0),
+            _word("Uninstall", line=1),
+            _word("Finish", line=1, left=400),
+        ]
+
+    def test_finish_is_pressed_when_the_install_wrote_outside_the_watched_folder(self):
+        """Regression test: a wizard that installs into the Wine prefix writes nothing under the work dir, so the
+        driver's progress stayed 0 and the late Finish was never pressed. The install sat on its last page for hours."""
+        action, _ = plan_action(self._final_page(), CATALOG, ScreenMemory(), installing=False)
+        assert action is not None
+        assert action.match.entry.category == "finish"
+
+    def test_install_read_on_the_last_page_is_never_pressed(self):
+        """A garbled Uninstall read as "Install" would roll the finished install back, leaving no files."""
+        words = [_word("Setup has finished", line=0), _word("Install", line=1)]
+        action, _ = plan_action(words, CATALOG, ScreenMemory(), installing=False)
+        assert action is None
+
+    def test_finish_still_waits_on_a_page_that_is_not_the_last(self):
+        words = [_word("Welcome to the setup wizard", line=0), _word("Finish", line=1)]
+        action, _ = plan_action(words, CATALOG, ScreenMemory(), installing=False)
+        assert action is None
+
+
+def test_exact_next_is_pressed_before_a_near_miss_install():
+    """A checkbox caption read as "instal" ranks after an exact Next, so the caption is not toggled first."""
+    words = [_word("instal", line=0), _word("Next", line=1)]
+    action, _ = plan_action(words, CATALOG, ScreenMemory())
+    assert action is not None
+    assert action.match.entry.category == "next"
+
+
+class TestAbortPage:
+    def _close_installer_page(self) -> list[Word]:
+        return [
+            _word("Are you sure that you want to close installer wizard?", line=0),
+            _word("No", line=1),
+            _word("Yes", line=1, left=400),
+        ]
+
+    def test_close_the_installer_confirmation_is_answered_no(self):
+        """Regression test: the wizard asked "Are you sure that you want to close installer wizard?" and auto mode
+        answered Yes (a plain confirmation), so the installer exited with code 253 before installing anything."""
+        action, _ = plan_action(self._close_installer_page(), CATALOG, ScreenMemory())
+        assert action is not None
+        assert action.match.entry.category == "decline"
+
+    def test_yes_alone_is_not_pressed_on_that_page(self):
+        words = [_word("Do you want to close the installer?", line=0), _word("Yes", line=1)]
+        action, _ = plan_action(words, CATALOG, ScreenMemory())
+        assert action is None
+
+    def test_no_is_not_pressed_anywhere_else(self):
+        words = [_word("Do you want to install DirectX?", line=0), _word("No", line=1), _word("Yes", line=1, left=400)]
+        action, _ = plan_action(words, CATALOG, ScreenMemory())
+        assert action is not None
+        assert action.match.entry.category == "agree"

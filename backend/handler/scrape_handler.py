@@ -28,7 +28,7 @@ _YEAR_TAG = re.compile(r"\(\s*(19\d{2}|20[0-2]\d)\s*\)")
 _VERSION = re.compile(r"[\s_.-]+v?\d+(\.\d+)+\b.*$", re.IGNORECASE)
 # Release/packaging words that start the noise after the title; everything after one is dropped.
 _TAGS = re.compile(
-    r"[\s_.-]+(gog|repack|setup|installer|multi\d*|goty|drm[\s_.-]?free|proper|readnfo|internal|retail|"
+    r"[\s_.-]+(gog|setup|installer|multi\d*|goty|drm[\s_.-]?free|proper|readnfo|internal|retail|"
     r"dvd\d*|x64|x86|win(32|64)|rip|cracked|incl|(build|update|patch|hotfix)[\s_.-]*v?\d+)\b.*$",
     re.IGNORECASE,
 )

@@ -99,7 +99,7 @@ class TestSearchName:
         assert search_name("Portal 2 - GOG") == "Portal 2"
 
     def test_scene_name_dots_and_group(self):
-        assert search_name("FANTASY.LIFE.i.The.Girl.Who.Steals.Time-TENOKE") == "FANTASY LIFE i The Girl Who Steals Time"
+        assert search_name("FANTASY.LIFE.i.The.Girl.Who.Steals.Time-GRPTAG") == "FANTASY LIFE i The Girl Who Steals Time"
 
     def test_scene_group_with_mixed_case(self):
         assert search_names("Broken.Reality-TiNYiSO") == ["Broken Reality", "Broken Reality TiNYiSO"]
@@ -107,7 +107,7 @@ class TestSearchName:
         assert search_name("Game.Name-razor1911") == "Game Name"
 
     def test_release_tags_and_versions_are_dropped(self):
-        assert search_name("Some.Game.MULTi12.REPACK-GROUP") == "Some Game"
+        assert search_name("Some.Game.MULTi12.PROPER-GROUP") == "Some Game"
         assert search_name("Game.Name.v1.2.3-RUNE") == "Game Name"
         assert search_name("Game.Name.Build.12345-SKIDROW") == "Game Name"
         assert search_name("Some Game - FLT") == "Some Game"
@@ -232,7 +232,7 @@ class TestFuzzyMatching:
         igdb.get_game_by_id.return_value = {"id": 2, "name": "Fantasy Life i: The Girl Who Steals Time"}
         sgdb.search_games.return_value = []
 
-        scrape_game(_game(name="Fantasy.Life.i.The.Girl.Who.Steals.Time-TENOKE", fs_name="x"))
+        scrape_game(_game(name="Fantasy.Life.i.The.Girl.Who.Steals.Time-GRPTAG", fs_name="x"))
 
         igdb.get_game_by_id.assert_called_once_with(2)
 

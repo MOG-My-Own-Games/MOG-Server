@@ -138,6 +138,8 @@ class InstallSession(BaseModel):
     extract_only: Mapped[bool] = mapped_column(
         Boolean(), default=False, server_default=sa_false(), nullable=False
     )
+    # Place in the waiting line while `queued`: lower starts first; rows without one go after the ranked ones.
+    queue_rank: Mapped[int | None] = mapped_column(Integer, default=None)
     # What auto mode is doing ("running" / "needs_manual", see
     # handler.install.auto_mode.driver) and its last action. NULL when off.
     auto_status: Mapped[str | None] = mapped_column(String(32), default=None)

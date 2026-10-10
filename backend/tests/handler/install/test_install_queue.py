@@ -78,6 +78,43 @@ def test_more_places_run_more_at_a_time(queue, monkeypatch):
     assert results == [True, True, False] and state(ids[2]) == S.QUEUED
 
 
+def test_the_line_can_be_reordered_and_the_head_starts_first(queue):
+    running, a, b, c = queue.add(), queue.add(), queue.add(), queue.add()
+    for sid in (running, a, b, c):
+        runner.start_or_queue(sid)
+
+    assert sessions.reorder_queue([c, a, b]) == [c, a, b]
+    assert sessions.get_queued_ids() == [c, a, b]
+    assert sessions.queue_position(c) == 1 and sessions.queue_position(b) == 3
+
+    sessions.update_session(running, {"state": S.DONE})
+    runner.dispatch_queue()
+    assert state(c) == S.INSTALLING and state(a) == S.QUEUED
+
+
+def test_reordering_leaves_the_places_of_the_others_alone(queue):
+    running, a, other, b = queue.add(), queue.add(), queue.add(), queue.add()
+    for sid in (running, a, other, b):
+        runner.start_or_queue(sid)
+
+    sessions.reorder_queue([b, a])  # `other` belongs to someone else and is not in the list
+
+    assert sessions.get_queued_ids() == [b, other, a]
+
+
+def test_a_session_that_runs_no_installer_takes_no_place_and_never_waits(queue):
+    first = queue.add()
+    runner.start_or_queue(first)
+    portable = queue.add()
+    sessions.update_session(portable, {"extract_only": True})
+
+    assert runner.start_or_queue(portable) is True
+    assert state(portable) == S.INSTALLING and sessions.count_running_sessions() == 1
+
+    second = queue.add()
+    assert runner.start_or_queue(second) is False  # the place is still the first install's
+
+
 def test_a_queued_session_is_active_and_never_expires_before_it_runs(queue):
     from models.install_session import ACTIVE_INSTALL_STATES, RUNNING_INSTALL_STATES
 
@@ -95,7 +132,7 @@ import asyncio  # noqa: E402
 from types import SimpleNamespace  # noqa: E402
 
 from endpoints import install as install_endpoint  # noqa: E402
-from endpoints.responses.install import InstallStartForm  # noqa: E402
+from endpoints.responses.install import InstallQueueForm, InstallStartForm  # noqa: E402
 
 
 @pytest.fixture
@@ -168,3 +205,14 @@ def test_a_session_started_again_does_not_keep_the_counts_of_its_earlier_run(end
     again = endpoint.start(9)
 
     assert again.id == done.id and (again.bytes_written, again.bytes_total) == (0, 0)
+
+
+def test_the_queue_can_be_reordered_through_the_endpoint(endpoint):
+    endpoint.start(1)
+    second, third = endpoint.start(2), endpoint.start(3)
+
+    listed = asyncio.run(
+        install_endpoint.reorder_install_queue(endpoint.user, InstallQueueForm(session_ids=[third.id, second.id]))
+    )
+
+    assert [(s.id, s.queue_position) for s in listed if s.state == S.QUEUED] == [(third.id, 1), (second.id, 2)]

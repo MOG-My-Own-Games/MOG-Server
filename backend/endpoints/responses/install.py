@@ -51,6 +51,12 @@ class InstallSessionSchema(BaseModel):
     queue_position: int | None = None
 
 
+class InstallQueueForm(BaseModel):
+    """The waiting installs in the order they should start (ids of the sessions, the first to start first)."""
+
+    session_ids: list[int]
+
+
 class InstallStartForm(BaseModel):
     """Request body to start (or restart) an install session for a game."""
 

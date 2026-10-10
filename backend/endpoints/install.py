@@ -36,6 +36,7 @@ from endpoints.responses.install import (
     InstallFileSchema,
     InstallFilesSchema,
     InstallSessionSchema,
+    InstallQueueForm,
     InstallStartForm,
     InstallStreamFileSchema,
     ModCacheEntrySchema,
@@ -120,6 +121,19 @@ async def get_active_installs(user: CurrentUser) -> list[InstallSessionSchema]:
     active = [_session_schema(s) for s in sessions if s.state in ACTIVE_INSTALL_STATES]
     # Those running first; the queued ones below them, in the order they will start.
     return sorted(active, key=lambda s: (s.state == InstallSessionState.QUEUED, s.queue_position or 0))
+
+
+@router.put("/install/queue")
+async def reorder_install_queue(user: CurrentUser, data: InstallQueueForm) -> list[InstallSessionSchema]:
+    """Put the caller's waiting installs in the given order. They keep the places they hold in the line, so other
+    people's installs do not move. Returns the caller's active installs as `GET /install/active` does."""
+    wanted = []
+    for session_id in data.session_ids:
+        queued = db_install_session_handler.get_session(session_id)
+        if queued is not None and queued.state == InstallSessionState.QUEUED and (queued.user_id == user.id or user.is_admin):
+            wanted.append(session_id)
+    db_install_session_handler.reorder_queue(wanted)
+    return await get_active_installs(user)
 
 
 @router.get("/install/defaults")

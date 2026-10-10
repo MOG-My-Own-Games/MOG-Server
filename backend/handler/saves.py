@@ -5,8 +5,11 @@ from __future__ import annotations
 import os
 import shutil
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
+from typing import TypeVar
 
+from anyio import CapacityLimiter, to_thread
 from fastapi import UploadFile
 
 from config import MAX_SAVE_UPLOAD_BYTES, SAVES_BASE_PATH, SAVES_KEEP_VERSIONS
@@ -18,6 +21,17 @@ from utils.archive_safety import inspect_archive
 
 _CHUNK = 1024 * 1024
 _INCOMING_DIR = ".incoming"
+
+T = TypeVar("T")
+
+# Blocking save work runs on threads of its own, counted apart from the shared pool that file downloads and installs
+# keep busy, so a save never waits behind them (it only waits for another save).
+SAVES_CHANNELS = 2
+_SAVES_LIMITER = CapacityLimiter(SAVES_CHANNELS)
+
+
+async def run_on_saves_channel(fn: Callable[..., T], *args: object) -> T:
+    return await to_thread.run_sync(fn, *args, limiter=_SAVES_LIMITER)
 
 
 class UploadTooLarge(Exception):

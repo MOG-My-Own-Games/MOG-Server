@@ -5,7 +5,6 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Path, Query, UploadFile, status
 from fastapi.responses import FileResponse
-from starlette.concurrency import run_in_threadpool
 
 from config import SAVES_KEEP_VERSIONS
 from endpoints.responses.save import (
@@ -19,7 +18,7 @@ from endpoints.responses.save import (
 from handler.auth import CurrentUser
 from handler.database import db_device_handler, db_game_handler, db_saves_handler
 from handler.notifications import notify_save_restored, notify_save_synced
-from handler.saves import UploadTooLarge, receive_upload, remove_version, resolve_path, store_version
+from handler.saves import UploadTooLarge, receive_upload, remove_version, resolve_path, run_on_saves_channel, store_version
 from models.device import Device
 from models.game import Game
 from models.save_version import SaveVersion
@@ -91,11 +90,11 @@ async def upload_game_saves(
             status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail="Save archive too large"
         ) from e
     try:
-        version, created = await run_in_threadpool(store_version, user.id, id, device_id, trigger, incoming)
+        version, created = await run_on_saves_channel(store_version, user.id, id, device_id, trigger, incoming)
     except ArchiveError as e:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e)) from e
     if created:
-        await run_in_threadpool(notify_save_synced, user.id, id, device.name, trigger, version.file_count)
+        await run_on_saves_channel(notify_save_synced, user.id, id, device.name, trigger, version.file_count)
     return SaveUploadSchema(version=SaveVersionSchema.model_validate(version), created=created)
 
 
@@ -133,11 +132,11 @@ async def save_restored(
     version = _own_version(user, id)
     device = _own_device(user, device_id)
     source = db_device_handler.get_device(version.device_id)
-    await run_in_threadpool(
+    await run_on_saves_channel(
         notify_save_restored, user.id, version.game_id, device.name, source.name if source else None, files
     )
 
 
 @router.delete("/saves/{id}")
 async def delete_save(user: CurrentUser, id: Annotated[int, Path(ge=1)]) -> None:
-    await run_in_threadpool(remove_version, _own_version(user, id))
+    await run_on_saves_channel(remove_version, _own_version(user, id))

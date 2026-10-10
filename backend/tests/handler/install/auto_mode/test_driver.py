@@ -155,3 +155,15 @@ def test_near_miss_read_does_not_stop_the_closer_passes():
 
     assert _needs_deep_pass([_caption("instal", 0)], load_catalog()) is True
     assert _needs_deep_pass([_caption("Install", 0)], load_catalog()) is False
+
+
+def test_a_stray_no_read_from_a_description_does_not_stop_the_closer_passes():
+    """Regression test: a skinned installer's description ("... clear the components you do no t want to install ...") was
+    read with a bare "no", which counted as the page's advance button; the closer passes that read the real, small Install
+    button below never ran and auto mode reported "needs help" while Install sat on screen."""
+    from handler.install.auto_mode.driver import _needs_deep_pass
+
+    catalog = load_catalog()
+    assert _needs_deep_pass([_caption("No", 0)], catalog) is True  # not a way forward on an ordinary page
+    close_prompt = [_caption("Do you want to close", 0), _caption("the setup?", 1), _caption("No", 2)]
+    assert _needs_deep_pass(close_prompt, catalog) is False  # but the answer to "close the installer?" is

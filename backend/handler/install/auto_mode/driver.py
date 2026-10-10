@@ -24,6 +24,7 @@ from .engine import (
     MAX_ATTEMPTS_PER_BUTTON,
     Action,
     ScreenMemory,
+    is_abort_page,
     is_license_page,
     is_progress_page,
     plan_action,
@@ -173,6 +174,10 @@ def _needs_deep_pass(words: list[Word], catalog: Catalog) -> bool:
     # A one-typo read ("instal" off a checkbox caption) is no proof of a button: it must not stop the closer passes
     # that would read the real Next below it.
     categories = {m.entry.category for m in find_matches(words, catalog) if not m.entry.late and is_exact(m)}
+    # A "No" is only a way forward on a "close the installer?" page. Anywhere else a word that reads as one ("you do no
+    # t want" in a description) is no button, and it must not stop the closer passes that would read the real Install.
+    if not is_abort_page(screen_lines(words), catalog):
+        categories.discard("decline")
     if not categories & {"next", "install", "finish", "decline"}:
         return True
     return is_license_page(screen_lines(words), catalog) and "agree" not in categories

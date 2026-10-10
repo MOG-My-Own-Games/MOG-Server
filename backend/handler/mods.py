@@ -75,6 +75,17 @@ def list_mods(game_root: Path) -> list[Mod]:
     return list(found.values())
 
 
+def has_mods(game_root: Path) -> bool:
+    """Whether a mods folder of the game holds anything a mod could be (looked at one level deep, nothing measured)."""
+    for folder in _mods_folders(game_root):
+        try:
+            if any(not e.name.startswith(".") and (e.is_file() or e.is_dir()) for e in folder.iterdir()):
+                return True
+        except OSError:
+            continue
+    return False
+
+
 def find_mod(game_root: Path, name: str) -> Mod | None:
     """The mod called `name`, looked up among the real entries, so nothing the client sends is joined into a path."""
     return next((m for m in list_mods(game_root) if m.name == name), None)

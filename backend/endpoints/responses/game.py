@@ -30,6 +30,10 @@ class GameSchema(BaseModel):
     saves_only: bool = False
     # The folder holds add-ons (mods, DLC, ...) and nothing that installs the base game.
     addons_only: bool = False
+    # Something sits in the game's mods folder.
+    has_mods: bool = False
+    # When the game was first seen by a scan.
+    created_at: datetime | None = None
     media: dict[str, Any] | None = None
     # This user has a finished install whose cache is still on disk.
     installed: bool = False

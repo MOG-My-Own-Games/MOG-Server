@@ -51,6 +51,9 @@ class Game(BaseModel):
     # the base game (see installer_detection.only_addons).
     addons_only: Mapped[bool] = mapped_column(Boolean(), default=False, server_default="0")
 
+    # Set by a scan when the game's mods folder holds something (see handler/mods.py has_mods).
+    has_mods: Mapped[bool] = mapped_column(Boolean(), default=False, server_default="0")
+
     # What the game's own folder (or file) takes on disk, set by a scan and refreshed whenever the size is
     # measured again (handler/sizes.py). NULL until measured.
     size_bytes: Mapped[int | None] = mapped_column(BigInteger(), default=None)

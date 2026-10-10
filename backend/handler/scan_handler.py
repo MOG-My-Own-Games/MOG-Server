@@ -15,6 +15,7 @@ from pathlib import Path, PurePosixPath
 
 from handler.database import db_game_handler
 from handler.filesystem.installer_detection import is_addon_folder, is_base_installer
+from handler.mods import has_mods
 from models.game import Game
 from models.library import Library
 
@@ -96,6 +97,7 @@ def _scan_library(library: Library) -> ScanResult:
                 fs_name=fs_name,
                 name=fs_name,
                 addons_only=only_addons(root / fs_name),
+                has_mods=has_mods(root / fs_name),
                 size_bytes=size_of(root / fs_name),
             )
         )
@@ -112,6 +114,9 @@ def _scan_library(library: Library) -> ScanResult:
         addons = not is_missing and only_addons(root / fs_name)
         if addons != bool(game.addons_only):
             changes["addons_only"] = addons
+        mods = not is_missing and has_mods(root / fs_name)
+        if mods != bool(game.has_mods):
+            changes["has_mods"] = mods
         if not is_missing and game.size_bytes is None:  # measured once; handler/sizes.py keeps it current
             changes["size_bytes"] = size_of(root / fs_name)
         if changes:

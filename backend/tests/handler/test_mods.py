@@ -182,3 +182,13 @@ def test_the_cancel_endpoint_stops_a_running_zip_and_does_nothing_for_an_archive
     monkeypatch.setattr(mods, "cancel_zip", lambda gid, name: called.append((gid, name)))
     assert api.post("/api/games/5/mods/mod1/cancel").json()["state"] == "idle"
     assert called == [(5, "mod1")]
+
+
+def test_has_mods_is_true_only_when_the_mods_folder_holds_something(game_root, tmp_path):
+    assert mods.has_mods(game_root) is True
+
+    bare = tmp_path / "Bare"
+    (bare / "Mods").mkdir(parents=True)
+    (bare / "Mods" / ".hidden").write_text("x")
+    assert mods.has_mods(bare) is False
+    assert mods.has_mods(tmp_path / "missing") is False

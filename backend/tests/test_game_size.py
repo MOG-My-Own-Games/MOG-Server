@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 from endpoints import games
 from handler import sizes
+from models.install_session import InstallSessionState
 
 
 @pytest.fixture
@@ -24,7 +25,7 @@ def world(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(sizes, "_remembered", {})
     monkeypatch.setattr(sizes, "session_cache_dir", lambda session_id: tmp_path / "cache" / str(session_id))
     monkeypatch.setattr(
-        sizes, "db_install_session_handler", SimpleNamespace(get_sessions_for_game=lambda gid: [SimpleNamespace(id=9)])
+        sizes, "db_install_session_handler", SimpleNamespace(get_sessions_for_game=lambda gid: [SimpleNamespace(id=9, state=InstallSessionState.DONE)])
     )
     monkeypatch.setattr(sizes, "db_saves_handler", SimpleNamespace(summary=lambda game_id: (2, state.saves)))
     monkeypatch.setattr(games.db_game_handler, "get_game", lambda _id: game)
@@ -71,3 +72,19 @@ def test_a_size_past_four_gigabytes_is_not_wrapped(monkeypatch, world):
     big = SimpleNamespace(path="a.iso", size_bytes=3_677_174_794)
     monkeypatch.setattr(sizes.fs_game_handler, "list_game_files_flat", lambda game: [big])
     assert sizes.game_sizes(world.game).installer == 3_677_174_794
+
+
+def test_a_size_is_not_kept_long_while_an_install_of_the_game_runs(world, monkeypatch):
+    """Regression test: the cache of a running install grows below the top level the fingerprint looks at, so the
+    size shown stayed at what the first minute held (270 MiB) while the cache reached 57 GiB."""
+    monkeypatch.setattr(
+        sizes,
+        "db_install_session_handler",
+        SimpleNamespace(get_sessions_for_game=lambda gid: [SimpleNamespace(id=9, state=InstallSessionState.INSTALLING)]),
+    )
+    first = sizes.game_sizes(world.game)
+    (world.tmp / "cache" / "9" / "deep").mkdir()
+    (world.tmp / "cache" / "9" / "deep" / "more.bin").write_bytes(b"w" * 600)
+    sizes._remembered[1].taken -= sizes.BUSY_MAX_AGE + 1
+
+    assert sizes.game_sizes(world.game).cache == first.cache + 600

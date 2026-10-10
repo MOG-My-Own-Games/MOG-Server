@@ -14,12 +14,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from models.game import Game
+from models.install_session import ACTIVE_INSTALL_STATES
 from utils.install_cache import dir_size_bytes, session_cache_dir
 
 from handler.database import db_game_handler, db_install_session_handler, db_saves_handler
 from handler.filesystem import fs_game_handler
 
 MAX_AGE = 30 * 60
+# While an install of the game runs its cache grows below the top level, which the fingerprint cannot see.
+BUSY_MAX_AGE = 20
 
 
 @dataclass(frozen=True)
@@ -70,8 +73,12 @@ def _fingerprint(root: Path, cache_dirs: list[Path]) -> tuple:
     return (_top_level(root), tuple((d.name, _top_level(d)) for d in cache_dirs))
 
 
-def _cache_dirs(game_id: int) -> list[Path]:
-    dirs = (session_cache_dir(s.id) for s in db_install_session_handler.get_sessions_for_game(game_id))
+def _sessions(game_id: int) -> list:
+    return db_install_session_handler.get_sessions_for_game(game_id)
+
+
+def _cache_dirs(sessions: list) -> list[Path]:
+    dirs = (session_cache_dir(s.id) for s in sessions)
     return sorted((d for d in dirs if d.is_dir()), key=lambda d: d.name)
 
 
@@ -86,11 +93,13 @@ def forget(game_id: int | None = None) -> None:
 
 def game_sizes(game: Game) -> GameSizes:
     root = fs_game_handler.get_game_root_abs_path(game)
-    cache_dirs = _cache_dirs(game.id)
+    sessions = _sessions(game.id)
+    cache_dirs = _cache_dirs(sessions)
     fingerprint = _fingerprint(root, cache_dirs)
+    max_age = BUSY_MAX_AGE if any(s.state in ACTIVE_INSTALL_STATES for s in sessions) else MAX_AGE
     with _lock:
         known = _remembered.get(game.id)
-    if known is None or known.fingerprint != fingerprint or time.monotonic() - known.taken > MAX_AGE:
+    if known is None or known.fingerprint != fingerprint or time.monotonic() - known.taken > max_age:
         listed = fs_game_handler.list_game_files_flat(game)
         cache = sum(dir_size_bytes(d) for d in cache_dirs)
         known = _Remembered(time.monotonic(), fingerprint, sum(f.size_bytes for f in listed), cache, len(listed))

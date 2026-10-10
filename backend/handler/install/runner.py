@@ -42,7 +42,7 @@ from config import (
 )
 from handler.database import db_game_handler, db_install_session_handler
 from handler.filesystem import fs_game_handler
-from handler.install.archive_prescan import extract_and_rescan, is_archive_candidate, source_phase
+from handler.install.archive_prescan import extract_and_rescan, is_archive_candidate, source_phase, unwrap_platform_builds
 from utils.archives import extract_archive
 from handler.install.auto_mode.runtime import start_auto_mode
 from handler.notifications import notify_auto_mode_failed
@@ -123,12 +123,20 @@ _QUEUE_LOCK = threading.Lock()
 
 def start_or_queue(install_session_id: int) -> bool:
     """Start the session now when there is room for another install, else put it in the queue (state `queued`) to be
-    started, in order, as places free up. True when it started."""
+    started, in order, as places free up. True when it started. A session that runs no installer (extract only) takes
+    no place, so it never waits."""
     with _QUEUE_LOCK:
-        if db_install_session_handler.count_running_sessions() >= INSTALL_MAX_CONCURRENCY:
-            db_install_session_handler.update_session(install_session_id, {"state": InstallSessionState.QUEUED})
+        queued = db_install_session_handler.get_session(install_session_id)
+        needs_place = not (queued and queued.extract_only)
+        if needs_place and db_install_session_handler.count_running_sessions() >= INSTALL_MAX_CONCURRENCY:
+            db_install_session_handler.update_session(
+                install_session_id,
+                {"state": InstallSessionState.QUEUED, "queue_rank": db_install_session_handler.next_queue_rank()},
+            )
             return False
-        db_install_session_handler.update_session(install_session_id, {"state": InstallSessionState.INSTALLING})
+        db_install_session_handler.update_session(
+            install_session_id, {"state": InstallSessionState.INSTALLING, "queue_rank": None}
+        )
         enqueue_install(install_session_id)
         return True
 
@@ -142,7 +150,9 @@ def dispatch_queue() -> int:
             waiting = db_install_session_handler.get_next_queued()
             if waiting is None:
                 break
-            db_install_session_handler.update_session(waiting.id, {"state": InstallSessionState.INSTALLING})
+            db_install_session_handler.update_session(
+                waiting.id, {"state": InstallSessionState.INSTALLING, "queue_rank": None}
+            )
             enqueue_install(waiting.id)
             log.info(f"Install session {hl(str(waiting.id))} left the queue")
             started += 1
@@ -1015,6 +1025,8 @@ def _run_extract_only(install_session_id: int, game, source_rel: str | None) -> 
     log.info(f"Extracting {hl(what)} as it is for session {hl(str(install_session_id))}")
     try:
         problem = extract_archive(source_abs, work_dir) if source_abs is not None else _copy_game_files(game, work_dir)
+        if not problem:
+            problem = unwrap_platform_builds(work_dir)  # a release packed once per system: only Windows' is kept
         if problem:
             _fail(install_session_id, f"Could not extract {what}: {problem}")
             return

@@ -245,10 +245,37 @@ def is_probable_installer(candidate: InstallerCandidate) -> bool:
     return any(hint in name for hint in _INSTALLER_NAME_HINTS) and "uninst" not in name
 
 
+_WINDOWS_TAGS = frozenset(("win", "win32", "win64", "windows", "pc", "x64", "x86", "w32", "w64"))
+_OTHER_PLATFORM_TAGS = frozenset(("mac", "macos", "osx", "linux", "android", "apk", "ios"))
+
+
+def build_platform(file_name: str) -> str | None:
+    """"windows" or "other" for an archive named after the system it is a build for (`game-1.2-pc.zip`,
+    `game-mac.zip`, `game_linux.tar.bz2`); None when its name says nothing about it."""
+    words = set(re.split(r"[^a-z0-9]+", file_name.lower()))
+    if words & _WINDOWS_TAGS:
+        return "windows"
+    if words & _OTHER_PLATFORM_TAGS:
+        return "other"
+    return None
+
+
+def is_platform_bundle(candidates: list[InstallerCandidate]) -> bool:
+    """Whether the archives a listing found are the same game built for several systems, with one for Windows: a
+    release that carries a `-pc`, a `-mac` and a `-linux` build is no installer, it is a game to unpack (see
+    `handler.install.archive_prescan.unwrap_platform_builds`)."""
+    probable = [c for c in candidates if c.category == GAME_CATEGORY and is_probable_installer(c)]
+    builds = [build_platform(c.file_name) for c in probable if c.rank == RANK_ARCHIVE]
+    return bool(probable) and len(builds) == len(probable) and "windows" in builds and all(builds)
+
+
 def looks_portable(candidates: list[InstallerCandidate]) -> bool:
     """Whether a game's folder holds no installer for the game (only executables that are probably the game
     itself, or nothing runnable): then it needs none, and the person is offered its executables and the choice
-    to use the files as they are. Add-ons (DLC, mods, patches) do not count."""
+    to use the files as they are. Add-ons (DLC, mods, patches) do not count. The same game packed once per system
+    (a `-pc`, a `-mac`, a `-linux` archive) needs none either."""
+    if is_platform_bundle(candidates):
+        return True
     return not any(c.category == GAME_CATEGORY and is_probable_installer(c) for c in candidates)
 
 

@@ -1,4 +1,5 @@
 import asyncio
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -448,3 +449,56 @@ def test_a_plain_executable_is_never_looked_into(start, monkeypatch):
     session = start.go(installer_path="setup.exe")
     assert session.extract_only is False and session.installer_path == "setup.exe"
 
+
+
+# --- a release packed once per system ------------------------------------------------------------------
+
+
+def test_a_release_with_a_build_per_system_is_a_game_to_unpack_not_an_installer():
+    found = listing(
+        "v0.26/park_after_dark-0.26a-pc.zip",
+        "v0.26/park_after_dark-0.26a-mac.zip",
+        "v0.26/park_after_dark-0.26a-linux.tar.bz2",
+    )
+    assert [c.rank for c in found] == [4, 4, 4]  # three archives: each could hold an installer
+    assert archive_prescan.extract_suggested(found) is True
+
+
+def test_archives_that_say_nothing_about_their_system_are_still_taken_for_installers():
+    assert archive_prescan.extract_suggested(listing("one.zip", "two.zip")) is False
+    assert archive_prescan.extract_suggested(listing("game-mac.zip", "game-linux.zip")) is False  # none for Windows
+    assert archive_prescan.extract_suggested(listing("game-pc.zip", "extras.zip")) is False  # one that is not a build
+
+
+needs_7z = pytest.mark.skipif(shutil.which("7z") is None, reason="7z is not installed here")
+
+
+@needs_7z
+def test_only_the_windows_build_is_kept_and_unpacked(tmp_path):
+    import zipfile
+
+    release = tmp_path / "v0.26"
+    release.mkdir()
+    with zipfile.ZipFile(release / "game-0.26-pc.zip", "w") as z:
+        z.writestr("game-0.26-pc/game.exe", b"exe")
+        z.writestr("game-0.26-pc/readme.txt", b"hi")
+    for other in ("game-0.26-mac.zip", "game-0.26-linux.zip"):
+        with zipfile.ZipFile(release / other, "w") as z:
+            z.writestr("game.app/run", b"x")
+
+    assert archive_prescan.unwrap_platform_builds(tmp_path) is None
+
+    left = sorted(p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*") if p.is_file())
+    assert left == ["v0.26/game-0.26-pc/game.exe", "v0.26/game-0.26-pc/readme.txt"]
+
+
+def test_nothing_is_touched_when_there_is_no_windows_build_to_keep(tmp_path):
+    import zipfile
+
+    with zipfile.ZipFile(tmp_path / "game-mac.zip", "w") as z:
+        z.writestr("a", b"x")
+    with zipfile.ZipFile(tmp_path / "game-linux.zip", "w") as z:
+        z.writestr("a", b"x")
+
+    assert archive_prescan.unwrap_platform_builds(tmp_path) is None
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["game-linux.zip", "game-mac.zip"]

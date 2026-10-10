@@ -29,12 +29,19 @@ from handler.filesystem.installer_detection import (
     RANK_NESTED_EXECUTABLE,
     DetectedFile,
     InstallerCandidate,
+    build_platform,
     detect_installer_candidates,
     looks_portable,
 )
 from logger.logger import log
 from models.install_session import InstallPhase
-from utils.archives import extract_archive_member, extract_archive_tree, list_archive_members, try_list_archive_members
+from utils.archives import (
+    extract_archive,
+    extract_archive_member,
+    extract_archive_tree,
+    list_archive_members,
+    try_list_archive_members,
+)
 
 _NESTED_RANKS = (RANK_DISC_IMAGE, RANK_ARCHIVE)
 # Archives inside archives are unpacked at most this many levels deep.
@@ -50,6 +57,28 @@ def is_archive_candidate(path: Path) -> bool:
     """Whether `path` needs extraction before it can be searched for an
     installer, rather than being runnable/openable as-is."""
     return path.suffix.lower() in _PRE_SCAN_EXTENSIONS
+
+
+def unwrap_platform_builds(root: Path) -> str | None:
+    """A game packed once per system (`game-pc.zip`, `game-mac.zip`, `game-linux.tar.bz2`) is unpacked as the one for
+    Windows only: the others are deleted and the Windows archives are unpacked where they lie, then removed. Nothing is
+    done unless there is a Windows build and another one. Returns why it failed, or None."""
+    found = [(p, build_platform(p.name)) for p in sorted(root.rglob("*")) if p.is_file() and is_archive_candidate(p)]
+    found = [(p, platform) for p, platform in found if platform]
+    if not any(platform == "windows" for _p, platform in found) or not any(platform == "other" for _p, platform in found):
+        return None
+    for path, platform in found:
+        if platform == "other":
+            path.unlink(missing_ok=True)
+    for path, platform in found:
+        if platform != "windows":
+            continue
+        problem = extract_archive(path, path.parent)
+        if problem:
+            return f"{path.name}: {problem}"
+        path.unlink(missing_ok=True)
+        log.info(f"Unpacked {path.name}, the build for Windows")
+    return None
 
 
 def source_phase(path: Path) -> InstallPhase:

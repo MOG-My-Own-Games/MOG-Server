@@ -2933,8 +2933,9 @@ function renderInstallState(session) {
   }
 }
 
-// Files tab: a subtab list (All files, Root, Installer cache, one per folder
-// in the game directory) on the left, the selected subtab's files on the right.
+// Files tab: a subtab list (All files, Root, one per kind of add-on the game has, Installer cache, Saves) on the left,
+// the selected subtab's files on the right. A folder of the game is never a subtab of its own: what is in the folders
+// of the game's root is in Root, and only a folder named for an add-on (mods, DLC, patches ...) has its own.
 let libFiles = null; // { root_path, files } from /api/games/{id}/files
 let cacheFiles = null; // { gameId, cachePath, files } of a finished install
 let gameSaves = null; // { devices, keep_versions } from /api/games/{id}/saves
@@ -2944,36 +2945,39 @@ let filesSubtab = "all";
 const ROOT_SUBTAB = "__root__";
 const CACHE_SUBTAB = "__cache__";
 const SAVES_SUBTAB = "__saves__";
+const ADDON_ORDER = ["mod", "dlc"]; // listed first; any other kind follows by name
 
-function topFolder(path) {
-  const slash = path.indexOf("/");
-  return slash < 0 ? ROOT_SUBTAB : path.slice(0, slash);
+// The subtab a library file belongs to: the kind the server gave it ("game" is the game itself, so Root).
+function fileSubtab(file) {
+  return !file.category || file.category === "game" ? ROOT_SUBTAB : file.category;
 }
 
-function folderSubtabLabel(folder, files) {
-  const category = files[0].category;
-  return category === "game" ? folder : category.charAt(0).toUpperCase() + category.slice(1);
+function addonLabel(category) {
+  return category === "dlc" ? "DLC" : category.charAt(0).toUpperCase() + category.slice(1);
 }
 
 function filesSubtabs() {
   const files = libFiles ? libFiles.files : [];
   const tabs = [{ id: "all", label: "All files", count: files.length }];
-  const byFolder = new Map();
+  const byKind = new Map();
   for (const f of files) {
-    const key = topFolder(f.path);
-    if (!byFolder.has(key)) byFolder.set(key, []);
-    byFolder.get(key).push(f);
+    const key = fileSubtab(f);
+    byKind.set(key, (byKind.get(key) || 0) + 1);
   }
-  if (byFolder.has(ROOT_SUBTAB)) tabs.push({ id: ROOT_SUBTAB, label: "Root", count: byFolder.get(ROOT_SUBTAB).length });
+  if (byKind.has(ROOT_SUBTAB)) tabs.push({ id: ROOT_SUBTAB, label: "Root", count: byKind.get(ROOT_SUBTAB) });
+  const addons = [...byKind.keys()]
+    .filter((k) => k !== ROOT_SUBTAB)
+    .sort((a, b) => {
+      const ra = ADDON_ORDER.indexOf(a);
+      const rb = ADDON_ORDER.indexOf(b);
+      return (ra < 0 ? ADDON_ORDER.length : ra) - (rb < 0 ? ADDON_ORDER.length : rb) || a.localeCompare(b);
+    });
+  for (const k of addons) tabs.push({ id: k, label: addonLabel(k), count: byKind.get(k) });
   if (cacheFiles && cacheFiles.files.length > 0) {
     tabs.push({ id: CACHE_SUBTAB, label: "Installer cache", count: cacheFiles.files.length });
   }
   tabs.push({ id: SAVES_SUBTAB, label: "Saves", count: savesCount() });
-  const folders = [...byFolder.keys()]
-    .filter((k) => k !== ROOT_SUBTAB)
-    .map((k) => ({ id: k, label: folderSubtabLabel(k, byFolder.get(k)), count: byFolder.get(k).length }))
-    .sort((a, b) => a.label.localeCompare(b.label));
-  return [...tabs, ...folders];
+  return tabs;
 }
 
 function renderFilesTab() {
@@ -3009,8 +3013,8 @@ function renderFilesTab() {
   }
 
   const files = libFiles ? libFiles.files : [];
-  const shown = filesSubtab === "all" ? files : files.filter((f) => topFolder(f.path) === filesSubtab);
-  const prefix = filesSubtab === "all" || filesSubtab === ROOT_SUBTAB ? "" : `${filesSubtab}/`;
+  const shown = filesSubtab === "all" ? files : files.filter((f) => fileSubtab(f) === filesSubtab);
+  const prefix = "";  // paths are shown whole: the folders of the game are part of the path, not tabs
   document.getElementById("files-panel-title").textContent = tabs.find((t) => t.id === filesSubtab).label;
   const root = libFiles ? libFiles.root_path : "";
   document.getElementById("game-files-root").textContent = prefix ? `${root}/${prefix}` : root;

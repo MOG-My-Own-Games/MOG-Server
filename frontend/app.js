@@ -1883,8 +1883,8 @@ async function loadLaunchSettings(gameId) {
   }
   if (!activeGame || activeGame.id !== gameId) return;
   const rows = [];
-  if (answer.shared) rows.push({ label: "All devices", ...answer.shared });
-  for (const d of answer.devices || []) rows.push({ label: d.device.name, ...d });
+  if (answer.shared) rows.push({ label: "All devices", ...answer.shared, scope: "all" });
+  for (const d of answer.devices || []) rows.push({ label: d.device.name, ...d, scope: "device", deviceId: d.device.id });
   empty.hidden = rows.length > 0;
   table.hidden = rows.length === 0;
   for (const row of rows) {
@@ -1911,6 +1911,23 @@ async function loadLaunchSettings(gameId) {
     }
     cell(row.winetricks && row.winetricks.length ? row.winetricks.join(", ") : "None");
     cell(new Date(row.updated_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }));
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "danger";
+    remove.textContent = "Delete";
+    remove.addEventListener("click", async () => {
+      const what = row.scope === "all" ? "the launch settings for all devices" : `the launch settings of ${row.label}`;
+      if (!confirm(`Delete ${what}? A client that has them goes back to its own defaults the next time it starts the game.`)) return;
+      remove.disabled = true;
+      try {
+        const query = `scope=${row.scope}` + (row.scope === "device" ? `&device_id=${row.deviceId}` : "");
+        await api(`/api/games/${gameId}/launch-settings?${query}`, { method: "DELETE" });
+      } catch (err) {
+        alert(`Could not delete: ${err.message}`);
+      }
+      loadLaunchSettings(gameId);
+    });
+    cell("").appendChild(remove);
     body.appendChild(tr);
   }
 }

@@ -406,6 +406,10 @@ starts it the same way. They belong to the game, not to a user.
   each made of lowercase letters, digits, `_`, `.` and `-`, once each), so a reinstall or another device can install them
   into its own prefix. A client takes the verbs of both entries together. They go on a command line: check them again.
 - Any signed-in user who can see the game can change the shared entry.
+- Settings can be deleted (the server's Settings tab of a game has a Delete button for each entry). A client that took
+  or sent settings for a game and then finds `shared` and `device` both `null` should treat that as deleted and go back to
+  its own defaults; a client that never saw any keeps what it has, and so does one that cannot read the answer (an older
+  server). MOG Client does this when a game is about to start.
 
 ## 8. Saves (optional)
 

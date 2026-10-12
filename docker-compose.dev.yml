@@ -3,6 +3,8 @@
 services:
   mog-server:
     image: mog-server:dev
+    environment:
+      LOGLEVEL: DEBUG
     pull_policy: never
     build:
       context: .

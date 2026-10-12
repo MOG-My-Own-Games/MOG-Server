@@ -375,6 +375,27 @@ reference, does this:
 None of this is required of you. A client that only wants to hand the files to another program needs steps 1 and
 2.
 
+### 7.1 Launch settings (optional)
+
+A client that launches games through Wine or Proton can keep three settings of a game on the server, so every device
+starts it the same way. They belong to the game, not to a user.
+
+| Call | What it does |
+| --- | --- |
+| `GET /api/games/{id}/launch-settings?device_id=N` | `{shared, device, devices}`: the settings for all devices, the ones for device `N` (`device_id` is optional), and the ones of each of the user's devices that has any (`[{device, proton, winecfg_reg, winetricks, updated_at}]`, for a web page like the server's Settings tab). Each of the first two is `null` or `{proton, winecfg_reg, winetricks, updated_at}`. |
+| `PUT /api/games/{id}/launch-settings` | Body `{scope: "device" \| "all", device_id, proton, winecfg_reg, winetricks}`. `device_id` is required for the `device` scope and must be one of the user's devices. Only the fields sent change; `null` clears one. |
+| `DELETE /api/games/{id}/launch-settings?scope=device\|all&device_id=N` | Remove one scope's settings. |
+
+- `proton` is the **name** of a build (`GE-Proton9-1`), never a path, up to 200 characters: paths differ between devices.
+  A device uses its own entry when it has one, else the shared one.
+- `winecfg_reg` is a Windows registry export (`.reg` text, up to 64 KiB) of what winecfg changed in the game's prefix.
+  The server stores it as it is and does not read it. A client must treat it as untrusted input and import only the
+  keys it expects (MOG Client takes nothing outside `HKEY_CURRENT_USER\Software\Wine`).
+- `winetricks` is the list of winetricks verbs installed in the game's prefix (`["vcrun2019", "d3dx9"]`, at most 100,
+  each made of lowercase letters, digits, `_`, `.` and `-`, once each), so a reinstall or another device can install them
+  into its own prefix. A client takes the verbs of both entries together. They go on a command line: check them again.
+- Any signed-in user who can see the game can change the shared entry.
+
 ## 8. Saves (optional)
 
 The server can keep a user's save games so they follow the person from one machine to another. It stores
@@ -466,7 +487,8 @@ MOG Client does not install mods: it only fetches them into the game's `mods` fo
 `GET /api/notifications` returns `{notifications: [...], unread: N}`. A notification has an `id`, a `kind`, a `title`,
 a `body`, optionally the `game_id` and `session_id` it is about, `read` and `created_at`. The server writes them
 for things a person should hear about even if the client was not looking: an installer that needs a person, a
-finished install, a mod that is zipped or downloaded, a save that was synced. `POST /api/notifications/read` and
+finished install, an install smaller than what it came from (`kind` `install_small`, a warning only: the install
+stays done, but the installer may have stopped on the way), a mod that is zipped or downloaded, a save that was synced. `POST /api/notifications/read` and
 `POST /api/notifications/{id}/read` mark them read; `DELETE /api/notifications` and `DELETE /api/notifications/{id}`
 remove them. MOG Client polls every 15 seconds and shows the unread count on the user's picture.
 

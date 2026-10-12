@@ -9,8 +9,9 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from config import DEV_MODE, MOG_VERSION, RESOURCES_BASE_PATH
-from endpoints import devices, games, install, libraries, notifications, saves, settings, users
-from handler import library_watcher, scrape_handler
+from endpoints import backups as backups_endpoints
+from endpoints import devices, games, install, launch_settings, libraries, notifications, saves, settings, users
+from handler import backups, library_watcher, scrape_handler
 from handler.metadata import ludusavi_handler
 from logger.logger import log
 from startup import run_startup_tasks
@@ -23,6 +24,7 @@ async def lifespan(app: FastAPI):
     run_startup_tasks()
     stop_watching = library_watcher.start()
     stop_ludusavi = ludusavi_handler.start()
+    stop_backups = backups.start()
     scrape_handler.warm_all_videos()
     log.info("MOG Server started")
     yield
@@ -30,14 +32,17 @@ async def lifespan(app: FastAPI):
         stop_watching.set()
     if stop_ludusavi is not None:
         stop_ludusavi.set()
+    stop_backups.set()
 
 
 app = FastAPI(title="MOG Server", version=MOG_VERSION, lifespan=lifespan)
 
+app.include_router(backups_endpoints.router, prefix="/api")
 app.include_router(devices.router, prefix="/api")
 app.include_router(libraries.router, prefix="/api")
 app.include_router(games.router, prefix="/api")
 app.include_router(install.router, prefix="/api")
+app.include_router(launch_settings.router, prefix="/api")
 app.include_router(notifications.router, prefix="/api")
 app.include_router(saves.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")

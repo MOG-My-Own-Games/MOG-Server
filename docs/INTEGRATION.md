@@ -105,7 +105,9 @@ A game object carries, among others:
   `completionist` and `all_styles` (any of them may be missing), each with a `_count` of reports. Show nothing
   when it is empty: a game that has not been matched simply has no times;
 - `cover_path` and `media`: the artwork the server chose for each kind (`cover`, `banner`, `hero`, `logo`,
-  `icon`);
+  `icon`), each `{url, source}` with `source` `steamgriddb`, `igdb` or `upload` (an image the administrator uploaded:
+  its `url`, like `cover_path` for a cover, is relative to the server, `/resources/media/<game>/<file>`, so resolve
+  it against the server's address, or better, take the image from the endpoints below);
 - `size_bytes`: what the game's own folder (or file) takes on the server's disk, `null` until the server has measured it
   (a scan does, and `GET /api/games/{id}/size` refreshes it). Sort by it with `null` last;
 - `installed` (this user has a finished install whose cache is still on the server), `last_played` and
@@ -115,6 +117,11 @@ A game object carries, among others:
 Artwork is served by the server so a client does not depend on the metadata providers' CDNs:
 `GET /api/games/{id}/cover`, `GET /api/games/{id}/media/{kind}`, `GET /api/games/{id}/screenshots/{index}` and
 `GET /api/games/{id}/videos`. Ask for what the game object says exists and fall back gracefully when it does not.
+An administrator sets artwork of their own with `POST /api/games/{id}/media/{kind}` (multipart field `file`; a PNG, JPEG,
+WebP or GIF up to 10 MiB, WebP and GIF being kept as PNG; `kind` is one of the five above). It becomes the choice for
+that kind, replaces the earlier one, and a scrape does not replace it; `PUT /api/games/{id}/media` with `null` for the kind
+removes it. A refused file answers `400` with the reason. Uploaded files are served without credentials from
+`/resources/media/`, like the avatars.
 
 Other useful reads: `GET /api/games/{id}/size` and `GET /api/games/{id}/sizes` (what the game, its install
 caches and its saves take on the server), and `GET /api/games/{id}/files` (the game's own files in the library,

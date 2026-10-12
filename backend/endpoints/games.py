@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+from pathlib import Path as FsPath
 from pathlib import PurePosixPath
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Path, Query, status
+from fastapi import APIRouter, HTTPException, Path, Query, UploadFile, status
 from fastapi.responses import FileResponse
 from handler.auth import AdminUser, CurrentUser
 from handler.database import db_game_handler, db_install_session_handler, db_saves_handler
 from handler.filesystem import fs_game_handler
 from handler.filesystem.installer_detection import category_for_path
 from handler import media as media_handler
+from handler import media_uploads
 from handler import video_handler
 from handler.metadata import hltb_handler, igdb_handler, ludusavi_handler, sgdb_handler
 from handler import mods as mods_handler
@@ -19,7 +21,7 @@ from handler.sizes import game_sizes
 from handler.scrape_handler import refresh_game, search_name
 from models.install_session import InstallSessionState
 from starlette.concurrency import run_in_threadpool
-from utils.image_cache import COVER_MAX_HEIGHT, cached_image, media_type
+from utils.image_cache import COVER_MAX_HEIGHT, cached_image, cached_local, media_type
 from utils.install_cache import session_cache_dir
 
 from endpoints.responses.game import (
@@ -119,6 +121,7 @@ async def delete_missing_game(
             detail={"code": "has_saves", "versions": versions, "size_bytes": size_bytes},
         )
     await run_in_threadpool(purge_game, id)
+    media_uploads.purge(id)
     db_game_handler.delete_game(id)
 
 
@@ -141,8 +144,18 @@ async def get_game(user: CurrentUser, id: Annotated[int, Path(ge=1)]) -> GameSch
     )
 
 
+def _image_path(url: str | None, max_height: int | None) -> FsPath | None:
+    """The file to serve for an artwork URL: our own upload (shrunk for a cover), or the provider's image from the cache."""
+    if not url:
+        return None
+    if media_uploads.is_upload(url):
+        own = media_uploads.path_for(url)
+        return (cached_local(own, max_height) if max_height else own) if own is not None and own.is_file() else None
+    return cached_image(url, max_height)
+
+
 def _serve_image(url: str | None, max_height: int | None = None) -> FileResponse:
-    path = cached_image(url, max_height) if url else None
+    path = _image_path(url, max_height)
     if path is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     return FileResponse(path, media_type=media_type(path), headers={"Cache-Control": "private, max-age=86400"})
@@ -185,13 +198,18 @@ async def choose_media(user: AdminUser, id: Annotated[int, Path(ge=1)], data: Me
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     media = dict(game.media or {})
     update: dict = {}
+    uploaded = media_uploads.uploaded_kinds(media)
     for kind, url in data.model_dump(exclude_unset=True).items():
+        if kind in uploaded and url != (media.get(kind) or {}).get("url"):
+            media_uploads.remove(media[kind]["url"])  # the upload is replaced or cleared: its file goes
         if url is None:
             media.pop(kind, None)
             if kind == "cover":
                 update["cover_path"] = None
             continue
         chosen = media_handler.selection(url)
+        if chosen is None and media_uploads.is_upload(url) and url == (game.media or {}).get(kind, {}).get("url"):
+            chosen = (game.media or {})[kind]  # the upload that is already the choice, sent again
         if chosen is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{kind}: not an image from a known provider")
         media[kind] = chosen
@@ -199,6 +217,33 @@ async def choose_media(user: AdminUser, id: Annotated[int, Path(ge=1)], data: Me
             update["cover_path"] = url
     updated = db_game_handler.update_game(id, {**update, "media": media})
     return GameSchema.model_validate(updated)
+
+
+@router.post("/{id}/media/{kind}")
+async def upload_game_media(
+    user: AdminUser, id: Annotated[int, Path(ge=1)], kind: str, file: UploadFile
+) -> GameSchema:
+    """Use an image of the person's own as the game's artwork of this kind (cover, banner, hero, logo or icon). A PNG, JPEG,
+    WebP or GIF up to 10 MiB; it replaces the earlier choice of that kind, and a scrape does not replace it."""
+    if kind not in media_handler.KINDS:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    game = db_game_handler.get_game(id)
+    if game is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    data = await file.read(media_uploads.MAX_UPLOAD_BYTES + 1)
+    try:
+        url = await run_in_threadpool(media_uploads.store, id, kind, data)
+    except media_uploads.UploadRefused as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+    media = dict(game.media or {})
+    previous = (media.get(kind) or {}).get("url")
+    if previous and previous != url:
+        media_uploads.remove(previous)
+    media[kind] = {"url": url, "source": media_uploads.UPLOAD}
+    update: dict = {"media": media}
+    if kind == "cover":
+        update["cover_path"] = url
+    return GameSchema.model_validate(db_game_handler.update_game(id, update))
 
 
 @router.get("/{id}/media/{kind}")

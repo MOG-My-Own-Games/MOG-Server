@@ -57,6 +57,9 @@ def candidates(game: Game, sgdb_id: int | None = None) -> dict[str, list[dict]]:
         found[kind] += [_candidate(i["url"], SGDB, i.get("thumb"), i.get("width"), i.get("height")) for i in items]
     for kind, items in igdb_candidates(game.igdb_metadata).items():
         found[kind] += items
+    for kind, chosen in (game.media or {}).items():  # the person's own upload is on offer too, first
+        if kind in found and isinstance(chosen, dict) and chosen.get("source") == "upload" and chosen.get("url"):
+            found[kind].insert(0, _candidate(chosen["url"], "upload"))
     for kind in KINDS:  # the same image from two places counts once
         seen: set[str] = set()
         found[kind] = [c for c in found[kind] if not (c["url"] in seen or seen.add(c["url"]))]

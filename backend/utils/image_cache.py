@@ -65,6 +65,26 @@ def media_type(path: Path) -> str:
     return next((m for _, suffix, m in _SIGNATURES if suffix == path.suffix), "application/octet-stream")
 
 
+def cached_local(source: Path, max_height: int) -> Path | None:
+    """A copy of a file of ours (an uploaded artwork) shrunk to a JPEG of at most `max_height` pixels tall, made once per version
+    of the file. None when the file is not there."""
+    try:
+        stamp = source.stat().st_mtime_ns
+    except OSError:
+        return None
+    key = hashlib.sha1(f"{source}|{stamp}|{max_height}".encode()).hexdigest()
+    hit = next(iter(CACHE_DIR.glob(f"{key}.*")), None) if CACHE_DIR.is_dir() else None
+    if hit is not None and hit.suffix != ".tmp":
+        return hit
+    data = _shrink(source.read_bytes(), max_height)
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    path = CACHE_DIR / f"{key}{_kind_of(data)[0]}"
+    tmp = path.with_suffix(".tmp")
+    tmp.write_bytes(data)
+    tmp.replace(path)
+    return path
+
+
 def cached_image(url: str, max_height: int | None = None) -> Path | None:
     """Local file for `url`, downloading it on first use. None if it cannot be fetched.
     With `max_height` the image is shrunk to a JPEG of that height (covers); otherwise it is kept

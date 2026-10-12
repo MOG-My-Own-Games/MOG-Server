@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from handler.database import db_game_handler
 from handler.notifications import notify_games_added
 from handler import media as media_handler
+from handler import media_uploads
 from handler import video_handler
 from handler.metadata import hltb_handler, igdb_handler, sgdb_handler
 from logger.logger import log
@@ -171,7 +172,10 @@ def _store_media(game: Game, sgdb_id: int | None, replace: bool, keep: set[str] 
     has no choice for yet (the automatic pass, which must not undo anyone's picks). cover_path
     follows the cover. Returns True if anything was chosen."""
     fresh = db_game_handler.get_game(game.id) or game
+    uploaded = media_uploads.uploaded_kinds(fresh.media)
+    keep = keep | uploaded  # a person's own upload is not replaced by a scrape
     chosen = media_handler.defaults(media_handler.candidates(fresh, sgdb_id=sgdb_id))
+    chosen = {kind: pick for kind, pick in chosen.items() if kind not in uploaded}
     if not chosen:
         return False
     current = dict(fresh.media or {})

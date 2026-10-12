@@ -13,6 +13,11 @@ set -e
 if [ "$(id -u)" = "0" ]; then
     mkdir -p /mog /opt/proton
     chown -R mog:mog /mog /opt/proton
+    # The backup volume, when one is mounted (Docker creates the host directory root-owned): only the folder itself, as it may
+    # hold many files. Nothing is created here without a volume: backups would land in the container and be lost with it.
+    if grep -q " /backups " /proc/mounts; then
+        chown mog:mog /backups
+    fi
     # CMD is always a fixed, simple "python3 main.py" (no args needing
     # quoting), so joining with $* to hand su a single -c string is safe.
     exec su -s /bin/sh mog -c "cd /src/backend && exec $*"

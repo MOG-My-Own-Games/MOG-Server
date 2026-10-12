@@ -40,6 +40,9 @@ class Settings(BaseModel):
     # Whether the log carries DEBUG lines. NULL means on only when LOGLEVEL=DEBUG in the environment
     # (see handler/log_level.py).
     debug_logging: Mapped[bool | None] = mapped_column(Boolean, default=None)
+    # The daily backup, and whether it holds the saves too (they can be large). NULL means on and off (see handler/backups.py).
+    backup_daily: Mapped[bool | None] = mapped_column(Boolean, default=None)
+    backup_saves: Mapped[bool | None] = mapped_column(Boolean, default=None)
     # Days an install cache survives before auto-eviction. NULL falls back to
     # config.INSTALL_CACHE_DEFAULT_TTL_DAYS; 0 means unlimited (see
     # utils/install_cache.py's resolve_expires_at).

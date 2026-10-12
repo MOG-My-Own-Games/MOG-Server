@@ -12,7 +12,7 @@ from config import (
     SAVES_BASE_PATH,
 )
 from handler.auth import hash_password, verify_password
-from handler import log_level
+from handler import backups, log_level
 from handler.database import db_install_session_handler, db_settings_handler, db_user_handler
 from handler.install.runner import dispatch_queue
 from logger.logger import log
@@ -39,6 +39,7 @@ def _ensure_dirs() -> None:
 
 
 def _run_migrations() -> None:
+    backups.before_update()  # the database is copied first when this start has migrations to run
     subprocess.run(["alembic", "upgrade", "head"], check=True, cwd=Path(__file__).parent)
 
 
@@ -91,5 +92,6 @@ def run_startup_tasks() -> None:
     _ensure_dirs()
     _run_migrations()
     _ensure_default_admin()
+    log_level.apply(db_settings_handler.get_settings())
     _fail_orphaned_installs()
     dispatch_queue()  # what was waiting for a place before the restart still waits its turn

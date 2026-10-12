@@ -536,8 +536,103 @@ async function openSettingsPage(subTab) {
   await refreshCacheTable();
   await refreshMissingTable();
   await refreshProviderValidityBadges();
+  await refreshBackups();
   await refreshUsersTable();
 }
+
+// --- Backups (Settings > Backups) ---
+
+const BACKUP_KIND_LABELS = { daily: "Daily", "pre-update": "Before an update", manual: "Manual" };
+
+async function refreshBackups() {
+  const body = document.getElementById("backups-table-body");
+  let data;
+  try {
+    data = await api("/api/backups");
+  } catch (err) {
+    document.getElementById("backups-volume").textContent = `Could not read the backups: ${err.message}`;
+    return;
+  }
+  const volume = document.getElementById("backups-volume");
+  volume.textContent = data.available
+    ? `Backups go to ${data.path}${data.own_volume ? "" : " (not a volume of its own: a backup there is lost with the data it protects)"}` +
+      `${data.free_bytes != null ? `, ${fmtBytes(data.free_bytes)} free` : ""}. Kept: ${data.keep.daily} daily, ${data.keep["pre-update"]} before an update, ${data.keep.manual} manual.`
+    : data.reason;
+  const error = document.getElementById("backups-error");
+  error.hidden = !data.last_error;
+  error.textContent = data.last_error || "";
+  document.getElementById("backups-daily-hint").textContent = `Once a day, from ${String(data.hour).padStart(2, "0")}:00 (server time). A copy of the database is also made before an update that migrates it.`;
+  document.getElementById("setting-backup-daily").checked = data.daily;
+  document.getElementById("setting-backup-saves").checked = data.daily_saves;
+  document.getElementById("backup-now-btn").disabled = !data.available;
+  body.replaceChildren();
+  if (data.backups.length === 0) {
+    body.innerHTML = "<tr><td colspan='5' class='muted'>No backups yet.</td></tr>";
+    return;
+  }
+  for (const backup of data.backups) {
+    const tr = document.createElement("tr");
+    const cell = (text) => {
+      const td = document.createElement("td");
+      td.textContent = text;
+      tr.appendChild(td);
+      return td;
+    };
+    cell(new Date(backup.created_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }));
+    cell(BACKUP_KIND_LABELS[backup.kind] || backup.kind);
+    cell(fmtBytes(backup.size_bytes));
+    cell(backup.includes_saves ? "Yes" : "No");
+    const actions = document.createElement("td");
+    actions.className = "row-actions";
+    const download = document.createElement("button");
+    download.type = "button";
+    download.textContent = "Download";
+    download.addEventListener("click", () => downloadWithAuth(`/api/backups/${encodeURIComponent(backup.name)}/download`, backup.name));
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "danger";
+    remove.textContent = "Delete";
+    remove.addEventListener("click", async () => {
+      if (!confirm(`Delete the backup ${backup.name}?`)) return;
+      try {
+        await api(`/api/backups/${encodeURIComponent(backup.name)}`, { method: "DELETE" });
+        await refreshBackups();
+      } catch (err) {
+        alert(`Could not delete: ${err.message}`);
+      }
+    });
+    actions.append(download, remove);
+    tr.appendChild(actions);
+    body.appendChild(tr);
+  }
+}
+
+for (const [id, field] of [["setting-backup-daily", "backup_daily"], ["setting-backup-saves", "backup_saves"]]) {
+  document.getElementById(id).addEventListener("change", async (e) => {
+    const box = e.target;
+    try {
+      await api("/api/settings", { method: "PUT", body: JSON.stringify({ [field]: box.checked }) });
+    } catch (err) {
+      box.checked = !box.checked;
+      alert(`Could not save: ${err.message}`);
+    }
+  });
+}
+
+document.getElementById("backup-now-btn").addEventListener("click", async () => {
+  const button = document.getElementById("backup-now-btn");
+  const status = document.getElementById("backup-now-status");
+  const saves = document.getElementById("backup-now-saves").checked;
+  button.disabled = true;
+  status.textContent = saves ? "Backing up, saves included: this can take a while..." : "Backing up...";
+  try {
+    const made = await api(`/api/backups?saves=${saves}`, { method: "POST" });
+    status.textContent = `Done: ${made.name} (${fmtBytes(made.size_bytes)}).`;
+  } catch (err) {
+    status.textContent = `The backup failed: ${err.message}`;
+  }
+  await refreshBackups();
+});
 
 // --- Debug logging (Settings > Libraries) ---
 
@@ -1753,6 +1848,7 @@ function resetGameTabs() {
   document.getElementById("tab-overview").hidden = false;
   document.getElementById("tab-install").hidden = true;
   document.getElementById("tab-files").hidden = true;
+  document.getElementById("tab-settings").hidden = true;
 }
 
 // What the game takes on the server: "40.0 GB (Installer 27.7 GB, Cache 12.3 GB, Saves 1.4 MB)", the empty parts left out. The server
@@ -1770,6 +1866,55 @@ async function loadGameSizes(gameId) {
     line.hidden = false;
   } catch (_) {
     // An older server has no such figure; the line just stays out.
+  }
+}
+
+// The Settings tab: the Proton build, winecfg changes and winetricks verbs the clients keep for the game, for all devices and for each one.
+async function loadLaunchSettings(gameId) {
+  const table = document.getElementById("launch-settings-table");
+  const empty = document.getElementById("launch-settings-empty");
+  const body = document.getElementById("launch-settings-body");
+  table.hidden = true;
+  empty.hidden = true;
+  body.replaceChildren();
+  let answer;
+  try {
+    answer = await api(`/api/games/${gameId}/launch-settings`);
+  } catch (_) {
+    empty.hidden = false; // an older server has no such settings
+    return;
+  }
+  if (!activeGame || activeGame.id !== gameId) return;
+  const rows = [];
+  if (answer.shared) rows.push({ label: "All devices", ...answer.shared });
+  for (const d of answer.devices || []) rows.push({ label: d.device.name, ...d });
+  empty.hidden = rows.length > 0;
+  table.hidden = rows.length === 0;
+  for (const row of rows) {
+    const tr = document.createElement("tr");
+    const cell = (text) => {
+      const td = document.createElement("td");
+      td.textContent = text;
+      tr.appendChild(td);
+      return td;
+    };
+    cell(row.label);
+    cell(row.proton || "Launcher's own");
+    const reg = cell(row.winecfg_reg ? "" : "Not changed");
+    if (row.winecfg_reg) {
+      const details = document.createElement("details");
+      const settings = row.winecfg_reg.split("\n").filter((l) => l.startsWith("[")).length;
+      const summary = document.createElement("summary");
+      summary.textContent = `${settings} key${settings === 1 ? "" : "s"} changed`;
+      const pre = document.createElement("pre");
+      pre.className = "reg-text";
+      pre.textContent = row.winecfg_reg;
+      details.append(summary, pre);
+      reg.appendChild(details);
+    }
+    cell(row.winetricks && row.winetricks.length ? row.winetricks.join(", ") : "None");
+    cell(new Date(row.updated_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }));
+    body.appendChild(tr);
   }
 }
 
@@ -1802,6 +1947,7 @@ async function openGamePage(id) {
   document.getElementById("game-title").textContent = game.name;
   document.getElementById("game-id-display").textContent = game.id;
   loadGameSizes(game.id);
+  loadLaunchSettings(game.id);
   renderLastPlayed(game);
   document.querySelector("#view-game .back-link").href = selectedLibraryId !== null ? `#library/${selectedLibraryId}` : "#";
   const libName = (libraries.find((l) => l.id === game.library_id) || {}).name || "";
@@ -2187,6 +2333,9 @@ function showCover(game) {
     coverImg.src = game.cover_path;
     coverImg.hidden = false;
     coverPlaceholder.hidden = true;
+  } else {
+    coverImg.hidden = true;
+    coverPlaceholder.hidden = false;
   }
 }
 
@@ -2296,7 +2445,93 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
+// The "Your own artwork" part of the edit form: a row per kind of artwork with what is used now, an upload and (for the person's
+// own upload) a way to take it away. An upload is used at once; Save in the form is for the text fields only.
+function renderEditMedia() {
+  const root = document.getElementById("edit-media");
+  const status = document.getElementById("edit-media-status");
+  root.replaceChildren();
+  for (const [kind, label, shape] of MEDIA_KINDS) {
+    const current = (activeGame.media || {})[kind] || {};
+    const row = document.createElement("div");
+    row.className = "edit-media-row";
+    const name = document.createElement("strong");
+    name.textContent = label;
+    const preview = document.createElement("div");
+    preview.className = `media-row media-${shape}`;
+    const tile = document.createElement("span");
+    tile.className = "media-choice";
+    if (current.url) {
+      const img = document.createElement("img");
+      img.src = current.url;
+      img.alt = "";
+      tile.appendChild(img);
+    } else {
+      tile.classList.add("media-none");
+      tile.textContent = "None";
+    }
+    preview.appendChild(tile);
+    const source = document.createElement("span");
+    source.className = "muted small";
+    source.textContent = current.url ? (current.source === "upload" ? "Your upload" : current.source === "igdb" ? "IGDB" : "SteamGridDB") : "";
+
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/png,image/jpeg,image/webp,image/gif";
+    input.hidden = true;
+    const upload = document.createElement("button");
+    upload.type = "button";
+    upload.textContent = "Upload...";
+    upload.addEventListener("click", () => input.click());
+    input.addEventListener("change", async () => {
+      const file = input.files[0];
+      if (!file) return;
+      status.textContent = `Uploading the ${label.toLowerCase()}...`;
+      const form = new FormData();
+      form.append("file", file);
+      try {
+        const resp = await fetch(`/api/games/${activeGame.id}/media/${kind}`, {
+          method: "POST",
+          headers: { Authorization: authHeader() },
+          body: form,
+        });
+        if (!resp.ok) throw new Error(await errorMessage(resp));
+        applyMediaChange(await resp.json());
+        status.textContent = `The ${label.toLowerCase()} is now your own image.`;
+      } catch (err) {
+        status.textContent = `Could not upload: ${err.message}`;
+      }
+    });
+    row.append(name, preview, source, upload, input);
+    if (current.source === "upload") {
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "danger";
+      remove.textContent = "Remove";
+      remove.addEventListener("click", async () => {
+        try {
+          applyMediaChange(await api(`/api/games/${activeGame.id}/media`, { method: "PUT", body: JSON.stringify({ [kind]: null }) }));
+          status.textContent = `The ${label.toLowerCase()} was removed. Scrape to get the providers' again.`;
+        } catch (err) {
+          status.textContent = `Could not remove: ${err.message}`;
+        }
+      });
+      row.appendChild(remove);
+    }
+    root.appendChild(row);
+  }
+}
+
+function applyMediaChange(updated) {
+  activeGame = { ...activeGame, media: updated.media, cover_path: updated.cover_path };
+  showCover(updated);
+  renderHeaderArt(activeGame);
+  renderEditMedia();
+}
+
 document.getElementById("edit-metadata-btn").addEventListener("click", () => {
+  renderEditMedia();
+  document.getElementById("edit-media-status").textContent = "";
   document.getElementById("edit-name").value = activeGame.name;
   document.getElementById("edit-summary").value = activeGame.summary || activeGame.igdb_metadata?.summary || "";
   document.getElementById("edit-igdb-id").value = activeGame.igdb_id ?? "";

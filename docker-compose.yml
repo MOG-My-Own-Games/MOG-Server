@@ -20,5 +20,7 @@ services:
       - ./data/library:/library:ro
       # Proton builds are downloaded on first use; keep them across rebuilds.
       - ./data/proton:/opt/proton
+      # Backups (daily, before an update, manual): a volume of their own, ideally on another disk. Without it backups are off.
+      - ./data/backups:/backups
   # Example library mount; add one volume line per folder you want scanned
   # as a library root, then point a Library's root_path at /library/<name>.

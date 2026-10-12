@@ -23,6 +23,8 @@ def row(**over):
         install_default_manual_mode=None,
         download_workers=None,
         debug_logging=None,
+        backup_daily=None,
+        backup_saves=None,
     )
     return SimpleNamespace(**{**base, **over})
 

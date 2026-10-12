@@ -118,6 +118,13 @@ in `endpoints/responses/`.
   embedded installer view permanently unauthenticated. Don't add
   `user: CurrentUser` back to `install_vnc_http`/`install_vnc_ws`.
 
+## Backups
+
+`handler/backups.py` makes the database, avatars/artwork (and, on request, saves) backups into the volume at `/backups`:
+daily (a scheduler thread, while the Settings switch is on), before an update (`startup._run_migrations` calls
+`backups.before_update()` ahead of `alembic upgrade head`) and manual (`POST /api/backups`). See `docs/BACKUPS.md`. A new
+table or folder with data only this server has belongs in them: add it to `backups.create` (and its test).
+
 ## Logging
 
 `LOGLEVEL` sets the level at start (`INFO` by default; the dev compose file sets `DEBUG`). The "Debug logging"

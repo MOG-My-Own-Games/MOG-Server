@@ -6,7 +6,7 @@ from fastapi import APIRouter
 from starlette.concurrency import run_in_threadpool
 
 from endpoints.responses.settings import SettingsSchema, SettingsUpdateForm, SettingsValidationSchema
-from handler import library_watcher, log_level
+from handler import backups, library_watcher, log_level
 from handler.auth import AdminUser
 from handler.database import db_settings_handler
 from handler.metadata import hltb_handler, igdb_handler, sgdb_handler
@@ -22,6 +22,9 @@ def _schema(row: Settings) -> SettingsSchema:
     fields["steamgriddb_enabled"] = sgdb_handler.enabled_in(row)
     fields["hltb_enabled"] = hltb_handler.enabled_in(row)
     fields["watch_libraries"] = library_watcher.enabled_in(row)
+    fields["debug_logging"] = log_level.enabled_in(row)
+    fields["backup_daily"] = backups.daily_enabled(row)
+    fields["backup_saves"] = backups.saves_in_daily(row)
     return SettingsSchema(**fields)
 
 
@@ -40,6 +43,8 @@ async def update_settings(user: AdminUser, data: SettingsUpdateForm) -> Settings
     row = db_settings_handler.update_settings(changes)
     if "install_cache_ttl_days" in changes:
         apply_default_ttl()
+    if "debug_logging" in changes:
+        log_level.apply(row)
     return _schema(row)
 
 

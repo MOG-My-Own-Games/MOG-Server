@@ -134,6 +134,12 @@
             <label class="field-label">IGDB ID (manual override)<input type="number" id="edit-igdb-id" placeholder="unset" /></label>
             <label class="field-label">SteamGridDB ID (manual override)<input type="number" id="edit-sgdb-id" placeholder="unset" /></label>
             <div class="metadata-search">
+              <h4>Your own artwork</h4>
+              <p class="muted small">Upload an image of your own for any kind of artwork (PNG, JPEG, WebP or GIF, up to 10 MiB). It is used at once, replaces the earlier choice of that kind and is not replaced by a scrape. Pick or clear provider artwork with Scrape.</p>
+              <div id="edit-media" class="edit-media"></div>
+              <p id="edit-media-status" class="muted small"></p>
+            </div>
+            <div class="metadata-search">
               <h4>IGDB</h4>
               <button id="igdb-search-btn" type="button">Search by name</button>
               <ul id="igdb-results" class="match-results"></ul>
@@ -158,6 +164,7 @@
             <button class="tab-btn active" data-tab="overview">Overview</button>
             <button class="tab-btn" data-tab="install">Install</button>
             <button class="tab-btn" data-tab="files">Files</button>
+            <button class="tab-btn" data-tab="settings">Settings</button>
           </nav>
 
           <!-- Overview tab -->
@@ -228,6 +235,19 @@
                 </div>
                 <p id="vnc-placeholder" class="muted">Starts automatically once the installer is running.</p>
               </div>
+            </div>
+          </div>
+
+          <!-- Settings tab: how clients launch the game (kept by the clients, see docs/INTEGRATION.md) -->
+          <div id="tab-settings" class="tab-panel" hidden>
+            <div class="card">
+              <h3>Launch settings</h3>
+              <p class="muted small">The Proton build, the winecfg changes and the winetricks verbs MOG Client keeps here for this game. A device uses its own entry and, for what that lacks, the one for all devices.</p>
+              <p id="launch-settings-empty" class="muted" hidden>Nothing is set for this game yet. Choose a Proton version, open winecfg or run winetricks from the game's Linux Options in MOG Client.</p>
+              <table id="launch-settings-table" class="data-table" hidden>
+                <thead><tr><th>For</th><th>Proton</th><th>winecfg</th><th>winetricks</th><th>Changed</th></tr></thead>
+                <tbody id="launch-settings-body"></tbody>
+              </table>
             </div>
           </div>
 
@@ -354,6 +374,7 @@
             <button class="tab-btn" data-settings-tab="cache">Install cache</button>
             <button class="tab-btn" data-settings-tab="missing">Missing games</button>
             <button class="tab-btn" data-settings-tab="providers">Metadata providers</button>
+            <button class="tab-btn" data-settings-tab="backups">Backups</button>
             <button class="tab-btn" data-settings-tab="users">Users</button>
           </nav>
 
@@ -530,6 +551,40 @@
 
             <p class="muted small">Keys are saved as you finish typing (when you leave a field or press Enter).</p>
             <p id="api-keys-saved" class="muted small" role="status"></p>
+          </div>
+
+          <div id="settings-tab-backups" class="tab-panel" hidden>
+            <div class="card">
+              <h3>Backups</h3>
+              <p id="backups-volume" class="muted small"></p>
+              <p id="backups-error" class="error" hidden></p>
+              <div class="toggle-row">
+                <div><strong>Daily backup</strong><p id="backups-daily-hint" class="muted small"></p></div>
+                <label class="switch"><input type="checkbox" id="setting-backup-daily" aria-label="Daily backup" /><span class="slider"></span></label>
+              </div>
+              <div class="toggle-row">
+                <div><strong>Include the saves in the daily backup</strong><p class="muted small">The saves can be large; each daily backup would hold a copy. Off by default. A backup before an update holds the database alone.</p></div>
+                <label class="switch"><input type="checkbox" id="setting-backup-saves" aria-label="Include the saves in the daily backup" /><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="card">
+              <h3>Back up now</h3>
+              <p class="muted small">A manual backup holds the database, the avatars and the artwork you uploaded; the install caches and the image cache are not in it, as they can be made again.</p>
+              <div class="toggle-row">
+                <div><strong>Include the saves</strong></div>
+                <label class="switch"><input type="checkbox" id="backup-now-saves" aria-label="Include the saves" /><span class="slider"></span></label>
+              </div>
+              <div class="page-actions"><button type="button" id="backup-now-btn">Back up now</button></div>
+              <p id="backup-now-status" class="muted small"></p>
+            </div>
+            <div class="card">
+              <h3>Backups made</h3>
+              <table id="backups-table" class="data-table">
+                <thead><tr><th>When</th><th>Kind</th><th>Size</th><th>Saves</th><th></th></tr></thead>
+                <tbody id="backups-table-body"></tbody>
+              </table>
+              <p class="muted small">To restore one, stop the server, unpack it over the data volume (its <code>mog.db</code> is the database) and start it again.</p>
+            </div>
           </div>
 
           <div id="settings-tab-users" class="tab-panel" hidden>

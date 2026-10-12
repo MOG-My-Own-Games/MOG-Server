@@ -260,7 +260,7 @@ def _windows_installer_path(installer_abs: Path, installer_search_root: Path, di
     would otherwise only be able to resolve through z: - the entire reason
     z: gets removed there in the first place.
     """
-    rel = installer_abs.relative_to(installer_search_root).as_posix().replace("/", "\\")
+    rel = installer_abs.relative_to(disc_source or installer_search_root).as_posix().replace("/", "\\")
     root = "D:" if disc_source is not None else f"C:\\{_SOURCE_LINK_NAME}"
     return f"{root}\\{rel}"
 
@@ -360,6 +360,18 @@ def _init_wine_prefix(
 # so it stays reachable purely via c: once z: is gone (see
 # _configure_drive_letters and _windows_installer_path).
 _SOURCE_LINK_NAME = ".mog-source"
+
+
+def _disc_root(extract_root: Path, installer: Path) -> Path:
+    """What d: shows. An installer taken out of a disc image inside the archive sits in that image's own folder
+    (`<image>.extracted`), and a real disc has its setup at the root of the drive, where installers look for their
+    sibling files (a setup.res, a data folder); so d: is that folder. Anything else keeps the whole extraction."""
+    try:
+        first = installer.relative_to(extract_root).parts[0]
+    except (ValueError, IndexError):
+        return extract_root
+    nested = extract_root / first
+    return nested if first.endswith(".extracted") and nested.is_dir() else extract_root
 
 
 def _configure_drive_letters(
@@ -593,6 +605,8 @@ def _run_install(install_session_id: int, attempt: int = 1) -> bool:
     # directly by the installer itself, in another - the same suffix, two
     # unrelated things, and nothing here ever mounts the second kind.
     disc_source: Path | None = extract_root if extract_temp_dir is not None else None
+    if disc_source is not None:
+        disc_source = _disc_root(disc_source, Path(installer_abs))
     log.debug(
         f"Install session {install_session_id} attempt {attempt}: installer {installer_abs}, "
         f"source {source_abs}, {installer_bytes} bytes, search root {installer_search_root}"
@@ -706,6 +720,8 @@ def _run_install(install_session_id: int, attempt: int = 1) -> bool:
             extra_env=extra_env,
             installer_search_root=str(installer_search_root),
             games_fallback_dir=str(games_dir),
+            # From a disc, the setup starts in its own folder, as when run from its drive.
+            chdir=str(Path(installer_abs).parent) if disc_source is not None and _uses_wine(installer_abs) else None,
         )
 
         log.info(f"Launching installer for session {hl(str(install_session_id))} via {hl('Proton' if is_proton else 'Wine')}")
@@ -1206,6 +1222,7 @@ def _wrap_for_sandbox(
     extra_env: tuple[tuple[str, str], ...] = (),
     installer_search_root: str | None = None,
     games_fallback_dir: str | None = None,
+    chdir: str | None = None,
 ) -> list[str]:
     """Wrap the inner command in bubblewrap unless the sandbox is disabled."""
     if not INSTALL_SANDBOX_ENABLED:
@@ -1234,6 +1251,7 @@ def _wrap_for_sandbox(
         ro_binds=ro_binds,
         extra_env=extra_env,
         games_fallback_dir=games_fallback_dir,
+        chdir=chdir,
     )
     argv = build_bwrap_command(spec, inner)
     log.debug(f"Sandbox command: {shlex.join(argv)}")

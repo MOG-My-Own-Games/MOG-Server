@@ -42,6 +42,9 @@ class SandboxSpec:
     # STEAM_COMPAT_DATA_PATH/STEAM_COMPAT_CLIENT_INSTALL_PATH - it computes
     # its real wine prefix from the former rather than WINEPREFIX itself).
     extra_env: tuple[tuple[str, str], ...] = field(default_factory=tuple)
+    # Where the installer starts, when that is not the work dir: a CD installer looks for its own files in the current
+    # directory (as it is when the disc's setup is started from its drive), and the work dir has none of them.
+    chdir: str | None = None
 
 
 def build_bwrap_command(
@@ -141,7 +144,7 @@ def build_bwrap_command(
         args += ["--setenv", "WINEPREFIX", spec.proton_prefix]
     for key, value in spec.extra_env:
         args += ["--setenv", key, value]
-    args += ["--chdir", spec.work_dir]
+    args += ["--chdir", spec.chdir or spec.work_dir]
 
     args.append("--")
     args += inner_command

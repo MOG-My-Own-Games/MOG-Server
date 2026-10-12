@@ -20,6 +20,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from handler.database import db_user_handler
+from logger.logger import log
 from models.user import User
 
 _security = HTTPBasic()

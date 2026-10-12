@@ -93,6 +93,7 @@ def store_version(
         raise
     latest = db_saves_handler.get_latest(user_id, game_id, device_id)
     if latest is not None and latest.content_hash == info.content_hash:
+        log.debug(f"Saves: game {game_id} device {device_id} upload identical to version {latest.id}, not stored")
         incoming.unlink(missing_ok=True)
         return latest, False
 

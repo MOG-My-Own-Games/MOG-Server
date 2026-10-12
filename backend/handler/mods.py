@@ -170,6 +170,7 @@ def start_zip(game_id: int, mod: Mod, user_id: int, on_done=None) -> ZipJob:
             return job
         job = ZipJob(bytes_total=mod.size_bytes, fingerprint=fingerprint, user_id=user_id)
         _jobs[key] = job
+    log.debug(f"Mods: zipping {mod.name!r} of game {game_id} ({mod.size_bytes} bytes)")
     threading.Thread(target=_run_zip, args=(game_id, mod, job, on_done), daemon=True, name=f"zip-mod-{game_id}").start()
     return job
 

@@ -16,6 +16,7 @@ from pathlib import Path, PurePosixPath
 from handler.database import db_game_handler
 from handler.filesystem.installer_detection import is_addon_folder, is_base_installer
 from handler.mods import has_mods
+from logger.logger import log
 from models.game import Game
 from models.library import Library
 

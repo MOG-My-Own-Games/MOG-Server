@@ -366,14 +366,19 @@ async def cancel_install(
 
 
 @router.delete("/{id}/install")
-async def clear_install(user: CurrentUser, id: Annotated[int, PathVar(ge=1)], session_id: int | None = None) -> None:
+async def clear_install(
+    user: CurrentUser, id: Annotated[int, PathVar(ge=1)], session_id: int | None = None
+) -> InstallCacheClearSchema:
+    """Delete the game's install cache and forget its session. `cleared` is 1 when there was one and 0 when there was
+    none: a cache that is already gone is not an error, since it is what was asked for."""
     session = _resolve_session(id, user.id, session_id)
     if session is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        return InstallCacheClearSchema(cleared=0)
     if session.state in RUNNING_INSTALL_STATES:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Install is still running")
     clear_session_cache(session.id)
     db_install_session_handler.delete_session(session.id)
+    return InstallCacheClearSchema(cleared=1)
 
 
 @router.get("/{id}/install/stream/manifest")

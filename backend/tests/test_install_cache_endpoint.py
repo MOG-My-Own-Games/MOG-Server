@@ -43,3 +43,36 @@ def test_one_zipped_mod_can_be_deleted_and_a_missing_one_is_a_404(cache):
 def test_all_zipped_mods_can_be_cleared(cache):
     (cache / "mod2.zip").write_bytes(b"y")
     assert asyncio.run(install.clear_mod_cache(SimpleNamespace())).cleared == 2
+
+
+# --- a game's own cache -----------------------------------------------------------------------------
+
+
+def _session(monkeypatch, found):
+    cleared, deleted = [], []
+    monkeypatch.setattr(install, "_resolve_session", lambda game_id, user_id, session_id: found)
+    monkeypatch.setattr(install, "clear_session_cache", cleared.append)
+    monkeypatch.setattr(install.db_install_session_handler, "delete_session", deleted.append)
+    return cleared, deleted
+
+
+def test_deleting_the_cache_of_a_game_that_has_none_says_so_instead_of_a_404(monkeypatch):
+    """Regression test: a client asking to delete a game's server cache that was already gone got a 404 and showed it as an
+    error. Nothing to delete is the answer `cleared: 0`."""
+    cleared, deleted = _session(monkeypatch, None)
+    result = asyncio.run(install.clear_install(SimpleNamespace(id=1), 5))
+    assert result.cleared == 0 and cleared == [] and deleted == []
+
+
+def test_deleting_the_cache_of_a_game_that_has_one_says_one_was_cleared(monkeypatch):
+    cleared, deleted = _session(monkeypatch, SimpleNamespace(id=9, state="done"))
+    result = asyncio.run(install.clear_install(SimpleNamespace(id=1), 5))
+    assert result.cleared == 1 and cleared == [9] and deleted == [9]
+
+
+def test_a_cache_in_use_is_still_refused(monkeypatch):
+    state = sorted(install.RUNNING_INSTALL_STATES, key=str)[0]
+    _session(monkeypatch, SimpleNamespace(id=9, state=state))
+    with pytest.raises(HTTPException) as err:
+        asyncio.run(install.clear_install(SimpleNamespace(id=1), 5))
+    assert err.value.status_code == 409

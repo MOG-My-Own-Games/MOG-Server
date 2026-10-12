@@ -272,7 +272,9 @@ An installer that stops before its install (it exits with a non-zero code after 
 not your download's progress: compute that from what you have on disk.
 
 Poll about every **3 seconds**. Cancel with `POST /api/games/{id}/install/cancel` (the session fails with
-"Cancelled" and its cache is cleared), and forget a finished one with `DELETE /api/games/{id}/install`.
+"Cancelled" and its cache is cleared), and forget a finished one with `DELETE /api/games/{id}/install`. That answers 200 with `cleared`: `1` when the game had an
+install cache that was deleted, `0` when it had none (not an error: it is what was asked for); `409` while an install of it
+is still running.
 `GET /api/games/install/active` lists the user's installs in progress, for a dashboard: the running ones first, then the
 `queued` ones in the order they will start.
 

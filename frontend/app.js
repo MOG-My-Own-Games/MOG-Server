@@ -526,6 +526,7 @@ async function openSettingsPage(subTab) {
     document.getElementById("setting-cache-ttl").value = apiSettings.install_cache_ttl_days ?? "";
     applyProviderToggles(apiSettings);
     document.getElementById("setting-watch-libraries").checked = apiSettings.watch_libraries !== false;
+    document.getElementById("setting-debug-logging").checked = apiSettings.debug_logging === true;
     document.getElementById("proton-default-saved").textContent = "";
     await refreshProtonBuildsTable(apiSettings.install_default_proton_build || "");
   } catch (_) {
@@ -537,6 +538,18 @@ async function openSettingsPage(subTab) {
   await refreshProviderValidityBadges();
   await refreshUsersTable();
 }
+
+// --- Debug logging (Settings > Libraries) ---
+
+document.getElementById("setting-debug-logging").addEventListener("change", async (e) => {
+  const box = e.target;
+  try {
+    await api("/api/settings", { method: "PUT", body: JSON.stringify({ debug_logging: box.checked }) });
+  } catch (err) {
+    box.checked = !box.checked;
+    alert(`Could not save: ${err.message}`);
+  }
+});
 
 // --- Watching the library folders (Settings > Libraries) ---
 

@@ -6,7 +6,7 @@ from fastapi import APIRouter
 from starlette.concurrency import run_in_threadpool
 
 from endpoints.responses.settings import SettingsSchema, SettingsUpdateForm, SettingsValidationSchema
-from handler import library_watcher
+from handler import library_watcher, log_level
 from handler.auth import AdminUser
 from handler.database import db_settings_handler
 from handler.metadata import hltb_handler, igdb_handler, sgdb_handler

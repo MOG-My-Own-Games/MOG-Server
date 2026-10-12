@@ -12,7 +12,8 @@ from config import (
     SAVES_BASE_PATH,
 )
 from handler.auth import hash_password, verify_password
-from handler.database import db_install_session_handler, db_user_handler
+from handler import log_level
+from handler.database import db_install_session_handler, db_settings_handler, db_user_handler
 from handler.install.runner import dispatch_queue
 from logger.logger import log
 from models.install_session import InstallSessionState

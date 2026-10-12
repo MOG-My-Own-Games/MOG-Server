@@ -37,6 +37,9 @@ class Settings(BaseModel):
     # Whether the library folders are watched for games added, removed or renamed on disk. NULL means on
     # (or whatever LIBRARY_WATCH_INTERVAL says, see handler/library_watcher.py).
     watch_libraries: Mapped[bool | None] = mapped_column(Boolean, default=None)
+    # Whether the log carries DEBUG lines. NULL means on only when LOGLEVEL=DEBUG in the environment
+    # (see handler/log_level.py).
+    debug_logging: Mapped[bool | None] = mapped_column(Boolean, default=None)
     # Days an install cache survives before auto-eviction. NULL falls back to
     # config.INSTALL_CACHE_DEFAULT_TTL_DAYS; 0 means unlimited (see
     # utils/install_cache.py's resolve_expires_at).

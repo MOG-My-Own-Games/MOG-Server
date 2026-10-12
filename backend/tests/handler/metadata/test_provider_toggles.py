@@ -22,6 +22,7 @@ def row(**over):
         install_default_auto_mode=None,
         install_default_manual_mode=None,
         download_workers=None,
+        debug_logging=None,
     )
     return SimpleNamespace(**{**base, **over})
 
@@ -140,3 +141,21 @@ def test_a_provider_with_no_key_is_not_called_whoever_asks(stored, monkeypatch):
     stored["row"] = row(steamgriddb_api_key=None, igdb_client_id=None)
     result = asyncio.run(settings_endpoint.validate_settings(SimpleNamespace()))
     assert called == [] and (result.igdb_valid, result.steamgriddb_valid) == (None, None)
+
+
+def test_turning_debug_logging_on_through_the_settings_changes_the_log_level(stored, monkeypatch):
+    import logging
+
+    from handler import log_level
+    from logger.logger import log
+
+    before = log.level
+    monkeypatch.setattr(log_level, "LOGLEVEL", "INFO")
+    monkeypatch.setattr(settings_endpoint.db_settings_handler, "update_settings", lambda changes: row(**changes))
+    try:
+        form = settings_endpoint.SettingsUpdateForm(debug_logging=True)
+        result = asyncio.run(settings_endpoint.update_settings(SimpleNamespace(), form))
+
+        assert result.debug_logging is True and log.isEnabledFor(logging.DEBUG)
+    finally:
+        log.setLevel(before)

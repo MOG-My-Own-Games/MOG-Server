@@ -14,6 +14,7 @@ class SettingsSchema(BaseModel):
     steamgriddb_enabled: bool
     hltb_enabled: bool
     watch_libraries: bool
+    debug_logging: bool
     install_cache_ttl_days: int | None
     install_default_proton_build: str | None
     install_default_auto_mode: bool | None

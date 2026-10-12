@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -45,6 +47,17 @@ app.include_router(users.router, prefix="/api")
 @app.get("/api/health")
 async def health() -> dict:
     return {"status": "ok", "version": MOG_VERSION}
+
+
+@app.middleware("http")
+async def log_requests(request, call_next):
+    """One DEBUG line per API request; never headers or bodies, which carry credentials."""
+    if not log.isEnabledFor(logging.DEBUG) or not request.url.path.startswith("/api"):
+        return await call_next(request)
+    started = time.monotonic()
+    response = await call_next(request)
+    log.debug(f"{request.method} {request.url.path} -> {response.status_code} ({(time.monotonic() - started) * 1000:.0f} ms)")
+    return response
 
 
 @app.middleware("http")

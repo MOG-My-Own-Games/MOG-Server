@@ -152,3 +152,17 @@ def test_a_restored_save_notifies_its_user_and_says_where_it_came_from(games, st
 
     store.add_notification.side_effect = RuntimeError("db down")
     notifications.notify_save_restored(3, 5, "deck", None, 1)  # never fails the request
+
+
+@patch("handler.notifications.db_notification_handler")
+@patch("handler.notifications.db_game_handler")
+@patch("handler.notifications.db_install_session_handler")
+def test_small_install_notifies_with_the_exit_code(sessions, games, store):
+    sessions.get_session.return_value = _session()
+    games.get_game.return_value = SimpleNamespace(name="Some Game")
+
+    notifications.notify_install_small(7, 1000, 5000, 253)
+
+    note = store.add_notification.call_args.args[0]
+    assert (note.user_id, note.kind, note.game_id) == (3, "install_small", 5)
+    assert "253" in note.body and "Some Game" in note.title

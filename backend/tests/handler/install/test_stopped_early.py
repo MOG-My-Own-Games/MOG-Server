@@ -70,3 +70,21 @@ def test_a_games_folder_already_on_the_disc_is_left_alone(tmp_path):
     (tmp_path / "Games").mkdir()
     runner._route_disc_games_dir(tmp_path)
     assert not (tmp_path / "Games").is_symlink()
+
+
+@pytest.mark.parametrize(
+    ("installed", "installer", "expected"),
+    [(10, 100, True), (100, 100, False), (200, 100, False), (10, None, False), (10, 0, False)],
+)
+def test_smaller_than_installer_only_when_the_installer_size_is_known(installed, installer, expected):
+    assert runner.is_smaller_than_installer(installed, installer) is expected
+
+
+def test_small_install_only_warns_and_never_fails_the_session(monkeypatch):
+    warned = []
+    monkeypatch.setattr(runner, "notify_install_small", lambda *args: warned.append(args))
+
+    runner._warn_if_smaller_than_installer(4, 10, 100, 1)
+    runner._warn_if_smaller_than_installer(4, 500, 100, 0)
+
+    assert warned == [(4, 10, 100, 1)]

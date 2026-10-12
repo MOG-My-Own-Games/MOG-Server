@@ -10,6 +10,7 @@ from models.notification import (
     KIND_AUTO_MODE_FAILED,
     KIND_AUTO_MODE_STUCK,
     KIND_GAMES_ADDED,
+    KIND_INSTALL_SMALL,
     KIND_MOD_DOWNLOADED,
     KIND_MOD_FAILED,
     KIND_MOD_READY,
@@ -58,6 +59,25 @@ def notify_auto_mode_stuck(install_session_id: int, detail: str | None) -> None:
         game_id=session.game_id,
         session_id=session.id,
     )
+
+
+def notify_install_small(install_session_id: int, installed: int, installer: int, exit_code: int | None) -> None:
+    """The install finished but is smaller than what it came from: the installer may have stopped on the way."""
+    session = db_install_session_handler.get_session(install_session_id)
+    if session is None:
+        return
+    how = f"The installer exited with code {exit_code}. " if exit_code not in (None, 0) else ""
+    try:
+        notify(
+            session.user_id,
+            KIND_INSTALL_SMALL,
+            f"Install smaller than its installer: {_game_name(session.game_id)}",
+            f"{how}Installed {installed:,} bytes from {installer:,}. It may be incomplete.",
+            game_id=session.game_id,
+            session_id=session.id,
+        )
+    except Exception as e:  # noqa: BLE001 - a failed notification must not fail a finished install
+        log.warning(f"Could not create the small install notification: {e}")
 
 
 def notify_auto_mode_failed(install_session_id: int, error: str) -> None:

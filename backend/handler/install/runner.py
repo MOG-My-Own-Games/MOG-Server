@@ -47,7 +47,7 @@ from handler.filesystem import fs_game_handler
 from handler.install.archive_prescan import extract_and_rescan, is_archive_candidate, source_phase, unwrap_platform_builds
 from utils.archives import extract_archive
 from handler.install.auto_mode.runtime import start_auto_mode
-from handler.notifications import notify_auto_mode_failed
+from handler.notifications import notify_auto_mode_failed, notify_install_small
 from handler.install.manifest import (
     LIVE_MANIFEST_FILENAME,
     MANIFEST_FILENAME,
@@ -524,6 +524,7 @@ def _run_install(install_session_id: int, attempt: int = 1) -> bool:
         return False
 
     extract_temp_dir: TemporaryDirectory[str] | None = None
+    source_abs: Path | None = None
     try:
         if source_rel is None:
             installer_abs = fs_game_handler.resolve_installer_abs_path(game, inner_installer or "")
@@ -747,10 +748,15 @@ def _run_install(install_session_id: int, attempt: int = 1) -> bool:
         _enter_streaming(install_session_id, vnc)
         vnc = None
         if native:
-            _finalize_native_install(install_session_id, work_dir)
+            _finalize_native_install(install_session_id, work_dir, exit_code, installer_bytes)
         else:
             _finalize_install(
-                install_session_id, _wine_drive_c_root(prefix_dir, proton_or_wine), work_dir, windows_baseline, exit_code
+                install_session_id,
+                _wine_drive_c_root(prefix_dir, proton_or_wine),
+                work_dir,
+                windows_baseline,
+                exit_code,
+                installer_bytes,
             )
     except InstallStoppedEarly as e:
         session = db_install_session_handler.get_session(install_session_id)
@@ -827,7 +833,9 @@ def _is_installer_leftover(path: Path) -> bool:
     return path.name.startswith("uninstall-") and path.suffix == ".sh" and (path.parent / ".mojosetup").is_dir()
 
 
-def _finalize_native_install(install_session_id: int, work_dir: Path) -> None:
+def _finalize_native_install(
+    install_session_id: int, work_dir: Path, exit_code: int | None = None, installer_bytes: int | None = None
+) -> None:
     """Take what a native installer wrote under its HOME as the install: the game's folder (below "GOG Games"
     when that is where it all went) is moved up to the top of the cache, as for a Windows install, hashed and
     listed. Raises when there is nothing, so the caller marks the session failed."""
@@ -860,6 +868,7 @@ def _finalize_native_install(install_session_id: int, work_dir: Path) -> None:
             "bytes_total": manifest_total_bytes(entries),
         },
     )
+    _warn_if_smaller_than_installer(install_session_id, manifest_total_bytes(entries), installer_bytes, exit_code)
 
 
 def _files_under(files: list[Path], root: Path) -> list[Path]:

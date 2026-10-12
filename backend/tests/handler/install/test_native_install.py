@@ -79,7 +79,7 @@ def native(monkeypatch, tmp_path):
         (tmp / "selfgz1234" / "mojosetup").write_bytes(b"z" * 10)
 
     monkeypatch.setattr(runner, "db_install_session_handler", db)
-    monkeypatch.setattr(runner.db_game_handler, "get_game", lambda _id: SimpleNamespace(id=3))
+    monkeypatch.setattr(runner.db_game_handler, "get_game", lambda _id: SimpleNamespace(id=3, size_bytes=None))
     monkeypatch.setattr(
         runner.fs_game_handler, "resolve_installer_abs_path", lambda game, rel: str(installer)
     )

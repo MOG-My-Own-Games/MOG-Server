@@ -481,9 +481,9 @@ document.getElementById("avatar-upload-input").addEventListener("change", async 
 async function getInstallDefaults() {
   try {
     const d = await api("/api/games/install/defaults");
-    return { autoMode: d.auto_mode, manualMode: d.manual_mode, downloadWorkers: d.download_workers };
+    return { autoMode: d.auto_mode, downloadWorkers: d.download_workers };
   } catch (_) {
-    return { autoMode: false, manualMode: false, downloadWorkers: 4 };
+    return { autoMode: false, downloadWorkers: 4 };
   }
 }
 
@@ -498,11 +498,9 @@ async function openSettingsPage(subTab) {
 
   const s = await getInstallDefaults();
   document.getElementById("setting-auto-mode").checked = s.autoMode;
-  document.getElementById("setting-manual-mode").checked = s.manualMode;
   document.getElementById("setting-download-workers").value = s.downloadWorkers;
   document.getElementById("download-workers-saved").textContent = "";
   document.getElementById("setting-auto-mode").onchange = saveInstallDefaults;
-  document.getElementById("setting-manual-mode").onchange = saveInstallDefaults;
   const groupToggle = document.getElementById("setting-group-games");
   groupToggle.checked = groupGamesEnabled();
   groupToggle.onchange = () => {
@@ -1001,7 +999,6 @@ async function saveInstallDefaults() {
       method: "PUT",
       body: JSON.stringify({
         install_default_auto_mode: document.getElementById("setting-auto-mode").checked,
-        install_default_manual_mode: document.getElementById("setting-manual-mode").checked,
       }),
     });
   } catch (_) {
@@ -2005,7 +2002,6 @@ async function openGamePage(id) {
 
   getInstallDefaults().then((defaults) => {
     document.getElementById("auto-mode-check").checked = defaults.autoMode;
-    document.getElementById("manual-mode-check").checked = defaults.manualMode;
   });
   document.getElementById("ttl-days-input").value = "";
   installQueue = [];
@@ -3018,7 +3014,6 @@ function askExtractAsIs(pick) {
 async function startInstall(candidate) {
   const body = {
     auto_mode: document.getElementById("auto-mode-check").checked,
-    manual_mode: document.getElementById("manual-mode-check").checked,
     proton_build: document.getElementById("proton-build-select").value || null,
   };
   const ttlRaw = document.getElementById("ttl-days-input").value;

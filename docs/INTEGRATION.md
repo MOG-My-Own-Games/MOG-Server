@@ -217,6 +217,8 @@ itself. What MOG Client does with that: A release packed once per system (a `-pc
 1. **A game that is an archive with no installer inside:** ask the user "no installer was found in X: extract its
    contents and use them as they are?". Yes starts with `extract_only: true`; No starts with `extract_only: false`
    and the server runs what it finds inside as an installer, as before.
+   If it then finds nothing to run (for example a disc image it cannot open), the session no longer fails: it
+   switches itself to `extract_only` and unpacks the archive as it is, unless a specific installer was named.
 2. **A game that is a folder with no installer in it:** the server does not run any executable by itself. The
    session waits in `awaiting_installer`, and the client shows the folder's executables together with a
    **"Just extract"** entry (start with `extract_only: true` and no file named) so the user can choose.

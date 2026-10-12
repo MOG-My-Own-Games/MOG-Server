@@ -240,6 +240,33 @@ def test_a_missing_source_file_fails_cleanly(env, monkeypatch):
     assert env.db.session.state == InstallSessionState.FAILED and "not there" in env.db.session.error
 
 
+def test_an_archive_with_nothing_runnable_is_extracted_as_it_is_instead_of_failing(env, monkeypatch):
+    """Regression test: a zip holding only a CD image 7-Zip cannot open (a .bin/.cue of raw sectors) listed as a disc
+    image to unpack, the unpacking found nothing, and the session failed telling the person to start again and pick
+    "extract as it is". With no installer asked for, that is now done at once."""
+    env.db.session.source_path = "Hearthlands.rar"
+    env.db.session.installer_path = None
+    env.db.session.extract_only = False
+    monkeypatch.setattr(runner.db_game_handler, "get_game", lambda _id: SimpleNamespace(fs_name="Hearthlands"))
+    env.db.session.game_id = 1
+    monkeypatch.setattr(runner, "extract_and_rescan", lambda source, inner: None)
+    monkeypatch.setattr(runner, "extract_archive", extractor({"Hearthlands.bin": b"x" * 4}))
+    assert runner._run_install(1) is False
+    assert env.db.session.state == InstallSessionState.DONE and env.db.session.extract_only is True
+    assert [e.path for e in read_manifest(env.work)] == ["Hearthlands.bin"]
+
+
+def test_a_named_installer_that_is_not_in_the_archive_still_fails(env, monkeypatch):
+    env.db.session.source_path = "Hearthlands.rar"
+    env.db.session.installer_path = "setup.exe"
+    env.db.session.extract_only = False
+    env.db.session.game_id = 1
+    monkeypatch.setattr(runner.db_game_handler, "get_game", lambda _id: SimpleNamespace(fs_name="Hearthlands"))
+    monkeypatch.setattr(runner, "extract_and_rescan", lambda source, inner: None)
+    assert runner._run_install(1) is False
+    assert env.db.session.state == InstallSessionState.FAILED and "Nothing recognizable" in env.db.session.error
+
+
 # --- the start endpoint -----------------------------------------------------------------------------
 
 

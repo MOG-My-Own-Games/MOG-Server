@@ -535,6 +535,13 @@ def _run_install(install_session_id: int, attempt: int = 1) -> bool:
                 {"phase": source_phase(source_abs).value, "phase_detail": source_abs.name},
             )
             result = extract_and_rescan(source_abs, inner_installer)
+            if result is None and not inner_installer:
+                # Nothing to run in it (a disc image 7-Zip cannot open, a folder of data): what the person would
+                # have chosen anyway, so it is taken as it is instead of failing and asking them to start again.
+                log.info(f"Nothing recognizable as an installer inside {source_abs.name}: extracting it as it is")
+                db_install_session_handler.update_session(install_session_id, {"extract_only": True})
+                _run_extract_only(install_session_id, game, source_rel)
+                return False
             if result is None:
                 _fail(
                     install_session_id,

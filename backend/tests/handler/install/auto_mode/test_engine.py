@@ -128,3 +128,43 @@ class TestAbortPage:
         action, _ = plan_action(words, CATALOG, ScreenMemory())
         assert action is not None
         assert action.match.entry.category == "agree"
+
+
+class TestOldGogEulaPage:
+    def _page(self, *tail: str) -> list[Word]:
+        words = [
+            _word("End User License Agreement", line=0),
+            _word("Yes, I have read and accept EULA", line=1),
+            _word("Save as .txt", line=2),
+        ]
+        return words + [_word(t, line=3 + i, left=400) for i, t in enumerate(tail)]
+
+    def test_accepts_then_closes(self):
+        words = self._page("Close")
+        memory = ScreenMemory()
+        steps = []
+        for _ in range(2):
+            action, _ = plan_action(words, CATALOG, memory)
+            assert action is not None
+            steps.append(action.match.entry.category)
+            memory.attempts[action.memory_key] = memory.attempts.get(action.memory_key, 0) + 1
+        assert steps == ["agree", "close"]
+
+    def test_close_is_ignored_without_save_as_txt(self):
+        action, _ = plan_action([_word("Setup is complete", line=0), _word("Close", line=1)], CATALOG, ScreenMemory())
+        assert action is None
+
+
+class TestToggleClickPoint:
+    def test_accept_toggle_is_not_clicked_on_the_eula_link(self):
+        """Regression test: the accept sentence ends with "EULA", a link that opens the license text. Clicking the middle of
+        a wide sentence landed on it and opened the EULA window instead of selecting the radio."""
+        words = [
+            Word("Yes, I have read and accept EULA", left=100, top=0, width=300, height=14, conf=95.0, line_id=(0, 0, 0)),
+            Word("Save as .txt", left=100, top=30, width=80, height=14, conf=95.0, line_id=(1, 0, 0)),
+        ]
+        action, _ = plan_action(words, CATALOG, ScreenMemory())
+        assert action is not None
+        assert action.match.entry.toggle
+        assert action.kind == "click"
+        assert 100 <= action.x <= 100 + 3 * 14

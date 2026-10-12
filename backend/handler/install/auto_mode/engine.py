@@ -11,6 +11,9 @@ from .matcher import Match, Word, find_matches, is_exact, screen_lines
 # Two OCR line sets at least this similar (Jaccard) are the same installer page.
 SAME_SCREEN_THRESHOLD = 0.7
 MAX_ATTEMPTS_PER_BUTTON = 2
+# A toggle sentence is clicked this many text heights from its left end. Its last word can be a link ("... accept
+# EULA" opens the license text), so the middle or the end of the line is not a safe place to click.
+TOGGLE_CLICK_OFFSET = 1.0
 
 # Lower is pressed first. Agree entries are only ever used on license pages.
 _PRIORITY = {
@@ -22,6 +25,7 @@ _PRIORITY = {
     "next": 3,
     "agree": 4,
     "option": 4,
+    "close": 4,
 }
 
 
@@ -97,6 +101,11 @@ def is_complete_page(lines: list[str], catalog: Catalog) -> bool:
     return _phrase_present(lines, catalog.complete_keywords)
 
 
+def is_eula_save_page(lines: list[str], catalog: Catalog) -> bool:
+    """An older GOG installer's EULA page: "Save as .txt" and Close, with no Next."""
+    return _phrase_present(lines, catalog.eula_save_keywords)
+
+
 def is_abort_page(lines: list[str], catalog: Catalog) -> bool:
     """A "close the installer?" confirmation. Answering Yes there ends the install, so only its No may be pressed."""
     return _phrase_present(lines, catalog.abort_keywords)
@@ -129,10 +138,13 @@ def plan_action(
     agree_allowed = license_page or is_confirm_page(lines, catalog)
     complete_page = is_complete_page(lines, catalog)
     abort_page = is_abort_page(lines, catalog)
+    close_allowed = is_eula_save_page(lines, catalog)
 
     ranked: list[tuple[tuple[int, int, int], Match, str, int]] = []
     for m in matches:
         if abort_page != (m.entry.category == "decline"):
+            continue
+        if m.entry.category == "close" and not close_allowed:
             continue
         if m.entry.category == "agree" and not agree_allowed:
             continue
@@ -162,6 +174,8 @@ def plan_action(
     if attempts >= 1 and match.entry.mnemonic:
         return Action("key", 0, 0, match.entry.mnemonic, match, key), matches
     x, y = match.center
+    if match.entry.toggle:
+        x = match.left + min(match.width // 2, round(match.height * TOGGLE_CLICK_OFFSET))
     if attempts >= 1 and match.entry.toggle:
         # Retry on the radio/checkbox glyph itself, left of its label.
         x = match.left - max(match.height, 8)

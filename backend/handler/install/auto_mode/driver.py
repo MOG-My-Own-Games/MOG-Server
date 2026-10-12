@@ -182,7 +182,7 @@ def _needs_deep_pass(words: list[Word], catalog: Catalog) -> bool:
     # t want" in a description) is no button, and it must not stop the closer passes that would read the real Install.
     if not is_abort_page(screen_lines(words), catalog):
         categories.discard("decline")
-    if not categories & {"next", "install", "finish", "decline"}:
+    if not categories & {"next", "install", "finish", "decline", "close"}:
         return True
     return is_license_page(screen_lines(words), catalog) and "agree" not in categories
 

@@ -3,10 +3,11 @@
 # Buttons the install auto mode knows how to press. To support another
 # installer or language, append an entry: the engine picks it up as is.
 #
-# category: next | agree | install | finish | key | deny | option
+# category: next | agree | install | finish | key | deny | option | decline | close
 #   deny entries are never pressed; a line containing one is ignored.
 #   agree entries only fire on a license or plain-confirmation page (see
 #     context_keywords below); option entries fire anywhere.
+#   close entries only fire on an old GOG EULA page (eula_save below).
 # labels:   OCR text to look for (case, spaces, "&", ">" and "(N)" are ignored).
 # mnemonic: Alt+<letter> tried when clicking the label changes nothing.
 # key:      (key only) xdotool key name pressed when the text is on screen.
@@ -109,6 +110,10 @@ context_keywords:
       "安裝完成",
     ]
 
+  # Older GOG installers end their EULA page with "Save as .txt" and Close instead of Next. Close is only pressed there,
+  # after the accept toggle, since anywhere else it would abort the install.
+  eula_save: ["save as .txt", "save as txt"]
+
   # "Close the installer?" confirmations: Yes would end the install, so only their No is pressed.
   abort:
     [
@@ -189,6 +194,10 @@ buttons:
       - "同意する"
       - "我接受协议"
       - "我接受许可协议中的条款"
+  - category: close
+    mnemonic: c
+    labels:
+      ["Close", "Chiudi", "Schließen", "Fermer", "Cerrar", "閉じる", "关闭"]
   # Some installers offer this to cap their own memory use during
   # extraction - worth always turning on in the sandbox, which has no
   # guarantee of a generous RAM allowance either way.

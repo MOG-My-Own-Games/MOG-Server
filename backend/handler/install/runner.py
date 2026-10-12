@@ -23,10 +23,12 @@ tree without touching the thread running this module.
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import signal
 import subprocess
 import threading
+import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -114,6 +116,7 @@ _RUNNING_LOCK = threading.Lock()
 
 def enqueue_install(install_session_id: int) -> None:
     """Run an install session in a background thread."""
+    log.debug(f"Install session {install_session_id}: submitted to the thread pool")
     _EXECUTOR.submit(run_install, install_session_id)
 
 
@@ -133,6 +136,7 @@ def start_or_queue(install_session_id: int) -> bool:
                 install_session_id,
                 {"state": InstallSessionState.QUEUED, "queue_rank": db_install_session_handler.next_queue_rank()},
             )
+            log.debug(f"Install session {install_session_id}: queued, all {INSTALL_MAX_CONCURRENCY} places taken")
             return False
         db_install_session_handler.update_session(
             install_session_id, {"state": InstallSessionState.INSTALLING, "queue_rank": None}
@@ -163,6 +167,7 @@ def cancel_install(install_session_id: int) -> bool:
     """Kill a running session's sandboxed process group, if any."""
     with _RUNNING_LOCK:
         pgid = _RUNNING_PGIDS.get(install_session_id)
+    log.debug(f"Install session {install_session_id}: cancel asked, process group {pgid}")
     if pgid is None:
         return False
     try:
@@ -551,6 +556,8 @@ def _run_install(install_session_id: int, attempt: int = 1) -> bool:
         _fail(install_session_id, str(e))
         return False
 
+    installer_bytes = _installer_bytes(game, source_abs)
+
     # InstallShield-based multi-part installers (their ISArcExtract/ISDone.dll
     # archive extractor) look for sibling data files (setup-N.bin, Data1.cab,
     # ...) next to the installer .exe at runtime, not just the .exe itself -
@@ -578,6 +585,10 @@ def _run_install(install_session_id: int, attempt: int = 1) -> bool:
     # directly by the installer itself, in another - the same suffix, two
     # unrelated things, and nothing here ever mounts the second kind.
     disc_source: Path | None = extract_root if extract_temp_dir is not None else None
+    log.debug(
+        f"Install session {install_session_id} attempt {attempt}: installer {installer_abs}, "
+        f"source {source_abs}, {installer_bytes} bytes, search root {installer_search_root}"
+    )
 
     work_dir = ensure_session_cache_dir(install_session_id)
     # A native installer (.sh/.run, GOG's MojoSetup among them) runs as it is: no Proton, no Wine prefix. Its
@@ -1086,6 +1097,7 @@ def _finalize_install(
     work_dir: Path,
     windows_baseline: frozenset[Path] = frozenset(),
     exit_code: int | None = None,
+    installer_bytes: int | None = None,
 ) -> None:
     """Hash whatever the installer produced and mark the session DONE.
 
@@ -1122,6 +1134,31 @@ def _finalize_install(
             "bytes_total": manifest_total_bytes(entries),
         },
     )
+    _warn_if_smaller_than_installer(install_session_id, manifest_total_bytes(entries), installer_bytes, exit_code)
+
+
+def is_smaller_than_installer(installed: int, installer: int | None) -> bool:
+    """An install smaller than what it was installed from hints that the installer stopped on the way."""
+    return installer is not None and installer > 0 and installed < installer
+
+
+def _installer_bytes(game, source_abs: Path | None) -> int | None:
+    """What the install came from: the archive or disc image picked, else the game's installer folder."""
+    if source_abs is not None:
+        try:
+            return source_abs.stat().st_size
+        except OSError:
+            return None
+    return game.size_bytes
+
+
+def _warn_if_smaller_than_installer(
+    install_session_id: int, installed: int, installer_bytes: int | None, exit_code: int | None
+) -> None:
+    """Only a notification: the install stays done, since a small result is not proof that it failed."""
+    if is_smaller_than_installer(installed, installer_bytes):
+        log.debug(f"Install session {install_session_id}: {installed} bytes installed from {installer_bytes}, exit code {exit_code}")
+        notify_install_small(install_session_id, installed, installer_bytes or 0, exit_code)
 
 
 def check_not_stopped_early(files: list[Path], exit_code: int | None) -> None:
@@ -1182,7 +1219,9 @@ def _wrap_for_sandbox(
         extra_env=extra_env,
         games_fallback_dir=games_fallback_dir,
     )
-    return build_bwrap_command(spec, inner)
+    argv = build_bwrap_command(spec, inner)
+    log.debug(f"Sandbox command: {shlex.join(argv)}")
+    return argv
 
 
 def _run_installer(argv: list[str], display: str, auto_mode_session: tuple[int, Path] | None = None) -> int:
@@ -1202,7 +1241,9 @@ def _run_installer(argv: list[str], display: str, auto_mode_session: tuple[int, 
     function. Returns the installer's exit code.
     """
     install_session_id = auto_mode_session[0] if auto_mode_session is not None else None
+    started = time.monotonic()
     proc = subprocess.Popen(argv, start_new_session=True)
+    log.debug(f"Install session {install_session_id}: installer process {proc.pid} started on display {display}")
     if install_session_id is not None:
         with _RUNNING_LOCK:
             _RUNNING_PGIDS[install_session_id] = proc.pid

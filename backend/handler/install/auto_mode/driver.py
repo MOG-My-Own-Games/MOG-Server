@@ -101,6 +101,10 @@ class AutoModeDriver:
             self._idle_since = now
 
         action, matches = plan_action(words, self.catalog, self.memory, installing=self._last_progress > 0)
+        log.debug(
+            f"Install auto mode: {len(words)} words, {len(matches)} matches, progress {self._last_progress}, "
+            f"attempts {self.memory.attempts}, action {action.describe() if action else None}"
+        )
         if lines != self._logged_lines:
             self._logged_lines = lines
             found = [f"{m.entry.category}:{m.text}" for m in matches]

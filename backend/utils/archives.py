@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -19,6 +20,14 @@ from logger.logger import log
 # `7z l -slt` output: one "Path = ..." / "Size = ..." pair per listed member,
 # blank-line separated, "Attributes = D..." marks a directory entry.
 _ENTRY_RE = re.compile(r"^(Path|Size|Attributes) = (.*)$")
+
+# A CD ripped sector by sector (CloneCD's .img, a .bin next to a .cue) keeps each sector's 12 bytes of sync, its header and
+# its error codes around the 2048 bytes of data: 7z cannot read the file system through them, but can once they are gone.
+RAW_IMAGE_EXTENSIONS = frozenset((".img", ".bin"))
+RAW_SECTOR_SIZE = 2352
+DATA_SECTOR_SIZE = 2048
+_SECTOR_SYNC = b"\x00" + b"\xff" * 10 + b"\x00"
+_RAW_CHUNK_SECTORS = 2048
 
 
 def list_archive_members(file_path: Path) -> list[tuple[str, int]]:
@@ -39,6 +48,9 @@ def try_list_archive_members(file_path: Path) -> list[tuple[str, int]] | None:
             check=True,
         )
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as e:
+        listed = _list_raw_image(file_path)
+        if listed is not None:
+            return listed
         log.error(f"Error listing archive {file_path}: {e}")
         return None
 
@@ -67,6 +79,23 @@ def try_list_archive_members(file_path: Path) -> list[tuple[str, int]] | None:
     return members
 
 
+def _list_raw_image(file_path: Path) -> list[tuple[str, int]] | None:
+    """What a raw CD image holds, read through a plain copy of its data. None when it is not one (or the copy failed).
+    Without this a disc 7z cannot open lists as empty, and looks like a game that has no installer."""
+    offset = raw_sector_data_offset(file_path)
+    if offset is None:
+        return None
+    try:
+        with tempfile.TemporaryDirectory(prefix="mog-raw-iso-") as tmp:
+            iso = Path(tmp) / f"{file_path.stem}.iso"
+            if not raw_sectors_to_iso(file_path, iso, offset):
+                return None
+            return try_list_archive_members(iso)
+    except OSError as e:
+        log.error(f"Could not convert {file_path}: {e}")
+        return None
+
+
 def _why_extraction_failed(file_path: Path, output: str) -> str:
     """What 7z said went wrong, in a line a person can read."""
     lines = [line.strip() for line in output.splitlines() if line.strip()]
@@ -79,6 +108,63 @@ def _why_extraction_failed(file_path: Path, output: str) -> str:
             "(see the Dockerfile)"
         )
     return text
+
+
+def raw_sector_data_offset(file_path: Path) -> int | None:
+    """Where the 2048 data bytes start in each sector of a raw CD image (16 after a mode 1 header, 24 after a mode 2
+    one, which has 8 bytes of subheader), or None when the file is not one."""
+    if file_path.suffix.lower() not in RAW_IMAGE_EXTENSIONS:
+        return None
+    try:
+        with open(file_path, "rb") as f:
+            head = f.read(16)
+    except OSError:
+        return None
+    if len(head) < 16 or head[:12] != _SECTOR_SYNC:
+        return None
+    return {1: 16, 2: 24}.get(head[15])
+
+
+def raw_sectors_to_iso(file_path: Path, iso_path: Path, offset: int) -> bool:
+    """Copy the data of every sector of a raw CD image into `iso_path`, up to the first sector without sync (where the data
+    track ends and audio, if any, begins). True when anything was written."""
+    written = 0
+    try:
+        with open(file_path, "rb") as src, open(iso_path, "wb") as dst:
+            while True:
+                chunk = src.read(RAW_SECTOR_SIZE * _RAW_CHUNK_SECTORS)
+                if not chunk:
+                    break
+                out = bytearray()
+                for start in range(0, len(chunk) - RAW_SECTOR_SIZE + 1, RAW_SECTOR_SIZE):
+                    if chunk[start : start + 12] != _SECTOR_SYNC:
+                        dst.write(out)
+                        return written + len(out) > 0
+                    out += chunk[start + offset : start + offset + DATA_SECTOR_SIZE]
+                dst.write(out)
+                written += len(out)
+    except OSError as e:
+        log.error(f"Could not convert the raw disc image {file_path}: {e}")
+        return False
+    return written > 0
+
+
+def _extract_raw_image(file_path: Path, dest_dir: Path, exclude: Sequence[str]) -> str | None:
+    """Unpack a raw CD image 7z could not read, through a copy of it without the sector framing. None when the file is
+    not one or the copy could not be made (the caller then keeps what 7z said)."""
+    offset = raw_sector_data_offset(file_path)
+    if offset is None:
+        return None
+    log.info(f"{file_path.name} is a raw CD image: converting it to a plain ISO to read it")
+    try:
+        with tempfile.TemporaryDirectory(dir=dest_dir.parent, prefix="mog-raw-iso-") as tmp:
+            iso = Path(tmp) / f"{file_path.stem}.iso"
+            if not raw_sectors_to_iso(file_path, iso, offset):
+                return None
+            return extract_archive(iso, dest_dir, exclude) or ""
+    except OSError as e:
+        log.error(f"Could not convert {file_path}: {e}")
+        return None
 
 
 def extract_archive(file_path: Path, dest_dir: Path, exclude: Sequence[str] = ()) -> str | None:
@@ -99,6 +185,9 @@ def extract_archive(file_path: Path, dest_dir: Path, exclude: Sequence[str] = ()
         )
     except subprocess.CalledProcessError as e:
         reason = _why_extraction_failed(file_path, f"{e.stdout or ''}\n{e.stderr or ''}")
+        converted = _extract_raw_image(file_path, dest_dir, exclude)
+        if converted is not None:
+            return converted or None
         log.error(f"Error extracting archive tree from {file_path}: {reason}")
         return reason
     except subprocess.TimeoutExpired:

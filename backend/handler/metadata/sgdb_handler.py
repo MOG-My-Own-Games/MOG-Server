@@ -55,7 +55,11 @@ def validate_key() -> bool:
 def _get(path: str, api_key: str) -> list:
     resp = httpx.get(f"{_API_BASE}/{path}", headers={"Authorization": f"Bearer {api_key}"}, timeout=15)
     resp.raise_for_status()
-    return resp.json().get("data", [])
+    try:
+        return resp.json().get("data", [])
+    except ValueError as e:
+        # An error page answered with 200 (a block, a rate limit) is not an artwork list; callers log it and go on.
+        raise httpx.DecodingError(f"not JSON ({resp.headers.get('content-type')}): {resp.text[:80]!r}") from e
 
 
 def search_games(name: str) -> list[dict]:

@@ -114,7 +114,8 @@ context_keywords:
   # after the accept toggle, since anywhere else it would abort the install.
   eula_save: ["save as .txt", "save as txt"]
 
-  # "Close the installer?" confirmations: Yes would end the install, so only their No is pressed.
+  # Questions whose Yes is never wanted, so only their No is pressed: "Close the installer?" confirmations (Yes would end
+  # the install) and the end-of-install offers to open a README or release notes (Yes opens a viewer nobody closes).
   abort:
     [
       "want to close",
@@ -133,6 +134,16 @@ context_keywords:
       "voulez-vous vraiment quitter",
       "desea cancelar",
       "desea salir",
+      "view the readme",
+      "view the read me",
+      "view the release notes",
+      "view the changelog",
+      "see the readme",
+      "visualizzare il file readme",
+      "leggere il file readme",
+      "readme-datei anzeigen",
+      "voir le fichier readme",
+      "ver el archivo readme",
     ]
 
 buttons:

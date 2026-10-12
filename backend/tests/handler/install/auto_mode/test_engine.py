@@ -168,3 +168,30 @@ class TestToggleClickPoint:
         assert action.match.entry.toggle
         assert action.kind == "click"
         assert 100 <= action.x <= 100 + 3 * 14
+
+
+class TestReadmeQuestion:
+    def _page(self, question: str = "Do you want to view the README file now?") -> list[Word]:
+        return [_word(question, line=0), _word("Yes", line=1), _word("No", line=1, left=400)]
+
+    def test_the_readme_offer_is_answered_no(self):
+        """Regression test: at the end of an install a Yes/No window asked "Do you want to view the README file now?" and
+        auto mode did not press anything, leaving the install waiting for a person. Yes would only open a viewer."""
+        action, _ = plan_action(self._page(), CATALOG, ScreenMemory())
+        assert action is not None
+        assert action.match.entry.category == "decline" and action.match.text == "No"
+
+    def test_yes_is_not_pressed_on_it_even_when_no_is_not_read(self):
+        words = [_word("Do you want to view the README file now?", line=0), _word("Yes", line=1)]
+        action, _ = plan_action(words, CATALOG, ScreenMemory())
+        assert action is None
+
+    def test_a_page_that_only_mentions_the_readme_is_not_blocked(self):
+        words = [_word("Please read the README before you continue", line=0), _word("Next", line=1)]
+        action, _ = plan_action(words, CATALOG, ScreenMemory())
+        assert action is not None and action.match.entry.category == "next"
+
+    def test_other_wordings_are_answered_no_too(self):
+        for question in ("Would you like to view the release notes?", "Vuoi visualizzare il file readme ora?"):
+            action, _ = plan_action(self._page(question), CATALOG, ScreenMemory())
+            assert action is not None and action.match.entry.category == "decline", question

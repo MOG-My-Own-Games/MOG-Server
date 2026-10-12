@@ -1004,6 +1004,7 @@ async function refreshCacheTable(silent = false) {
         <td class="cache-expiry">${entry.state ? fmtExpiry(entry.expires_at) : "-"}</td>
       `;
       const actionTd = document.createElement("td");
+      actionTd.className = "row-actions";
       if (entry.state) {
         const resetBtn = document.createElement("button");
         resetBtn.textContent = "Reset";

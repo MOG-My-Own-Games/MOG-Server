@@ -18,6 +18,28 @@ commit`, `git push`, or open a PR unless the user explicitly asks for that
 specific action in that turn. Implementing and testing a change is not
 itself a request to commit it.
 
+## Prepare the commits, never make them
+
+Whatever you change, write down the commit it will become in `TODO-commits.md` at the root of the repo, in the same turn
+and without committing (the rule above stands). The file is gitignored: the commit-only agent (`.kilo/AGENTS.md`) works
+from it, so it does not have to read the whole diff to group the work.
+
+One entry per logical change, in the order the commits should be made, as a message line and a line of files:
+
+```
+feat(scope): imperative description
+path/one.py:12-34, path/two.py:123-456
+```
+
+- The message follows `.kilo/AGENTS.md` (Conventional Commits, English, imperative, no trailing period, under 72 characters,
+  `feat`, `fix`, `chore` or `doc`; a documentation-only change is `doc`).
+- The files are relative to the repo, each with the lines of the change (`file.py:12-34`, several ranges `file.py:12-34;80-95`).
+  A new file is just its path. Tests go in the entry of the change they cover, not in one of their own.
+- When a later change touches what an entry already lists, update that entry (message and ranges) instead of adding another.
+  Re-read the ranges when you are done: edits move lines.
+- Order: backend, then client, then docs. Create the file when it is missing; never delete other entries, which are
+  waiting for the commit agent (it deletes an entry once it has committed it).
+
 ## Docker permission
 
 You may use `flatpak-spawn --host -- docker ...` (build/up/down/logs/exec)
@@ -95,6 +117,13 @@ in `endpoints/responses/`.
   request (only for a top-level navigation), so Basic auth alone left the
   embedded installer view permanently unauthenticated. Don't add
   `user: CurrentUser` back to `install_vnc_http`/`install_vnc_ws`.
+
+## Logging
+
+`LOGLEVEL` sets the level at start (`INFO` by default; the dev compose file sets `DEBUG`). The "Debug logging"
+switch in Settings overrides it at once, without a restart (`handler/log_level.py`). Put the step-by-step detail
+of a flow (what was chosen, the command run, how long it took) in `log.debug`; never log credentials, request
+headers or bodies.
 
 ## Conventions
 

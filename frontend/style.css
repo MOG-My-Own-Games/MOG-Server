@@ -122,9 +122,10 @@ code {
   border-radius: var(--radius);
   padding: var(--space-lg);
   margin-bottom: var(--space-lg);
-  max-width: 640px;
+  max-width: min(1000px, 100%);
 }
 .card h3 { margin-top: 0; }
+.card .data-table { max-width: none; }
 
 /* Login */
 #login-screen {
@@ -538,8 +539,8 @@ code {
 
 .profile-card { display: flex; gap: 1.5em; align-items: flex-start; }
 
-.edit-metadata-form { max-width: 640px; }
 .edit-metadata-form textarea { width: 100%; resize: vertical; }
+.edit-metadata-form .field-label input[type="text"] { max-width: none; }
 
 .tabs { display: flex; gap: 0.25em; border-bottom: 1px solid var(--border); margin-bottom: 1.25em; }
 .tab-btn {

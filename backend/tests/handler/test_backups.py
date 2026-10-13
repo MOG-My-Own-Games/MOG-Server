@@ -213,3 +213,16 @@ def test_the_archive_name_is_what_listing_reads_back(world):
     only = backups.list_backups()[0]
 
     assert (only["kind"], only["includes_saves"], only["created_at"].year) == ("pre-update", False, 2026)
+
+
+def test_the_addons_kept_from_installs_are_in_every_backup_but_not_the_pre_update_one(world, monkeypatch):
+    addons = world.data / "addons" / "3" / "patch" / "1"
+    addons.mkdir(parents=True)
+    (addons / "content.zip").write_bytes(b"zip")
+    monkeypatch.setattr(backups, "ADDONS_PATH", str(world.data / "addons"))
+
+    manual = backups.create(backups.MANUAL, now=NOON)
+    pre = backups.create(backups.PRE_UPDATE, now=NOON)
+
+    assert "addons/3/patch/1/content.zip" in _members(world.volume / manual["name"])
+    assert "addons/3/patch/1/content.zip" not in _members(world.volume / pre["name"])

@@ -25,6 +25,7 @@ from config import (
     BACKUP_KEEP_DAILY,
     BACKUP_KEEP_MANUAL,
     BACKUP_KEEP_PRE_UPDATE,
+    ADDONS_PATH,
     BACKUP_PATH,
     MOG_VERSION,
     RESOURCES_BASE_PATH,
@@ -191,6 +192,9 @@ def create(kind: str, include_saves: bool = False, note: str | None = None, now:
                         source = Path(RESOURCES_BASE_PATH) / folder
                         if source.is_dir():
                             tar.add(source, arcname=f"resources/{folder}")
+                    # Mods, patches and DLC kept from installs: made once, not again, so they are never left out.
+                    if Path(ADDONS_PATH).is_dir():
+                        tar.add(ADDONS_PATH, arcname="addons")
                     if include_saves and Path(SAVES_BASE_PATH).is_dir():
                         tar.add(SAVES_BASE_PATH, arcname="saves")
         part.replace(final)

@@ -16,6 +16,8 @@ class FakeDb:
             installer_path="lost_ruins.sh",
             source_path=None,
             extract_only=False,
+            steps=None,
+            error=None,
             proton_build=None,
             **session,
         )

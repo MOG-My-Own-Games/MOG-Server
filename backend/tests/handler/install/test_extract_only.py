@@ -69,7 +69,7 @@ def test_the_bundled_prerequisites_do_not_count_as_an_installer():
 
 class FakeDb:
     def __init__(self, state=InstallSessionState.INSTALLING):
-        self.session = SimpleNamespace(id=1, state=state)
+        self.session = SimpleNamespace(id=1, state=state, steps=None, error=None)
         self.updates = []
 
     def get_session(self, _id):
@@ -317,6 +317,8 @@ def start(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(endpoint, "list_source_candidates", lambda path: [cand("setup.exe", 0, "known installer")])
     monkeypatch.setattr(endpoint, "purge_superseded_sessions", lambda *a: None)
+    monkeypatch.setattr(endpoint.db_install_steps_handler, "list_for_game", lambda game_id: [])
+
     def start_now(sid):  # what runner.start_or_queue does with a free place
         made[-1].state = InstallSessionState.INSTALLING
         enqueued.append(sid)
@@ -407,6 +409,7 @@ def test_a_normal_start_is_not_extract_only(start):
 def _candidates_of(monkeypatch, found):
     monkeypatch.setattr(endpoint.db_game_handler, "get_game", lambda _id: SimpleNamespace(id=1, name="Metroid"))
     monkeypatch.setattr(endpoint.fs_game_handler, "get_installer_candidates", lambda game: found)
+    monkeypatch.setattr(endpoint.db_install_steps_handler, "list_for_game", lambda game_id: [])
     return asyncio.run(endpoint.get_install_candidates(SimpleNamespace(id=3), 1))
 
 

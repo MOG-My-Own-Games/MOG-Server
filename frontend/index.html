@@ -192,8 +192,13 @@
             <div class="page-columns">
               <div class="page-col">
                 <h3>Installer</h3>
-                <p class="muted small">Check one to install now. Once it finishes, check another (e.g. a patch) and install again into the same cache.</p>
+                <p class="muted small">Check the installers to run, in order: the first is the game, the others are patches. Use the arrows to reorder them; the server can remember the order.</p>
                 <div id="game-candidates" class="section"></div>
+                <p id="chain-warning" class="notice small" hidden>A patch may ask where the game is installed. If it does, you will have to answer in the installer screen by hand.</p>
+                <div class="page-actions">
+                  <button id="save-order-btn" class="secondary" type="button" hidden>Save order</button>
+                  <span id="save-order-status" class="muted small"></span>
+                </div>
 
                 <label class="field-label">Proton / Wine build
                   <select id="proton-build-select"><option value="">(server default)</option></select>
@@ -261,6 +266,15 @@
                     <tbody id="game-files-table-body"></tbody>
                   </table>
                   <p id="game-files-empty" class="muted" hidden>No files found on disk.</p>
+                </div>
+
+                <div id="files-panel-addons" class="card" hidden>
+                  <h3 id="files-panel-addons-title">Mods (MOG)</h3>
+                  <p class="muted small">Kept on the server for good: they are not part of the installer cache and survive clearing it.</p>
+                  <table id="game-addons-table" class="data-table">
+                    <thead><tr><th>Name</th><th>Size</th><th>Files</th><th>Added</th><th></th></tr></thead>
+                    <tbody id="game-addons-table-body"></tbody>
+                  </table>
                 </div>
 
                 <div id="files-panel-cache" class="card" hidden>
@@ -466,6 +480,8 @@
                 <tbody id="cache-table-body"></tbody>
               </table>
             </div>
+
+            <div id="addon-cache-cards"></div>
 
             <div class="card">
               <div class="main-header">

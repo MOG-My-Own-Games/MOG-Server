@@ -671,8 +671,7 @@ a.chip { color: inherit; text-decoration: none; }
 .hltb-time { font-size: 1.25em; font-weight: 600; }
 .hltb-players { font-size: 0.7em; color: var(--muted); }
 
-.candidate-list { display: flex; flex-direction: column; gap: 0.4em; max-height: 220px; overflow-y: auto; }
-.candidate-row { display: flex; align-items: center; gap: 0.5em; font-size: 0.9em; cursor: pointer; }
+.candidate-list { display: flex; flex-direction: column; gap: 0.5em; max-height: 420px; overflow-y: auto; }
 
 .metadata-search { margin-top: 1.5em; }
 .metadata-search h4 { font-size: 0.85em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.4em; }
@@ -983,3 +982,55 @@ a.chip { color: inherit; text-decoration: none; }
 .edit-media-row { display: flex; align-items: center; flex-wrap: wrap; gap: 0.8em; padding: 0.5em 0; border-bottom: 1px solid var(--border); }
 .edit-media-row > strong { min-width: 7em; }
 .edit-media-row .media-choice { cursor: default; }
+
+/* A secondary action next to a primary one (Save order beside Install): outlined, not the accent gradient. */
+.secondary { background: transparent; border: 1px solid var(--border); color: var(--text); }
+.secondary:hover { border-color: var(--accent); filter: none; }
+
+/* An installer row, a big label like the cards around it: a flag on the left, its place in the install order and the
+   arrows (only for a ticked one), and the name, which wraps. Ticked rows sit on top, outlined. */
+.candidate-row {
+  display: flex;
+  align-items: center;
+  gap: 0.8em;
+  padding: 0.7em 0.9em;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 0.95em;
+  cursor: pointer;
+}
+.candidate-row.ticked { background: var(--bg-elevated-2); border-color: var(--accent); }
+.candidate-row input[type="checkbox"] { width: 1.3em; height: 1.3em; flex-shrink: 0; accent-color: var(--accent); }
+.candidate-row .candidate-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.candidate-row .chip { flex-shrink: 0; margin: 0; }
+.candidate-place {
+  flex-shrink: 0;
+  width: 1.9em;
+  height: 1.9em;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-gradient);
+  color: white;
+  font-weight: bold;
+  font-size: 0.9em;
+}
+.order-buttons { display: flex; gap: 0.3em; flex-shrink: 0; }
+.order-btn {
+  width: 1.9em;
+  height: 1.9em;
+  padding: 0;
+  line-height: 1;
+  font-size: 0.8em;
+  background: var(--bg-elevated-2);
+  border: 1px solid var(--border);
+  border-radius: 0.5em;
+  color: var(--text);
+}
+.order-btn:hover:not(:disabled) { border-color: var(--accent); filter: none; }
+.order-btn:disabled { opacity: 0.3; cursor: default; }
+
+/* Something to read before going on (a patch may ask where the game is): set apart, in the warning colour. */
+.notice { border-left: 3px solid var(--warn); padding: 0.3em 0.8em; margin: 0.8em 0; color: var(--muted); }

@@ -33,6 +33,10 @@ copy of.
   on the fly in the background (`/api/games/{id}/mods`, `.../{name}/prepare`, `.../status`, `.../download`), with progress for
   the client and a notification when the zip is ready. Zips are kept in `/mog/cache/mods` and forgotten after
   `MODS_CACHE_MAX_AGE_HOURS` (24 by default).
+- Keeps a game's mods, patches and DLC made through MOG as *addons* (`/api/games/{id}/addons`), in `/mog/addons`, apart from
+  the install cache, so clearing it leaves them. An install that runs several installers in order keeps what the patches
+  changed as a patch. MOG offers basic modding and is **not a mod manager**: for load order and conflicts use dedicated
+  software such as Amethyst Mod Manager.
 - Runs an installer for a Game inside a sandboxed Wine/Proton environment
   (bubblewrap + Xvfb + VNC, viewable live in the web UI), with an
   experimental OCR-driven "auto mode" (on by default; if it gets stuck or the

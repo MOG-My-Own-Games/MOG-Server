@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from endpoints.responses.save import DeviceSchema, UtcDatetime
 from models.game_launch_settings import (
+    LAUNCH_ARGS_MAX_LENGTH,
     PROTON_MAX_LENGTH,
     WINECFG_REG_MAX_LENGTH,
     WINETRICKS_MAX_VERBS,
@@ -19,6 +20,7 @@ class LaunchSettingsSchema(BaseModel):
     proton: str | None
     winecfg_reg: str | None
     winetricks: list[str] | None
+    launch_args: str | None
     updated_at: UtcDatetime
 
 
@@ -43,6 +45,14 @@ class LaunchSettingsForm(BaseModel):
     proton: str | None = Field(default=None, max_length=PROTON_MAX_LENGTH)
     winecfg_reg: str | None = Field(default=None, max_length=WINECFG_REG_MAX_LENGTH)
     winetricks: list[str] | None = Field(default=None, max_length=WINETRICKS_MAX_VERBS)
+    launch_args: str | None = Field(default=None, max_length=LAUNCH_ARGS_MAX_LENGTH)
+
+    @field_validator("launch_args")
+    @classmethod
+    def _one_line(cls, args: str | None) -> str | None:
+        if args is not None and any(ord(c) < 32 or ord(c) == 127 for c in args):
+            raise ValueError("launch arguments are one line of text: no line breaks or control characters")
+        return args
 
     @field_validator("winetricks")
     @classmethod

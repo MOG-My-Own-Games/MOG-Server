@@ -17,7 +17,7 @@ from models.game import Game
 from models.install_session import ACTIVE_INSTALL_STATES
 from utils.install_cache import dir_size_bytes, session_cache_dir
 
-from handler.database import db_game_handler, db_install_session_handler, db_saves_handler
+from handler.database import db_game_addons_handler, db_game_handler, db_install_session_handler, db_saves_handler
 from handler.filesystem import fs_game_handler
 
 MAX_AGE = 30 * 60
@@ -31,10 +31,11 @@ class GameSizes:
     cache: int
     saves: int
     files: int = 0  # files in the game's folder
+    addons: int = 0  # the mods, patches, DLC and extras kept for the game
 
     @property
     def total(self) -> int:
-        return self.installer + self.cache + self.saves
+        return self.installer + self.cache + self.saves + self.addons
 
 
 @dataclass
@@ -108,7 +109,8 @@ def game_sizes(game: Game) -> GameSizes:
         if game.size_bytes != known.installer:
             db_game_handler.update_game(game.id, {"size_bytes": known.installer})
     _versions, saves = db_saves_handler.summary(game_id=game.id)
-    return GameSizes(known.installer, known.cache, saves, known.files)
+    addons = db_game_addons_handler.total_size(game.id)  # live: an addon is added or removed in a moment
+    return GameSizes(known.installer, known.cache, saves, known.files, addons)
 
 
 def game_sizes_by_id(game_id: int) -> GameSizes | None:

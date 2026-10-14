@@ -74,7 +74,7 @@ INSTALL_CACHE_PATH: Final[str] = f"{MOG_BASE_PATH}/cache/installs"
 MODS_CACHE_PATH: Final[str] = f"{MOG_BASE_PATH}/cache/mods"
 MODS_CACHE_MAX_AGE_HOURS: Final[int] = max(1, safe_int(_get_env("MODS_CACHE_MAX_AGE_HOURS"), 24))
 
-# Game addons (mods, patches and DLC installed through MOG, see handler/addons.py): kept for good, never swept with the
+# Game addons (mods, patches, DLC and extras installed through MOG, see handler/addons.py): kept for good, never swept with the
 # caches above, so they survive clearing the installer cache. One folder per entity, under the data volume.
 ADDONS_PATH: Final[str] = f"{MOG_BASE_PATH}/addons"
 ADDONS_MAX_BYTES: Final[int] = max(1, safe_int(_get_env("ADDONS_MAX_BYTES"), 8 * 1024 * 1024 * 1024))

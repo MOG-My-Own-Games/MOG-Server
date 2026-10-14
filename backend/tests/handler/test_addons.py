@@ -102,3 +102,17 @@ def test_a_changed_file_is_the_only_one_a_patch_run_keeps(tmp_path):
     found = runner._changed_since(before, tmp_path, frozenset(), drive_c)
 
     assert sorted(member for member, _ in found) == ["Game/changed.dat", "Game/new.dat"]
+
+
+def test_an_extra_is_kept_like_the_other_kinds(store, tmp_path):
+    source = _zip(tmp_path / "in.zip", {"tools/readme.txt": b"x"})
+
+    row = addons.add_zip(3, "extra", "Tools", source, user_id=1)
+
+    assert row.category == "extra" and addons.content_path(row).is_file()
+
+
+def test_only_the_known_kinds_are_accepted():
+    assert addons.check_category("extra") == "extra"
+    with pytest.raises(addons.AddonError, match="mod, patch, dlc, extra"):
+        addons.check_category("save")

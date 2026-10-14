@@ -1,4 +1,4 @@
-"""Mods, patches and DLC kept on the server (see handler/addons.py). Every user can list, download and add them; only an
+"""Mods, patches, DLC and extras kept on the server (see handler/addons.py). Every user can list, download and add them; only an
 admin, or the person who added one, can delete it."""
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Path as PathVar, Uploa
 from starlette.responses import FileResponse
 
 from config import ADDONS_MAX_BYTES, ADDONS_PATH
-from endpoints.responses.addons import GameAddonSchema
+from endpoints.responses.addons import GameAddonRenameForm, GameAddonSchema
 from handler import addons as addons_handler
 from handler.auth import CurrentUser
 from handler.database import db_game_addons_handler, db_game_handler
@@ -56,7 +56,7 @@ async def add_addon(
     name: Annotated[str, Form()],
     file: Annotated[UploadFile, File()],
 ) -> GameAddonSchema:
-    """Keep a zip of files the user installed (the diff of a mod, patch or DLC) as an entity of the game."""
+    """Keep a zip of files the user installed (the diff of a mod, patch, DLC or extra) as an entity of the game."""
     _game_or_404(id)
     try:
         addons_handler.check_category(category)
@@ -86,6 +86,25 @@ async def add_addon(
     return GameAddonSchema.model_validate(row)
 
 
+ADDON_FILES_LISTED = 500  # how many of an addon's files its listing names; the count is always the whole of them
+
+
+@router.get("/{id}/addons/{addon_id}/files")
+async def list_addon_files(
+    user: CurrentUser,
+    id: Annotated[int, PathVar(ge=1)],
+    addon_id: Annotated[int, PathVar(ge=1)],
+) -> dict:
+    """What an addon puts in the game's folder: its file count and the first files of it, with their sizes."""
+    _game_or_404(id)
+    addon = _addon_of_game(id, addon_id)
+    try:
+        count, files = await asyncio.to_thread(addons_handler.list_files, addon, ADDON_FILES_LISTED)
+    except addons_handler.AddonError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    return {"file_count": count, "files": [{"path": p, "size": s} for p, s in files]}
+
+
 @router.get("/{id}/addons/{addon_id}/download")
 async def download_addon(
     user: CurrentUser,
@@ -98,6 +117,27 @@ async def download_addon(
     if not path.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="The entity's content is missing")
     return FileResponse(path, media_type="application/zip", filename=f"{addon.name}.zip")
+
+
+@router.patch("/{id}/addons/{addon_id}")
+async def rename_addon(
+    user: CurrentUser,
+    id: Annotated[int, PathVar(ge=1)],
+    addon_id: Annotated[int, PathVar(ge=1)],
+    form: GameAddonRenameForm,
+) -> GameAddonSchema:
+    """Give an entity another name. Its content, category and place on disk do not change."""
+    _game_or_404(id)
+    addon = _addon_of_game(id, addon_id)
+    if not user.is_admin and addon.user_id != user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only an admin or the person who added it can rename it")
+    try:
+        name = addons_handler.sanitize_name(form.name)
+    except addons_handler.AddonError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+    row = db_game_addons_handler.rename(addon_id, name)
+    log.debug(f"Addon {addon_id} of game {id} renamed to {name!r} by user {user.id}")
+    return GameAddonSchema.model_validate(row)
 
 
 @router.delete("/{id}/addons/{addon_id}")

@@ -23,6 +23,9 @@ MIN_WORD_CONF = 30
 # Button and checkbox labels are UI-font sized; a taller match is a page
 # title ("Installation") or artwork text, and clicking it does nothing.
 MAX_LABEL_HEIGHT = 30
+# The other way: a sliver of artwork on a window's edge can read as a short word ("ja", 5 px tall on a
+# button-sized line of 11). A label is never that thin, so it is not a button either.
+MIN_LABEL_HEIGHT = 8
 # A real button never appears this many times on one screen. A short,
 # generic label ("OK") repeated past this is a status column in a data
 # table (a file-verification tool's per-row "OK", not a button) - see
@@ -157,7 +160,7 @@ def find_matches(words: list[Word], catalog: Catalog) -> list[Match]:
             if entry.category == "deny":
                 continue
             found = _match_line(line, line_text, entry)
-            if found is not None and found.height <= MAX_LABEL_HEIGHT:
+            if found is not None and MIN_LABEL_HEIGHT <= found.height <= MAX_LABEL_HEIGHT:
                 matches.append(found)
     return _drop_implausible_repeats(matches)
 

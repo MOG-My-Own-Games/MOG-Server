@@ -1849,25 +1849,36 @@ function resetGameTabs() {
   document.getElementById("tab-settings").hidden = true;
 }
 
-// What the game takes on the server: "40.0 GB (Installer 27.7 GB, Cache 12.3 GB, Saves 1.4 MB)", the empty parts left out. The server
-// remembers it, so this is cheap to ask for on every visit.
+// What the game takes on the server: the total, and under it the parts it is made of (installer, cache, addons, saves),
+// the ones with nothing left out. The server remembers it, so this is cheap to ask for on every visit.
 async function loadGameSizes(gameId) {
   const line = document.getElementById("game-sizes");
   line.hidden = true;
   try {
     const sizes = await api(`/api/games/${gameId}/sizes`);
     if (!activeGame || activeGame.id !== gameId) return;
-    const parts = [["Installer", sizes.installer_bytes], ["Cache", sizes.cache_bytes], ["Saves", sizes.saves_bytes]]
-      .filter(([, bytes]) => bytes > 0)
-      .map(([name, bytes]) => `${name} ${fmtBytes(bytes)}`);
-    line.textContent = `Size on server: ${fmtBytes(sizes.total_bytes)}` + (parts.length ? ` (${parts.join(", ")})` : "");
+    document.getElementById("game-sizes-total").textContent = `Size on server: ${fmtBytes(sizes.total_bytes)}`;
+    document.getElementById("game-sizes-parts").replaceChildren(
+      ...[
+        ["Installer", sizes.installer_bytes],
+        ["Cache", sizes.cache_bytes],
+        ["Addons", sizes.addons_bytes],
+        ["Saves", sizes.saves_bytes],
+      ]
+        .filter(([, bytes]) => bytes > 0)
+        .map(([name, bytes]) => {
+          const li = document.createElement("li");
+          li.innerHTML = `<span>${name}</span><span class="saves-size">${fmtBytes(bytes)}</span>`;
+          return li;
+        })
+    );
     line.hidden = false;
   } catch (_) {
     // An older server has no such figure; the line just stays out.
   }
 }
 
-// The Settings tab: the Proton build, winecfg changes and winetricks verbs the clients keep for the game, for all devices and for each one.
+// The Settings tab: the Proton build, winecfg changes, winetricks verbs and launch arguments the clients keep for the game, for all devices and for each one.
 async function loadLaunchSettings(gameId) {
   const table = document.getElementById("launch-settings-table");
   const empty = document.getElementById("launch-settings-empty");
@@ -1911,6 +1922,7 @@ async function loadLaunchSettings(gameId) {
       reg.appendChild(details);
     }
     cell(row.winetricks && row.winetricks.length ? row.winetricks.join(", ") : "None");
+    cell(row.launch_args || "None");
     cell(new Date(row.updated_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }));
     const remove = document.createElement("button");
     remove.type = "button";
@@ -2802,6 +2814,7 @@ async function loadCandidates(gameId) {
           }
           settle();
           render();
+          rememberInstallOrder();
         });
         label.appendChild(check);
         if (item.checked && !c.extractAsIs) {
@@ -2841,6 +2854,7 @@ async function loadCandidates(gameId) {
               e.preventDefault();
               [items[i], items[i + step]] = [items[i + step], items[i]];
               render();
+              rememberInstallOrder();
             });
             arrows.appendChild(move);
           }
@@ -2851,7 +2865,6 @@ async function loadCandidates(gameId) {
       installQueue = items.filter((item) => item.checked).map((item) => item.c);
       const several = installQueue.filter((c) => !c.extractAsIs).length > 1;
       document.getElementById("chain-warning").hidden = !several;
-      document.getElementById("save-order-btn").hidden = installQueue.some((c) => c.extractAsIs);
     };
     render();
     el.appendChild(list);
@@ -3185,16 +3198,20 @@ document.getElementById("start-install-btn").addEventListener("click", async () 
   }
 });
 
-document.getElementById("save-order-btn").addEventListener("click", async () => {
+// Every order the person sets (ticks, moves) is the game's default from then on: the next Install runs it. "Just extract" is
+// a one-off and leaves the default as it was; an empty selection keeps the last default too, so nothing is lost by accident.
+async function rememberInstallOrder() {
   const status = document.getElementById("save-order-status");
+  const gameId = activeGame?.id;
   const steps = installQueue.filter((c) => !c.extractAsIs).map((c) => ({ path: c.path, source_path: c.source_path || null }));
+  if (!gameId || steps.length === 0) return;
   try {
-    await api(`/api/games/${activeGame.id}/install/order`, { method: "PUT", body: JSON.stringify({ steps }) });
-    status.textContent = steps.length === 0 ? "Saved order cleared." : "Order saved.";
+    await api(`/api/games/${gameId}/install/order`, { method: "PUT", body: JSON.stringify({ steps }) });
+    if (activeGame?.id === gameId) status.textContent = steps.length > 1 ? "Order remembered as the default." : "Remembered as the default.";
   } catch (err) {
-    status.textContent = `Could not save: ${err.message}`;
+    if (activeGame?.id === gameId) status.textContent = `Could not remember the default: ${err.message}`;
   }
-});
+}
 
 document.getElementById("cancel-install-btn").addEventListener("click", async () => {
   if (!activeGame) return;
@@ -3337,11 +3354,11 @@ const ADDON_ORDER = ["mod", "dlc"]; // listed first; any other kind follows by n
 
 // Mods, patches and DLC kept on the server for the game (not files of the library): one subtab per kind that has any.
 const ADDON_SUBTAB = "__addon_";
-const ADDON_CATEGORIES = ["mod", "patch", "dlc"];
+const ADDON_CATEGORIES = ["mod", "patch", "dlc", "extra"];
 let gameAddons = []; // from /api/games/{id}/addons
 
 function addonSubtabLabel(category) {
-  return { mod: "Mods (MOG)", patch: "Patches (MOG)", dlc: "DLC (MOG)" }[category] || `${category} (MOG)`;
+  return { mod: "Mods (MOG)", patch: "Patches (MOG)", dlc: "DLC (MOG)", extra: "Extras (MOG)" }[category] || `${category} (MOG)`;
 }
 
 async function loadGameAddons(gameId) {
@@ -3368,6 +3385,23 @@ async function deleteAddon(addon, afterDelete) {
   }
 }
 
+async function renameAddon(addon, afterRename) {
+  const name = prompt("New name for this addon", addon.name);
+  if (name === null || !name.trim() || name.trim() === addon.name) return;
+  try {
+    await api(`/api/games/${addon.game_id}/addons/${addon.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: name.trim() }),
+    });
+    await afterRename();
+  } catch (err) {
+    alert(`Could not rename: ${err.message}`);
+  }
+}
+
+// The row of an addon, and under it the row that lists its files: opened with the arrow on its file count (as the
+// saved versions in the Saves panel), the list fetched the first time.
 function addonRow(addon, withGame, game, afterDelete) {
   const tr = document.createElement("tr");
   const gameCell = withGame
@@ -3377,23 +3411,58 @@ function addonRow(addon, withGame, game, afterDelete) {
     ${gameCell}
     <td>${escapeHtml(addon.name)}</td>
     <td>${fmtBytes(addon.size_bytes)}</td>
-    <td>${addon.file_count}</td>
+    <td><button type="button" class="link-button" aria-expanded="false"><span class="caret" aria-hidden="true"></span>${addon.file_count} file${addon.file_count === 1 ? "" : "s"}</button></td>
     <td>${escapeHtml(new Date(addon.created_at).toLocaleString())}</td>
   `;
+  const files = document.createElement("tr");
+  files.className = "saves-files-row";
+  files.hidden = true;
+  files.innerHTML = `<td colspan="${withGame ? 6 : 5}"><ul class="saves-files"><li class="muted">Loading...</li></ul></td>`;
+  tr.querySelector(".link-button").addEventListener("click", () => toggleAddonFiles(addon, tr, files));
   const actions = document.createElement("td");
   actions.className = "row-actions";
-  const download = document.createElement("a");
-  download.className = "button-link";
-  download.href = `/api/games/${addon.game_id}/addons/${addon.id}/download`;
+  const download = document.createElement("button");  // a button like the saves' Download: the same height and place in the row
+  download.type = "button";
   download.textContent = "Download";
+  download.addEventListener("click", () =>
+    downloadWithAuth(`/api/games/${addon.game_id}/addons/${addon.id}/download`, `${addon.name}.zip`).catch((err) => alert(`Could not download: ${err.message}`))
+  );
   const del = document.createElement("button");
   del.type = "button";
   del.className = "danger";
   del.textContent = "Delete";
   del.addEventListener("click", () => deleteAddon(addon, afterDelete));
-  actions.append(download, del);
+  const rename = document.createElement("button");
+  rename.type = "button";
+  rename.className = "secondary";
+  rename.textContent = "Rename";
+  rename.addEventListener("click", () => renameAddon(addon, afterDelete));
+  actions.append(download, rename, del);
   tr.appendChild(actions);
-  return tr;
+  const pair = document.createDocumentFragment();
+  pair.append(tr, files);
+  return pair;
+}
+
+async function toggleAddonFiles(addon, tr, row) {
+  const button = tr.querySelector(".link-button");
+  const open = row.hidden;
+  row.hidden = !open;
+  button.setAttribute("aria-expanded", String(open));
+  if (!open || row.dataset.loaded) return;
+  row.dataset.loaded = "1";
+  const list = row.querySelector(".saves-files");
+  try {
+    const listed = await api(`/api/games/${addon.game_id}/addons/${addon.id}/files`);
+    const more = listed.file_count - listed.files.length;
+    list.innerHTML =
+      listed.files
+        .map((f) => `<li><span class="saves-path">${escapeHtml(f.path)}</span><span class="saves-size">${fmtBytes(f.size)}</span></li>`)
+        .join("") + (more > 0 ? `<li class="muted">and ${more} more</li>` : "");
+  } catch (err) {
+    row.dataset.loaded = "";
+    list.innerHTML = `<li class="muted">${escapeHtml(err.message)}</li>`;
+  }
 }
 
 function renderAddonsPanel(category) {
@@ -3402,7 +3471,7 @@ function renderAddonsPanel(category) {
   document.getElementById("game-addons-table-body").replaceChildren(...rows);
 }
 
-// Every game's mods, patches and DLC, a list for each kind, in the install cache view.
+// Every game's mods, patches, DLC and extras, a list for each kind, in the install cache view.
 async function refreshAddonLists() {
   const host = document.getElementById("addon-cache-cards");
   let all = [];

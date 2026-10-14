@@ -90,3 +90,55 @@ def test_an_addon_is_not_found_under_another_game(api):
     created = _upload(api, _zip_bytes({"a": b"x"})).json()
 
     assert api.get(f"/api/games/9/addons/{created['id']}/download").status_code == 404
+
+
+def test_the_uploader_can_rename_and_the_content_is_untouched(api):
+    created = _upload(api, _zip_bytes({"a": b"x"})).json()
+    url = f"/api/games/5/addons/{created['id']}"
+
+    renamed = api.patch(url, json={"name": "Better: name"})
+
+    assert renamed.status_code == 200
+    assert renamed.json()["name"] == "Better_ name" and renamed.json()["category"] == "patch"
+    assert api.get(f"{url}/download").status_code == 200
+
+
+def test_only_an_admin_or_the_uploader_can_rename(api):
+    created = _upload(api, _zip_bytes({"a": b"x"})).json()
+    url = f"/api/games/5/addons/{created['id']}"
+
+    api.state.user = SimpleNamespace(id=2, is_admin=False)
+    assert api.patch(url, json={"name": "Other"}).status_code == 403
+
+    api.state.user = SimpleNamespace(id=2, is_admin=True)
+    assert api.patch(url, json={"name": "Other"}).status_code == 200
+    assert api.get("/api/games/5/addons").json()[0]["name"] == "Other"
+
+
+def test_an_empty_name_or_an_unknown_addon_is_refused_on_rename(api):
+    created = _upload(api, _zip_bytes({"a": b"x"})).json()
+
+    assert api.patch(f"/api/games/5/addons/{created['id']}", json={"name": "  "}).status_code == 400
+    assert api.patch("/api/games/5/addons/999", json={"name": "x"}).status_code == 404
+
+
+def test_an_extra_is_uploaded_listed_and_downloaded(api):
+    created = _upload(api, _zip_bytes({"tools/a.txt": b"x"}), category="extra", name="Tools")
+
+    assert created.status_code == 201 and created.json()["category"] == "extra"
+    assert api.get(f"/api/games/5/addons/{created.json()['id']}/download").status_code == 200
+
+
+def test_an_addon_lists_its_files_with_sizes_and_counts_all_of_them(api):
+    created = _upload(api, _zip_bytes({"Game/a.pak": b"xyz", "Game/b.dat": b"x"})).json()
+
+    listed = api.get(f"/api/games/5/addons/{created['id']}/files")
+
+    assert listed.status_code == 200
+    assert listed.json() == {"file_count": 2, "files": [{"path": "Game/a.pak", "size": 3}, {"path": "Game/b.dat", "size": 1}]}
+
+
+def test_the_listing_of_an_addon_of_another_game_is_not_found(api):
+    created = _upload(api, _zip_bytes({"a": b"x"})).json()
+
+    assert api.get(f"/api/games/9/addons/{created['id']}/files").status_code == 404

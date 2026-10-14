@@ -17,3 +17,7 @@ class GameAddonSchema(BaseModel):
     user_id: int | None = None
     session_id: int | None = None
     created_at: datetime
+
+
+class GameAddonRenameForm(BaseModel):
+    name: str

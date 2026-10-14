@@ -161,7 +161,9 @@ def plan_action(
         # gets its retry after every other button had its turn.
         penalty = 1 if m.entry.toggle and attempts >= 1 else 0
         # A near-miss read ("instal" off a checkbox caption) goes after every exact one.
-        ranked.append(((penalty, 0 if is_exact(m) else 1, _priority(m)), m, key, attempts))
+        # On a license page its Yes is the answer that goes on: an "Ok" or "Next" read off the license text comes after it.
+        priority = -3 if license_page and m.entry.category == "agree" and not m.entry.toggle else _priority(m)
+        ranked.append(((penalty, 0 if is_exact(m) else 1, priority), m, key, attempts))
     if not ranked:
         return None, matches
 
@@ -171,6 +173,10 @@ def plan_action(
             Action("key", 0, 0, match.entry.key, match, key, alt=match.entry.key_alt),
             matches,
         )
+    if match.entry.category == "agree" and license_page and not match.entry.toggle and attempts == 0:
+        # Caught live (Sacrifice): a mouse click on Yes on the license page did nothing, while Return, which the page
+        # makes the default button, accepted it. On a license page Yes is the default, so Return is that same answer.
+        return Action("key", 0, 0, "Return", match, key, alt=False), matches
     if attempts >= 1 and match.entry.mnemonic:
         return Action("key", 0, 0, match.entry.mnemonic, match, key), matches
     x, y = match.center

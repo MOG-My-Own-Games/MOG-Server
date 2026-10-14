@@ -1,4 +1,4 @@
-"""A mod, patch or DLC of a game kept on the server (see handler/addons.py). The content is one zip in a folder of its
+"""A mod, patch, DLC or extra of a game kept on the server (see handler/addons.py). The content is one zip in a folder of its
 own, under ADDONS_PATH; the row is what the game's Files and the install cache list."""
 
 from __future__ import annotations
@@ -8,7 +8,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from models.base import BaseModel
 
-ADDON_CATEGORIES = ("mod", "patch", "dlc")
+# "extra" is any other addon that is not a mod, a patch or a DLC: a generic folder of files added on top of a game.
+ADDON_CATEGORIES = ("mod", "patch", "dlc", "extra")
 ADDON_NAME_MAX_LENGTH = 120
 
 

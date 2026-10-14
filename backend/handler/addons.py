@@ -1,4 +1,4 @@
-"""Mods, patches and DLC kept on the server: the files an install added on top of a game, as one zip per entity.
+"""Mods, patches, DLC and extras kept on the server: the files an install added on top of a game, as one zip per entity.
 
 An entity lives in a folder of its own under ADDONS_PATH (`<ADDONS_PATH>/<game_id>/<category>/<entity_id>/content.zip`),
 never in the install cache, so the cache's expiry and its clearing leave it alone. The zip's member names are the
@@ -97,6 +97,16 @@ def add_zip(
         raise
     log.info(f"Addon kept: {category} {name!r} of game {game_id} ({count} files, {size:,} bytes)")
     return row
+
+
+def list_files(addon: GameAddon, limit: int) -> tuple[int, list[tuple[str, int]]]:
+    """(how many files the addon holds, the first `limit` of them as (path, size)), read from its zip."""
+    path = content_path(addon)
+    if not path.is_file():
+        raise AddonError("The addon's content is missing")
+    with zipfile.ZipFile(path) as zf:
+        members = [info for info in zf.infolist() if not info.is_dir()]
+    return len(members), [(info.filename, info.file_size) for info in members[:limit]]
 
 
 def build_zip(files: list[tuple[str, Path]]) -> Path:

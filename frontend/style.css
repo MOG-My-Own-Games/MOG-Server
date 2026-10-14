@@ -932,7 +932,7 @@ a.chip { color: inherit; text-decoration: none; }
 .link-button:hover { color: var(--text); background: none; }
 .link-button .caret { width: 0; height: 0; border-left: 5px solid currentColor; border-top: 4px solid transparent; border-bottom: 4px solid transparent; transition: transform 0.12s; }
 .link-button[aria-expanded="true"] .caret { transform: rotate(90deg); }
-.saves-device .data-table tr.saves-files-row td { padding: 0 0.6em 0.8em; white-space: normal; border-bottom: 1px solid var(--border); }
+.data-table tr.saves-files-row td { padding: 0 0.6em 0.8em; white-space: normal; border-bottom: 1px solid var(--border); }
 .saves-files-row[hidden] { display: none; }
 .saves-files { margin: 0; padding: 0.4em 0.8em; list-style: none; max-height: 16em; overflow-y: auto; font-size: 0.85em; background: var(--bg-elevated, rgba(255, 255, 255, 0.03)); border: 1px solid var(--border); border-radius: 6px; }
 .saves-files li { display: flex; justify-content: space-between; gap: var(--space-md); padding: 0.15em 0; }
@@ -1034,3 +1034,10 @@ a.chip { color: inherit; text-decoration: none; }
 
 /* Something to read before going on (a patch may ask where the game is): set apart, in the warning colour. */
 .notice { border-left: 3px solid var(--warn); padding: 0.3em 0.8em; margin: 0.8em 0; color: var(--muted); }
+
+/* The size of a game on the server: the total, and under it the parts it is made of. */
+.size-box { max-width: 22em; margin: 0.4em 0 1.2em; padding: 0.5em 0.8em; border: 1px solid var(--border); border-radius: 6px; }
+.size-box[hidden] { display: none; }
+.size-box .size-total { color: var(--text); }
+.size-box .size-parts { list-style: none; margin: 0.3em 0 0; padding: 0; font-size: 0.85em; }
+.size-box .size-parts li { display: flex; justify-content: space-between; gap: var(--space-md); padding: 0.15em 0; }

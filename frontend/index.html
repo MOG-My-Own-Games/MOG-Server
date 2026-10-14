@@ -116,7 +116,10 @@
               <p id="game-library" class="muted small"></p>
               <div id="game-versions" class="chip-row" hidden></div>
               <p class="muted small">Game ID: <code id="game-id-display"></code></p>
-              <p id="game-sizes" class="muted small" hidden></p>
+              <div id="game-sizes" class="size-box" hidden>
+                <div class="size-total" id="game-sizes-total"></div>
+                <ul id="game-sizes-parts" class="size-parts"></ul>
+              </div>
               <p id="game-last-played" class="muted small" hidden></p>
               <div class="page-actions">
                 <button id="client-install-btn" type="button" title="Install this game with the MOG client">Install</button>
@@ -192,8 +195,12 @@
             <div class="page-columns">
               <div class="page-col">
                 <h3>Installer</h3>
-                <p class="muted small">Check one to install now. Once it finishes, check another (e.g. a patch) and install again into the same cache.</p>
+                <p class="muted small">Check the installers to run, in order: the first is the game, the others are patches. Use the arrows to reorder them; the server can remember the order.</p>
                 <div id="game-candidates" class="section"></div>
+                <p id="chain-warning" class="notice small" hidden>A patch may ask where the game is installed. If it does, you will have to answer in the installer screen by hand.</p>
+                <div class="page-actions">
+                  <span id="save-order-status" class="muted small"></span>
+                </div>
 
                 <label class="field-label">Proton / Wine build
                   <select id="proton-build-select"><option value="">(server default)</option></select>
@@ -238,10 +245,10 @@
           <div id="tab-settings" class="tab-panel" hidden>
             <div class="card">
               <h3>Launch settings</h3>
-              <p class="muted small">The Proton build, the winecfg changes and the winetricks verbs MOG Client keeps here for this game. A device uses its own entry and, for what that lacks, the one for all devices.</p>
+              <p class="muted small">The Proton build, the winecfg changes, the winetricks verbs and the launch arguments MOG Client keeps here for this game. A device uses its own entry and, for what that lacks, the one for all devices.</p>
               <p id="launch-settings-empty" class="muted" hidden>Nothing is set for this game yet. Choose a Proton version, open winecfg or run winetricks from the game's Linux Options in MOG Client.</p>
               <table id="launch-settings-table" class="data-table" hidden>
-                <thead><tr><th>For</th><th>Proton</th><th>winecfg</th><th>winetricks</th><th>Changed</th><th></th></tr></thead>
+                <thead><tr><th>For</th><th>Proton</th><th>winecfg</th><th>winetricks</th><th>Arguments</th><th>Changed</th><th></th></tr></thead>
                 <tbody id="launch-settings-body"></tbody>
               </table>
             </div>
@@ -261,6 +268,15 @@
                     <tbody id="game-files-table-body"></tbody>
                   </table>
                   <p id="game-files-empty" class="muted" hidden>No files found on disk.</p>
+                </div>
+
+                <div id="files-panel-addons" class="card" hidden>
+                  <h3 id="files-panel-addons-title">Mods (MOG)</h3>
+                  <p class="muted small">Kept on the server for good: they are not part of the installer cache and survive clearing it.</p>
+                  <table id="game-addons-table" class="data-table">
+                    <thead><tr><th>Name</th><th>Size</th><th>Files</th><th>Added</th><th></th></tr></thead>
+                    <tbody id="game-addons-table-body"></tbody>
+                  </table>
                 </div>
 
                 <div id="files-panel-cache" class="card" hidden>
@@ -466,6 +482,8 @@
                 <tbody id="cache-table-body"></tbody>
               </table>
             </div>
+
+            <div id="addon-cache-cards"></div>
 
             <div class="card">
               <div class="main-header">

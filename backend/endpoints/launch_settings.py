@@ -43,6 +43,7 @@ async def get_launch_settings(
                 proton=by_device[d.id].proton,
                 winecfg_reg=by_device[d.id].winecfg_reg,
                 winetricks=by_device[d.id].winetricks,
+                launch_args=by_device[d.id].launch_args,
                 updated_at=by_device[d.id].updated_at,
             )
             for d in db_device_handler.get_for_user(user.id)
@@ -55,12 +56,12 @@ async def get_launch_settings(
 async def put_launch_settings(
     user: CurrentUser, id: Annotated[int, Path(ge=1)], form: LaunchSettingsForm
 ) -> LaunchSettingsSchema:
-    """Set the Proton build, the winecfg changes and the winetricks verbs of a game, for one device or for all of them."""
+    """Set the Proton build, the winecfg changes, the winetricks verbs and the launch arguments of a game, for one device or for all of them."""
     _visible_game(user, id)
     target = None
     if form.scope == "device":
         target = _own_device(user, form.device_id).id  # type: ignore[arg-type]
-    changes = form.model_dump(exclude_unset=True, include={"proton", "winecfg_reg", "winetricks"})
+    changes = form.model_dump(exclude_unset=True, include={"proton", "winecfg_reg", "winetricks", "launch_args"})
     log.debug(f"Launch settings: game {id} {form.scope} {target}, changing {sorted(changes)} for user {user.id}")
     return LaunchSettingsSchema.model_validate(db_launch_settings_handler.save(id, target, changes))
 

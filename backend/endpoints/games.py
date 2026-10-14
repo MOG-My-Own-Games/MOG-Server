@@ -398,7 +398,11 @@ async def get_game_sizes(user: CurrentUser, id: Annotated[int, Path(ge=1)]) -> G
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     sizes = await run_in_threadpool(game_sizes, game)
     return GameSizesSchema(
-        installer_bytes=sizes.installer, cache_bytes=sizes.cache, saves_bytes=sizes.saves, total_bytes=sizes.total
+        installer_bytes=sizes.installer,
+        cache_bytes=sizes.cache,
+        saves_bytes=sizes.saves,
+        addons_bytes=sizes.addons,
+        total_bytes=sizes.total,
     )
 
 

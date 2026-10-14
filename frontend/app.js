@@ -1079,6 +1079,7 @@ async function refreshCacheTable(silent = false) {
     const data = await api("/api/games/install/cache");
     renderCacheTotal(data);
     await renderModCacheTable(data.mods || []);
+    await refreshAddonLists();
     if (data.entries.length === 0) {
       body.innerHTML = "<tr><td colspan='6' class='muted'>No cached installs.</td></tr>";
       return;
@@ -1848,25 +1849,36 @@ function resetGameTabs() {
   document.getElementById("tab-settings").hidden = true;
 }
 
-// What the game takes on the server: "40.0 GB (Installer 27.7 GB, Cache 12.3 GB, Saves 1.4 MB)", the empty parts left out. The server
-// remembers it, so this is cheap to ask for on every visit.
+// What the game takes on the server: the total, and under it the parts it is made of (installer, cache, addons, saves),
+// the ones with nothing left out. The server remembers it, so this is cheap to ask for on every visit.
 async function loadGameSizes(gameId) {
   const line = document.getElementById("game-sizes");
   line.hidden = true;
   try {
     const sizes = await api(`/api/games/${gameId}/sizes`);
     if (!activeGame || activeGame.id !== gameId) return;
-    const parts = [["Installer", sizes.installer_bytes], ["Cache", sizes.cache_bytes], ["Saves", sizes.saves_bytes]]
-      .filter(([, bytes]) => bytes > 0)
-      .map(([name, bytes]) => `${name} ${fmtBytes(bytes)}`);
-    line.textContent = `Size on server: ${fmtBytes(sizes.total_bytes)}` + (parts.length ? ` (${parts.join(", ")})` : "");
+    document.getElementById("game-sizes-total").textContent = `Size on server: ${fmtBytes(sizes.total_bytes)}`;
+    document.getElementById("game-sizes-parts").replaceChildren(
+      ...[
+        ["Installer", sizes.installer_bytes],
+        ["Cache", sizes.cache_bytes],
+        ["Addons", sizes.addons_bytes],
+        ["Saves", sizes.saves_bytes],
+      ]
+        .filter(([, bytes]) => bytes > 0)
+        .map(([name, bytes]) => {
+          const li = document.createElement("li");
+          li.innerHTML = `<span>${name}</span><span class="saves-size">${fmtBytes(bytes)}</span>`;
+          return li;
+        })
+    );
     line.hidden = false;
   } catch (_) {
     // An older server has no such figure; the line just stays out.
   }
 }
 
-// The Settings tab: the Proton build, winecfg changes and winetricks verbs the clients keep for the game, for all devices and for each one.
+// The Settings tab: the Proton build, winecfg changes, winetricks verbs and launch arguments the clients keep for the game, for all devices and for each one.
 async function loadLaunchSettings(gameId) {
   const table = document.getElementById("launch-settings-table");
   const empty = document.getElementById("launch-settings-empty");
@@ -1910,6 +1922,7 @@ async function loadLaunchSettings(gameId) {
       reg.appendChild(details);
     }
     cell(row.winetricks && row.winetricks.length ? row.winetricks.join(", ") : "None");
+    cell(row.launch_args || "None");
     cell(new Date(row.updated_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }));
     const remove = document.createElement("button");
     remove.type = "button";
@@ -1994,6 +2007,7 @@ async function openGamePage(id) {
   renderVersions(game);
   renderOverview(game);
   loadGameFiles(game.id);
+  loadGameAddons(game.id);
   loadSaves(game.id);
 
   document.getElementById("scrape-status").textContent = "";
@@ -2010,8 +2024,10 @@ async function openGamePage(id) {
   document.getElementById("clear-game-cache-btn").hidden = true;
   document.getElementById("start-install-btn").hidden = false;
   libFiles = null;
+  gameAddons = [];
   cacheFiles = null;
   gameSaves = null;
+  document.getElementById("save-order-status").textContent = "";
   setSavesStatus("");
   filesSubtab = "all";
   renderFilesTab();
@@ -2703,12 +2719,42 @@ const CHAINABLE_KINDS = new Set(["known installer", "executable (top level)", "e
 // itself). Starting it sends extract_only with no file named.
 const EXTRACT_AS_IS = { path: "", kind: "extract as it is", category: "game", extractAsIs: true };
 
+// The installers of a game can be inside a disc image or an archive, not beside it: the server lists what is in each
+// (a few at most, so a folder of parts does not keep the page waiting). Such an entry remembers its disc in source_path.
+const MAX_SOURCES_LOOKED_INTO = 8;
+const INSIDE_KIND = "executable (inside)";
+
+async function installersInsideDiscs(gameId, candidates) {
+  const sources = candidates
+    .filter((c) => ARCHIVE_SOURCE_KINDS.has(c.kind) && !c.path.toLowerCase().endsWith(".mds")) // .mds only describes a disc
+    .slice(0, MAX_SOURCES_LOOKED_INTO);
+  const listings = await Promise.all(
+    sources.map(async (source) => {
+      try {
+        const found = await api(`/api/games/${gameId}/install/candidates?source=${encodeURIComponent(source.path)}`);
+        return found.candidates
+          .filter((c) => CHAINABLE_KINDS.has(c.kind))
+          .map((c) => ({ ...c, kind: INSIDE_KIND, source_path: source.path }));
+      } catch (_) {
+        return []; // a disc that cannot be read shows nothing inside
+      }
+    }),
+  );
+  return listings.flat();
+}
+
+// How an installer is named in the list: its path, and for one inside a disc, the disc's name first.
+function candidateLabel(c) {
+  return c.source_path ? `${c.source_path.split("/").pop()} > ${c.path}` : c.path;
+}
+
 async function loadCandidates(gameId) {
   const el = document.getElementById("game-candidates");
   el.innerHTML = "Loading installer candidates...";
   try {
     const data = await api(`/api/games/${gameId}/install/candidates`);
     const chainable = data.candidates.filter((c) => CHAINABLE_KINDS.has(c.kind));
+    chainable.push(...(await installersInsideDiscs(gameId, data.candidates)));
     const portable = Boolean(data.extract_suggested);
     if (data.candidates.length === 0 && !portable) {
       el.innerHTML = '<p class="muted">No installer detected automatically - start the install anyway to pick one by hand through the installer display.</p>';
@@ -2725,38 +2771,102 @@ async function loadCandidates(gameId) {
     // The "just extract" entry comes first and excludes the executables below it: it is one way to install,
     // they are another (and can be chained).
     const entries = portable ? [EXTRACT_AS_IS, ...chainable] : chainable;
+    // The saved order is checked and comes first; what it does not name follows, unchecked. With none saved, the first
+    // installer of the game itself is the one checked. Ticked rows always sit on top, in the order they will run.
+    const known = (data.order || [])
+      .map((step) => entries.find((c) => c.path === step.path && (c.source_path || null) === (step.source_path || null)))
+      .filter(Boolean);
+    const items =
+      known.length > 0
+        ? [
+            ...known.map((c) => ({ c, origin: entries.indexOf(c), checked: true })),
+            ...entries.filter((c) => !known.includes(c)).map((c) => ({ c, origin: entries.indexOf(c), checked: false })),
+          ]
+        : entries.map((c, i) => ({ c, origin: i, checked: i === 0 && c.category === "game" }));
+    const settle = () => {
+      const on = items.filter((item) => item.checked);
+      const off = items.filter((item) => !item.checked).sort((a, b) => a.origin - b.origin);
+      items.splice(0, items.length, ...on, ...off);
+    };
+    settle();
     const list = document.createElement("div");
     list.className = "candidate-list";
-    const checks = [];
-    const select = () => {
-      installQueue = entries.filter((_, j) => checks[j].checked);
-    };
-    entries.forEach((c, i) => {
-      const label = document.createElement("label");
-      label.className = "candidate-row";
-      const check = document.createElement("input");
-      check.type = "checkbox";
-      const isBase = c.category === "game";
-      check.checked = i === 0 && isBase;
-      checks.push(check);
-      check.addEventListener("change", () => {
-        if (check.checked) {
-          // Extracting as it is and running an executable do not mix.
-          entries.forEach((other, j) => {
-            if (j !== i && (c.extractAsIs || other.extractAsIs)) checks[j].checked = false;
-          });
+    const render = () => {
+      list.innerHTML = "";
+      let place = 0;
+      items.forEach((item, i) => {
+        const c = item.c;
+        const label = document.createElement("label");
+        label.className = `candidate-row${item.checked ? " ticked" : ""}`;
+        const check = document.createElement("input");
+        check.type = "checkbox";
+        check.checked = item.checked;
+        check.addEventListener("change", () => {
+          item.checked = check.checked;
+          if (item.checked) {
+            // Extracting as it is and running an executable do not mix.
+            items.forEach((other) => {
+              if (other !== item && (c.extractAsIs || other.c.extractAsIs)) other.checked = false;
+            });
+            // A row just ticked runs last of the ticked ones.
+            items.splice(items.indexOf(item), 1);
+            items.splice(items.map((x) => x.checked).lastIndexOf(true) + 1, 0, item);
+          }
+          settle();
+          render();
+          rememberInstallOrder();
+        });
+        label.appendChild(check);
+        if (item.checked && !c.extractAsIs) {
+          const badge = document.createElement("span");
+          badge.className = "candidate-place";
+          badge.textContent = String(++place);
+          badge.title = place === 1 ? "Installed first: the game" : "A patch: installed after the ones above it";
+          label.appendChild(badge);
         }
-        select();
+        // The same pill the Files tab uses: a ticked row says what part it has (the first is the game, the others
+        // patches); an unticked one says what the server calls it, when that is not "game".
+        const tagText = item.checked && !c.extractAsIs ? (place === 1 ? "game" : "patch") : !c.extractAsIs && c.category && c.category !== "game" ? c.category : null;
+        if (tagText) {
+          const tag = document.createElement("span");
+          tag.className = `chip ${tagText === "game" ? "chip-active" : "chip-tag"}`;
+          tag.textContent = tagText;
+          label.appendChild(tag);
+        }
+        const text = document.createElement("span");
+        text.className = "candidate-text";
+        text.textContent = c.extractAsIs
+          ? "Just extract: use the files as they are, run nothing"
+          : `${candidateLabel(c)} (${fmtBytes(c.file_size_bytes)})`;
+        label.appendChild(text);
+        if (item.checked && !c.extractAsIs) {
+          const arrows = document.createElement("span");
+          arrows.className = "order-buttons";
+          for (const [symbol, step, title] of [["\u25B2", -1, "Move up"], ["\u25BC", 1, "Move down"]]) {
+            const move = document.createElement("button");
+            move.type = "button";
+            move.className = "order-btn";
+            move.textContent = symbol;
+            move.title = title;
+            move.setAttribute("aria-label", title);
+            move.disabled = !(items[i + step] && items[i + step].checked); // only among the ticked ones
+            move.addEventListener("click", (e) => {
+              e.preventDefault();
+              [items[i], items[i + step]] = [items[i + step], items[i]];
+              render();
+              rememberInstallOrder();
+            });
+            arrows.appendChild(move);
+          }
+          label.appendChild(arrows);
+        }
+        list.appendChild(label);
       });
-      label.appendChild(check);
-      const text = document.createElement("span");
-      text.textContent = c.extractAsIs
-        ? "Just extract: use the files as they are, run nothing"
-        : `${isBase ? "" : `[${c.category.toUpperCase()}] `}${c.path} (${fmtBytes(c.file_size_bytes)})`;
-      label.appendChild(text);
-      list.appendChild(label);
-    });
-    select();
+      installQueue = items.filter((item) => item.checked).map((item) => item.c);
+      const several = installQueue.filter((c) => !c.extractAsIs).length > 1;
+      document.getElementById("chain-warning").hidden = !several;
+    };
+    render();
     el.appendChild(list);
     // An archive/disc image with nothing directly executable alongside it
     // (e.g. the whole game ships as one .zip) - not chainable, but still
@@ -3028,13 +3138,23 @@ function askExtractAsIs(pick) {
   });
 }
 
-async function startInstall(candidate) {
+// `chain` is a list of executables to run one after another in one session, the first the game's own.
+async function startInstall(candidate, chain = null) {
   const body = {
     auto_mode: document.getElementById("auto-mode-check").checked,
     proton_build: document.getElementById("proton-build-select").value || null,
   };
   const ttlRaw = document.getElementById("ttl-days-input").value;
   if (ttlRaw !== "") body.ttl_seconds = parseInt(ttlRaw, 10) * 86400;
+
+  if (chain) {
+    body.steps = chain.map((c) => ({ path: c.path, source_path: c.source_path || null }));
+    const session = await api(`/api/games/${activeGame.id}/install`, { method: "POST", body: JSON.stringify(body) });
+    renderInstallState(session);
+    startPolling();
+    refreshActiveInstalls();
+    return;
+  }
 
   if (candidate?.extractAsIs) {
     body.extract_only = true;
@@ -3043,6 +3163,7 @@ async function startInstall(candidate) {
       body.source_path = candidate.path;
     } else {
       body.installer_path = candidate.path;
+      if (candidate.source_path) body.source_path = candidate.source_path; // it is inside this disc or archive
     }
   }
 
@@ -3060,14 +3181,37 @@ async function startInstall(candidate) {
   refreshActiveInstalls();
 }
 
+// Executables only: an archive or "just extract" cannot be chained with a patch.
+function chainOf(queue) {
+  const chain = queue.filter((c) => !c.extractAsIs && !ARCHIVE_SOURCE_KINDS.has(c.kind));
+  return chain.length > 1 && chain.length === queue.length ? chain : null;
+}
+
 document.getElementById("start-install-btn").addEventListener("click", async () => {
-  queueActive = true;
+  const chain = chainOf(installQueue);
+  // A chain is one session, so the page does not start the next one when it ends.
+  queueActive = !chain;
   try {
-    await startInstall(installQueue[0]);
+    await startInstall(installQueue[0], chain);
   } catch (err) {
     alert(`Could not start install: ${err.message}`);
   }
 });
+
+// Every order the person sets (ticks, moves) is the game's default from then on: the next Install runs it. "Just extract" is
+// a one-off and leaves the default as it was; an empty selection keeps the last default too, so nothing is lost by accident.
+async function rememberInstallOrder() {
+  const status = document.getElementById("save-order-status");
+  const gameId = activeGame?.id;
+  const steps = installQueue.filter((c) => !c.extractAsIs).map((c) => ({ path: c.path, source_path: c.source_path || null }));
+  if (!gameId || steps.length === 0) return;
+  try {
+    await api(`/api/games/${gameId}/install/order`, { method: "PUT", body: JSON.stringify({ steps }) });
+    if (activeGame?.id === gameId) status.textContent = steps.length > 1 ? "Order remembered as the default." : "Remembered as the default.";
+  } catch (err) {
+    if (activeGame?.id === gameId) status.textContent = `Could not remember the default: ${err.message}`;
+  }
+}
 
 document.getElementById("cancel-install-btn").addEventListener("click", async () => {
   if (!activeGame) return;
@@ -3208,6 +3352,154 @@ const CACHE_SUBTAB = "__cache__";
 const SAVES_SUBTAB = "__saves__";
 const ADDON_ORDER = ["mod", "dlc"]; // listed first; any other kind follows by name
 
+// Mods, patches and DLC kept on the server for the game (not files of the library): one subtab per kind that has any.
+const ADDON_SUBTAB = "__addon_";
+const ADDON_CATEGORIES = ["mod", "patch", "dlc", "extra"];
+let gameAddons = []; // from /api/games/{id}/addons
+
+function addonSubtabLabel(category) {
+  return { mod: "Mods (MOG)", patch: "Patches (MOG)", dlc: "DLC (MOG)", extra: "Extras (MOG)" }[category] || `${category} (MOG)`;
+}
+
+async function loadGameAddons(gameId) {
+  try {
+    gameAddons = await api(`/api/games/${gameId}/addons`);
+  } catch (_) {
+    gameAddons = [];
+  }
+  renderFilesTab();
+}
+
+async function deleteAddon(addon, afterDelete) {
+  const ok = await confirmDanger({
+    title: `Delete ${addon.name}?`,
+    lines: ["It is removed from the server for good. Clients that have not applied it yet can no longer get it."],
+    confirmLabel: "Delete",
+  });
+  if (!ok) return;
+  try {
+    await api(`/api/games/${addon.game_id}/addons/${addon.id}`, { method: "DELETE" });
+    await afterDelete();
+  } catch (err) {
+    alert(`Could not delete: ${err.message}`);
+  }
+}
+
+async function renameAddon(addon, afterRename) {
+  const name = prompt("New name for this addon", addon.name);
+  if (name === null || !name.trim() || name.trim() === addon.name) return;
+  try {
+    await api(`/api/games/${addon.game_id}/addons/${addon.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: name.trim() }),
+    });
+    await afterRename();
+  } catch (err) {
+    alert(`Could not rename: ${err.message}`);
+  }
+}
+
+// The row of an addon, and under it the row that lists its files: opened with the arrow on its file count (as the
+// saved versions in the Saves panel), the list fetched the first time.
+function addonRow(addon, withGame, game, afterDelete) {
+  const tr = document.createElement("tr");
+  const gameCell = withGame
+    ? `<td><a href="#game/${addon.game_id}">${escapeHtml(game ? game.name : String(addon.game_id))}</a></td>`
+    : "";
+  tr.innerHTML = `
+    ${gameCell}
+    <td>${escapeHtml(addon.name)}</td>
+    <td>${fmtBytes(addon.size_bytes)}</td>
+    <td><button type="button" class="link-button" aria-expanded="false"><span class="caret" aria-hidden="true"></span>${addon.file_count} file${addon.file_count === 1 ? "" : "s"}</button></td>
+    <td>${escapeHtml(new Date(addon.created_at).toLocaleString())}</td>
+  `;
+  const files = document.createElement("tr");
+  files.className = "saves-files-row";
+  files.hidden = true;
+  files.innerHTML = `<td colspan="${withGame ? 6 : 5}"><ul class="saves-files"><li class="muted">Loading...</li></ul></td>`;
+  tr.querySelector(".link-button").addEventListener("click", () => toggleAddonFiles(addon, tr, files));
+  const actions = document.createElement("td");
+  actions.className = "row-actions";
+  const download = document.createElement("button");  // a button like the saves' Download: the same height and place in the row
+  download.type = "button";
+  download.textContent = "Download";
+  download.addEventListener("click", () =>
+    downloadWithAuth(`/api/games/${addon.game_id}/addons/${addon.id}/download`, `${addon.name}.zip`).catch((err) => alert(`Could not download: ${err.message}`))
+  );
+  const del = document.createElement("button");
+  del.type = "button";
+  del.className = "danger";
+  del.textContent = "Delete";
+  del.addEventListener("click", () => deleteAddon(addon, afterDelete));
+  const rename = document.createElement("button");
+  rename.type = "button";
+  rename.className = "secondary";
+  rename.textContent = "Rename";
+  rename.addEventListener("click", () => renameAddon(addon, afterDelete));
+  actions.append(download, rename, del);
+  tr.appendChild(actions);
+  const pair = document.createDocumentFragment();
+  pair.append(tr, files);
+  return pair;
+}
+
+async function toggleAddonFiles(addon, tr, row) {
+  const button = tr.querySelector(".link-button");
+  const open = row.hidden;
+  row.hidden = !open;
+  button.setAttribute("aria-expanded", String(open));
+  if (!open || row.dataset.loaded) return;
+  row.dataset.loaded = "1";
+  const list = row.querySelector(".saves-files");
+  try {
+    const listed = await api(`/api/games/${addon.game_id}/addons/${addon.id}/files`);
+    const more = listed.file_count - listed.files.length;
+    list.innerHTML =
+      listed.files
+        .map((f) => `<li><span class="saves-path">${escapeHtml(f.path)}</span><span class="saves-size">${fmtBytes(f.size)}</span></li>`)
+        .join("") + (more > 0 ? `<li class="muted">and ${more} more</li>` : "");
+  } catch (err) {
+    row.dataset.loaded = "";
+    list.innerHTML = `<li class="muted">${escapeHtml(err.message)}</li>`;
+  }
+}
+
+function renderAddonsPanel(category) {
+  document.getElementById("files-panel-addons-title").textContent = addonSubtabLabel(category);
+  const rows = gameAddons.filter((a) => a.category === category).map((a) => addonRow(a, false, null, () => loadGameAddons(a.game_id)));
+  document.getElementById("game-addons-table-body").replaceChildren(...rows);
+}
+
+// Every game's mods, patches, DLC and extras, a list for each kind, in the install cache view.
+async function refreshAddonLists() {
+  const host = document.getElementById("addon-cache-cards");
+  let all = [];
+  try {
+    all = await api("/api/games/addons");
+  } catch (_) {
+    host.replaceChildren();
+    return;
+  }
+  const cards = [];
+  for (const category of ADDON_CATEGORIES) {
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `<div class="main-header"><h3>${escapeHtml(addonSubtabLabel(category))}</h3></div>
+      <table class="data-table"><thead><tr><th>Game</th><th>Name</th><th>Size</th><th>Files</th><th>Added</th><th></th></tr></thead><tbody></tbody></table>`;
+    const body = card.querySelector("tbody");
+    const mine = all.filter((a) => a.category === category);
+    if (mine.length === 0) {
+      body.innerHTML = "<tr><td colspan='6' class='muted'>None kept.</td></tr>";
+    }
+    for (const addon of mine) {
+      body.appendChild(addonRow(addon, true, await gameById(addon.game_id), refreshAddonLists));
+    }
+    cards.push(card);
+  }
+  host.replaceChildren(...cards);
+}
+
 // The subtab a library file belongs to: the kind the server gave it ("game" is the game itself, so Root).
 function fileSubtab(file) {
   return !file.category || file.category === "game" ? ROOT_SUBTAB : file.category;
@@ -3234,6 +3526,10 @@ function filesSubtabs() {
       return (ra < 0 ? ADDON_ORDER.length : ra) - (rb < 0 ? ADDON_ORDER.length : rb) || a.localeCompare(b);
     });
   for (const k of addons) tabs.push({ id: k, label: addonLabel(k), count: byKind.get(k) });
+  for (const category of ADDON_CATEGORIES) {
+    const count = gameAddons.filter((a) => a.category === category).length;
+    if (count > 0) tabs.push({ id: ADDON_SUBTAB + category, label: addonSubtabLabel(category), count });
+  }
   if (cacheFiles && cacheFiles.files.length > 0) {
     tabs.push({ id: CACHE_SUBTAB, label: "Installer cache", count: cacheFiles.files.length });
   }
@@ -3261,9 +3557,15 @@ function renderFilesTab() {
 
   const showCache = filesSubtab === CACHE_SUBTAB;
   const showSaves = filesSubtab === SAVES_SUBTAB;
+  const showAddons = filesSubtab.startsWith(ADDON_SUBTAB);
   document.getElementById("files-panel-cache").hidden = !showCache;
   document.getElementById("files-panel-saves").hidden = !showSaves;
-  document.getElementById("files-panel-library").hidden = showCache || showSaves;
+  document.getElementById("files-panel-addons").hidden = !showAddons;
+  document.getElementById("files-panel-library").hidden = showCache || showSaves || showAddons;
+  if (showAddons) {
+    renderAddonsPanel(filesSubtab.slice(ADDON_SUBTAB.length));
+    return;
+  }
   if (showCache) {
     renderCachePanel();
     return;

@@ -4,8 +4,10 @@ def load_all_models() -> None:
     from models import (  # noqa: F401
         device,
         game,
+        game_addon,
         game_launch_settings,
         install_session,
+        install_step,
         library,
         notification,
         save_version,

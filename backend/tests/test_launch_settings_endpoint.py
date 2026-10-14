@@ -141,3 +141,23 @@ def test_winetricks_verbs_are_kept_once_each_in_order_for_a_scope_and_listed_for
 
     api.put("/api/games/5/launch-settings", json={"scope": "all", "winetricks": None})
     assert api.get("/api/games/5/launch-settings").json()["shared"]["winetricks"] is None
+
+
+def test_launch_arguments_are_kept_per_scope_and_listed_for_the_web_ui(api):
+    device = _device(api)
+
+    api.put("/api/games/5/launch-settings", json={"scope": "all", "launch_args": "-windowed"})
+    api.put("/api/games/5/launch-settings", json={"scope": "device", "device_id": device, "launch_args": "-savetouserdir"})
+    body = api.get("/api/games/5/launch-settings", params={"device_id": device}).json()
+
+    assert body["shared"]["launch_args"] == "-windowed"
+    assert body["device"]["launch_args"] == "-savetouserdir"
+    assert body["devices"][0]["launch_args"] == "-savetouserdir"
+
+
+def test_a_null_clears_the_launch_arguments_and_they_are_one_line(api):
+    api.put("/api/games/5/launch-settings", json={"scope": "all", "launch_args": "-windowed"})
+
+    assert api.put("/api/games/5/launch-settings", json={"scope": "all", "launch_args": None}).json()["launch_args"] is None
+    assert api.put("/api/games/5/launch-settings", json={"scope": "all", "launch_args": "-a\n-b"}).status_code == 422
+    assert api.put("/api/games/5/launch-settings", json={"scope": "all", "launch_args": "x" * 1001}).status_code == 422

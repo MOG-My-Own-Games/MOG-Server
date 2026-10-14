@@ -60,6 +60,7 @@ from handler.install.manifest import (
     write_live_manifest,
     write_manifest,
 )
+from handler import addons as addons_handler
 from handler.install.progress import ThrottledProgress
 from handler.install.proton_builds import (
     _download_proton_build,
@@ -161,6 +162,15 @@ def dispatch_queue() -> int:
             log.info(f"Install session {hl(str(waiting.id))} left the queue")
             started += 1
     return started
+
+
+# The error a session carries once someone cancelled it (set by the endpoint, which the runner then leaves alone).
+CANCELLED_ERROR = "Cancelled"
+
+
+def _cancelled(install_session_id: int) -> bool:
+    session = db_install_session_handler.get_session(install_session_id)
+    return session is not None and session.error == CANCELLED_ERROR
 
 
 def cancel_install(install_session_id: int) -> bool:
@@ -498,8 +508,153 @@ def _set_phase(install_session_id: int, phase: InstallPhase | None, detail: str 
     )
 
 
+@dataclass
+class _Step:
+    """One installer of a session's chain, resolved and unpacked when its turn comes."""
+
+    installer_abs: str
+    source_abs: Path | None
+    # What it is run against: the game's folder, or the scratch dir its archive was unpacked into.
+    search_root: Path
+    # The unpacked disc image's root when the installer came from one (see _disc_root), else None.
+    disc_source: Path | None
+    installer_bytes: int | None
+    extract_temp_dir: TemporaryDirectory[str] | None = None
+
+
+def _steps_of(session: InstallSession) -> list[tuple[str | None, str | None]]:
+    """The (installer, source) pairs the session runs in order: its chain, or the one installer it was started with."""
+    if session.steps:
+        return [(step.get("path"), step.get("source_path")) for step in session.steps]
+    return [(session.installer_path, session.source_path)]
+
+
+def _normalize_step(game, installer_path: str | None, source_path: str | None) -> tuple[str | None, str | None]:
+    """An archive named as the installer (no source) is read as the source, as sessions started that way always were."""
+    if source_path is None and installer_path:
+        probe = fs_game_handler.resolve_installer_abs_path(game, installer_path)
+        if is_archive_candidate(Path(probe)):
+            return None, installer_path
+    return installer_path, source_path
+
+
+def _step_label(index: int, total: int, message: str) -> str:
+    """A failure names its step when the session runs more than one installer."""
+    return message if total == 1 else f"Step {index + 1}/{total}: {message}"
+
+
+def _prepare_step(
+    install_session_id: int, game, inner_installer: str | None, source_rel: str | None, total: int
+) -> _Step | None:
+    """Resolve one installer of the chain, unpacking its archive into a scratch dir if it comes from one. None when a
+    single installer turned out to be nothing to run: the session then extracts its contents as they are instead."""
+    extract_temp_dir: TemporaryDirectory[str] | None = None
+    extract_root: Path | None = None
+    source_abs: Path | None = None
+    if source_rel is None:
+        installer_abs = fs_game_handler.resolve_installer_abs_path(game, inner_installer or "")
+    else:
+        source_abs = Path(fs_game_handler.resolve_installer_abs_path(game, source_rel))
+        db_install_session_handler.update_session(
+            install_session_id,
+            {"phase": source_phase(source_abs).value, "phase_detail": source_abs.name},
+        )
+        result = extract_and_rescan(source_abs, inner_installer)
+        if result is None and not inner_installer:
+            if total > 1:
+                raise ValueError(f"Nothing recognizable as an installer inside {source_abs.name}")
+            # Nothing to run in it (a disc image 7-Zip cannot open, a folder of data): what the person would have chosen
+            # anyway, so it is taken as it is instead of failing and asking them to start again.
+            log.info(f"Nothing recognizable as an installer inside {source_abs.name}: extracting it as it is")
+            db_install_session_handler.update_session(install_session_id, {"extract_only": True})
+            _run_extract_only(install_session_id, game, source_rel)
+            return None
+        if result is None:
+            raise ValueError(
+                f"Nothing recognizable as an installer inside {source_abs.name}. Start the install again "
+                "and choose to extract its contents as they are."
+            )
+        extract_temp_dir, extract_root, chosen = result
+        installer_abs = str(extract_root / chosen.path)
+        db_install_session_handler.update_session(
+            install_session_id,
+            {
+                "source_path": source_rel,
+                "installer_path": chosen.path,
+                "phase": None,
+                "phase_detail": None,
+            },
+        )
+
+    # Bound read-only for the installer to find its sibling files (InstallShield's setup-N.bin, Data1.cab, ...), which
+    # sit next to the .exe or a level or two below it. Only a source this step actually unpacked gets a d: (see
+    # _configure_drive_letters); a plain file has no real "disc" to represent.
+    if extract_root is not None:
+        search_root = extract_root
+        disc_source = _disc_root(extract_root, Path(installer_abs))
+    else:
+        search_root = fs_game_handler.get_game_root_abs_path(game)
+        if not search_root.is_dir():
+            search_root = search_root.parent
+        disc_source = None
+    return _Step(
+        installer_abs=installer_abs,
+        source_abs=source_abs,
+        search_root=search_root,
+        disc_source=disc_source,
+        installer_bytes=_installer_bytes(game, source_abs),
+        extract_temp_dir=extract_temp_dir,
+    )
+
+
+def _file_stats(files: list[Path]) -> dict[Path, tuple[int, int]]:
+    stats: dict[Path, tuple[int, int]] = {}
+    for f in files:
+        try:
+            st = f.stat()
+        except OSError:
+            continue
+        stats[f] = (st.st_size, st.st_mtime_ns)
+    return stats
+
+
+def _changed_since(
+    before: dict[Path, tuple[int, int]], prefix_dir: Path, baseline: frozenset[Path], root: Path
+) -> list[tuple[str, Path]]:
+    """The files under the install root that are new or differ from `before`, as (path under `root`, file)."""
+    changed: list[tuple[str, Path]] = []
+    for f in collect_windows_install_files(prefix_dir, baseline):
+        try:
+            st = f.stat()
+        except OSError:
+            continue
+        if before.get(f) != (st.st_size, st.st_mtime_ns):
+            changed.append((f.relative_to(root).as_posix(), f))
+    return changed
+
+
+def _keep_patch(install_session_id: int, game, zip_path: Path, name: str) -> None:
+    """Keep the patch's zip as an entity of the game. A failure to keep it never fails the install itself."""
+    session = db_install_session_handler.get_session(install_session_id)
+    try:
+        addons_handler.add_zip(
+            game.id, "patch", name, zip_path, user_id=session.user_id if session else None, session_id=install_session_id
+        )
+    except Exception as e:  # noqa: BLE001 - the install is done; only the kept copy is lost
+        log.warning(f"Install session {install_session_id}: could not keep the patch {name!r} as an addon: {e}")
+    finally:
+        addons_handler.discard_zip(zip_path)
+
+
+def _sum_installer_bytes(sizes: list[int | None]) -> int | None:
+    known = [size for size in sizes if size is not None]
+    return sum(known) if known else None
+
+
 def _run_install(install_session_id: int, attempt: int = 1) -> bool:
-    """Run the install once. True when it stopped early on an auto mode session that has runs left: the caller runs it again."""
+    """Run the session's installers once, in order, inside one VNC session, then stream what they left.
+
+    True when it stopped early on an auto mode session that has runs left: the caller runs it again."""
     retry = False
     session = db_install_session_handler.get_session(install_session_id)
     if session is None:
@@ -511,276 +666,257 @@ def _run_install(install_session_id: int, attempt: int = 1) -> bool:
         _fail(install_session_id, "Game no longer exists")
         return False
 
-    if not session.installer_path and not session.source_path and not session.extract_only:
+    if not session.installer_path and not session.source_path and not session.extract_only and not session.steps:
         _fail(install_session_id, "No installer selected for this session")
         return False
 
-    # An archive/disc image holding the installer: either picked explicitly
-    # (`source_path`, with `installer_path` naming the executable inside it) or
-    # an archive selected as the installer itself (legacy sessions). Extracted
-    # into a scratch dir, never the install cache, since it holds a copy of
-    # the game's own contents rather than the install's output.
-    source_rel = session.source_path
-    inner_installer = session.installer_path
-    if source_rel is None and inner_installer:
-        try:
-            probe = fs_game_handler.resolve_installer_abs_path(game, inner_installer)
-        except (ValueError, FileNotFoundError) as e:
-            _fail(install_session_id, str(e))
-            return False
-        if is_archive_candidate(Path(probe)):
-            source_rel, inner_installer = inner_installer, None
-
-    if session.extract_only:
-        _run_extract_only(install_session_id, game, source_rel)
-        return False
-
-    extract_temp_dir: TemporaryDirectory[str] | None = None
-    source_abs: Path | None = None
+    pairs = _steps_of(session)
+    total = len(pairs)
     try:
-        if source_rel is None:
-            installer_abs = fs_game_handler.resolve_installer_abs_path(game, inner_installer or "")
-        else:
-            source_abs = Path(fs_game_handler.resolve_installer_abs_path(game, source_rel))
-            db_install_session_handler.update_session(
-                install_session_id,
-                {"phase": source_phase(source_abs).value, "phase_detail": source_abs.name},
-            )
-            result = extract_and_rescan(source_abs, inner_installer)
-            if result is None and not inner_installer:
-                # Nothing to run in it (a disc image 7-Zip cannot open, a folder of data): what the person would
-                # have chosen anyway, so it is taken as it is instead of failing and asking them to start again.
-                log.info(f"Nothing recognizable as an installer inside {source_abs.name}: extracting it as it is")
-                db_install_session_handler.update_session(install_session_id, {"extract_only": True})
-                _run_extract_only(install_session_id, game, source_rel)
-                return False
-            if result is None:
-                _fail(
-                    install_session_id,
-                    f"Nothing recognizable as an installer inside {source_abs.name}. Start the install again "
-                    "and choose to extract its contents as they are.",
-                )
-                return False
-            extract_temp_dir, extract_root, chosen = result
-            installer_abs = str(extract_root / chosen.path)
-            db_install_session_handler.update_session(
-                install_session_id,
-                {
-                    "source_path": source_rel,
-                    "installer_path": chosen.path,
-                    "phase": None,
-                    "phase_detail": None,
-                },
-            )
+        pairs = [_normalize_step(game, installer, source) for installer, source in pairs]
     except (ValueError, FileNotFoundError) as e:
         _fail(install_session_id, str(e))
         return False
 
-    installer_bytes = _installer_bytes(game, source_abs)
+    if session.extract_only:
+        _run_extract_only(install_session_id, game, pairs[0][1])
+        return False
 
-    # InstallShield-based multi-part installers (their ISArcExtract/ISDone.dll
-    # archive extractor) look for sibling data files (setup-N.bin, Data1.cab,
-    # ...) next to the installer .exe at runtime, not just the .exe itself -
-    # and older/DOS-era titles in particular sometimes nest those siblings a
-    # subfolder or two below the installer rather than right next to it.
-    # Without this, bwrap only exposes the single chosen file and the
-    # installer fails the instant it needs a sibling it can't see. Bind the
-    # installer's actual containing root read-only: the game's own library
-    # directory normally, or the archive's scratch extraction root when the
-    # installer came from inside an archive/ISO (see archive_prescan above).
-    if extract_temp_dir is not None:
-        installer_search_root = extract_root
-    else:
-        installer_search_root = fs_game_handler.get_game_root_abs_path(game)
-        if not installer_search_root.is_dir():
-            installer_search_root = installer_search_root.parent
-
-    # Only a source this session actually mounted/extracted gets a d: (see
-    # _configure_drive_letters): a plain single-file install has no real
-    # "disc" to represent, and handing it a d: anyway just gives its own
-    # "default next to the source" logic an extra drive letter to land on
-    # instead of c:. Deliberately not content-based (e.g. a ".bin" sitting
-    # next to the installer): that extension means a real CD-ROM dump in one
-    # context but a PC installer's own multi-part payload format, read
-    # directly by the installer itself, in another - the same suffix, two
-    # unrelated things, and nothing here ever mounts the second kind.
-    disc_source: Path | None = extract_root if extract_temp_dir is not None else None
-    if disc_source is not None:
-        disc_source = _disc_root(disc_source, Path(installer_abs))
-    log.debug(
-        f"Install session {install_session_id} attempt {attempt}: installer {installer_abs}, "
-        f"source {source_abs}, {installer_bytes} bytes, search root {installer_search_root}"
-    )
-
-    work_dir = ensure_session_cache_dir(install_session_id)
-    # A native installer (.sh/.run, GOG's MojoSetup among them) runs as it is: no Proton, no Wine prefix. Its
-    # HOME and temporary files go inside the session's cache, the one place it may write.
-    native = not _uses_wine(installer_abs)
+    work_dir: Path | None = None
+    vnc: VncSession | None = None
+    temp_dirs: list[TemporaryDirectory[str]] = []
+    native = False
     prefix_dir: Path | None = None
     proton_or_wine = ""
     is_proton = False
     extra_env: tuple[tuple[str, str], ...] = ()
-    if native:
-        extra_env = _native_env(work_dir)
-    else:
-        prefix_dir = _proton_prefix_dir(work_dir)
-        wanted_build = session.proton_build or default_build_id()
-        if wanted_build and resolve_proton_path(wanted_build) is None:
-            _set_phase(
-                install_session_id,
-                InstallPhase.DOWNLOADING,
-                f"Downloading Proton {wanted_build} (first run only, can take a few minutes)",
-            )
-        proton_or_wine = _wine_or_proton(session.proton_build)
-        _set_phase(install_session_id, None, None)
-        is_proton = _is_proton(proton_or_wine)
-
-        if is_proton:
-            # Proton computes its own real Wine prefix from
-            # STEAM_COMPAT_DATA_PATH (as "<that>/pfx", not WINEPREFIX directly)
-            # and needs STEAM_COMPAT_CLIENT_INSTALL_PATH to exist, even though
-            # nothing here is a real Steam install - a session-local, already-
-            # bound-in directory satisfies it.
-            steam_client_dir = work_dir / "steam-client"
-            steam_client_dir.mkdir(parents=True, exist_ok=True)
-            extra_env = (
-                ("STEAM_COMPAT_DATA_PATH", str(prefix_dir)),
-                ("STEAM_COMPAT_CLIENT_INSTALL_PATH", str(steam_client_dir)),
-            )
-
-    vnc: VncSession | None = None
+    windows_baseline: frozenset[Path] = frozenset()
+    installer_sizes: list[int | None] = []
+    exit_code: int | None = None
+    # What the first installer left on drive_c, to tell the patches after it apart (a chain only).
+    after_first: dict[Path, tuple[int, int]] | None = None
+    last_name = ""
     try:
-        vnc = start_vnc_session(
-            install_session_id, NOVNC_WEB_ROOT, INSTALL_NATIVE_VNC_RESOLUTION if native else INSTALL_VNC_RESOLUTION
-        )
-        db_install_session_handler.update_session(
-            install_session_id,
-            {
-                "state": InstallSessionState.INSTALLING,
-                "cache_path": str(work_dir),
-                "vnc_url": vnc.public_url,
-                "vnc_web_port": vnc.web_port,
-                "vnc_token": vnc.token,
-            },
-        )
+        for index, (inner_installer, source_rel) in enumerate(pairs):
+            try:
+                step = _prepare_step(install_session_id, game, inner_installer, source_rel, total)
+            except (ValueError, FileNotFoundError) as e:
+                _fail(install_session_id, _step_label(index, total, str(e)))
+                return False
+            if step is None:
+                return False
+            if step.extract_temp_dir is not None:
+                temp_dirs.append(step.extract_temp_dir)
+            installer_sizes.append(step.installer_bytes)
+            last_name = Path(step.installer_abs).name
+            step_wine = _uses_wine(step.installer_abs)
 
-        windows_baseline: frozenset[Path] = frozenset()
-        installer_arg = installer_abs
-        if _uses_wine(installer_abs):
-            _set_phase(install_session_id, InstallPhase.PREPARING, "Preparing the Wine prefix (the display stays black until the installer opens)")
-            _init_wine_prefix(
-                proton_or_wine,
-                installer_abs=installer_abs,
-                work_dir=str(work_dir),
-                prefix_dir=str(prefix_dir),
-                display=vnc.display,
-                extra_env=extra_env,
-            )
-            _configure_drive_letters(prefix_dir, proton_or_wine, installer_search_root, disc_source)
-            if disc_source is not None:
-                _mark_d_drive_as_cdrom(
-                    proton_or_wine,
-                    installer_abs=installer_abs,
-                    work_dir=str(work_dir),
-                    prefix_dir=str(prefix_dir),
-                    display=vnc.display,
-                    extra_env=extra_env,
+            if index == 0:
+                work_dir = ensure_session_cache_dir(install_session_id)
+                # A native installer (.sh/.run, GOG's MojoSetup among them) runs as it is: no Proton, no Wine prefix.
+                # Its HOME and temporary files go inside the session's cache, the one place it may write.
+                native = not step_wine
+                if native:
+                    extra_env = _native_env(work_dir)
+                else:
+                    prefix_dir = _proton_prefix_dir(work_dir)
+                    wanted_build = session.proton_build or default_build_id()
+                    if wanted_build and resolve_proton_path(wanted_build) is None:
+                        _set_phase(
+                            install_session_id,
+                            InstallPhase.DOWNLOADING,
+                            f"Downloading Proton {wanted_build} (first run only, can take a few minutes)",
+                        )
+                    proton_or_wine = _wine_or_proton(session.proton_build)
+                    _set_phase(install_session_id, None, None)
+                    is_proton = _is_proton(proton_or_wine)
+
+                    if is_proton:
+                        # Proton computes its own real Wine prefix from STEAM_COMPAT_DATA_PATH (as "<that>/pfx", not
+                        # WINEPREFIX directly) and needs STEAM_COMPAT_CLIENT_INSTALL_PATH to exist, even though
+                        # nothing here is a real Steam install - a session-local, already-bound-in directory does.
+                        steam_client_dir = work_dir / "steam-client"
+                        steam_client_dir.mkdir(parents=True, exist_ok=True)
+                        extra_env = (
+                            ("STEAM_COMPAT_DATA_PATH", str(prefix_dir)),
+                            ("STEAM_COMPAT_CLIENT_INSTALL_PATH", str(steam_client_dir)),
+                        )
+
+                vnc = start_vnc_session(
+                    install_session_id, NOVNC_WEB_ROOT, INSTALL_NATIVE_VNC_RESOLUTION if native else INSTALL_VNC_RESOLUTION
                 )
-            # Never the bare Unix path from here on: see
-            # _windows_installer_path for why.
-            installer_arg = _windows_installer_path(Path(installer_abs), installer_search_root, disc_source)
-            # Wine's own bootstrap seeds Program Files with real stock stub
-            # apps (wmplayer.exe, iexplore.exe, Common Files DLLs, ...) -
-            # snapshot them now, before the installer ever runs, so they
-            # don't get mistaken for what it wrote (see windows_output.py).
-            saved_baseline = load_baseline(prefix_dir)
-            if saved_baseline is None:
-                windows_baseline = snapshot_windows_content_files(_wine_drive_c_root(prefix_dir, proton_or_wine))
-                save_baseline(prefix_dir, windows_baseline)
+                db_install_session_handler.update_session(
+                    install_session_id,
+                    {
+                        "state": InstallSessionState.INSTALLING,
+                        "cache_path": str(work_dir),
+                        "vnc_url": vnc.public_url,
+                        "vnc_web_port": vnc.web_port,
+                        "vnc_token": vnc.token,
+                    },
+                )
+
+                if not native:
+                    _set_phase(
+                        install_session_id,
+                        InstallPhase.PREPARING,
+                        "Preparing the Wine prefix (the display stays black until the installer opens)",
+                    )
+                    _init_wine_prefix(
+                        proton_or_wine,
+                        installer_abs=step.installer_abs,
+                        work_dir=str(work_dir),
+                        prefix_dir=str(prefix_dir),
+                        display=vnc.display,
+                        extra_env=extra_env,
+                    )
+                    # Wine's own bootstrap seeds Program Files with real stock stub apps (wmplayer.exe, iexplore.exe,
+                    # Common Files DLLs, ...): snapshot them before any installer runs, so they are not mistaken for
+                    # what it wrote (see windows_output.py). Every step of the chain shares this prefix and baseline.
+                    saved_baseline = load_baseline(prefix_dir)
+                    if saved_baseline is None:
+                        windows_baseline = snapshot_windows_content_files(_wine_drive_c_root(prefix_dir, proton_or_wine))
+                        save_baseline(prefix_dir, windows_baseline)
+                    else:
+                        windows_baseline = saved_baseline
+            elif step_wine == native:
+                kind = "Windows" if step_wine else "native"
+                first = "Windows" if not native else "native"
+                _fail(
+                    install_session_id,
+                    _step_label(
+                        index, total, f"it is a {kind} installer, but the install started with a {first} one: "
+                        "the steps of one install run the same way"
+                    ),
+                )
+                return False
+
+            assert vnc is not None and work_dir is not None
+            if not native:
+                # The drive letters point at this step's own source, so they are set for each step, not just once.
+                _configure_drive_letters(prefix_dir, proton_or_wine, step.search_root, step.disc_source)
+                if step.disc_source is not None:
+                    _mark_d_drive_as_cdrom(
+                        proton_or_wine,
+                        installer_abs=step.installer_abs,
+                        work_dir=str(work_dir),
+                        prefix_dir=str(prefix_dir),
+                        display=vnc.display,
+                        extra_env=extra_env,
+                    )
+                # Never the bare Unix path from here on: see _windows_installer_path for why.
+                installer_arg = _windows_installer_path(Path(step.installer_abs), step.search_root, step.disc_source)
             else:
-                windows_baseline = saved_baseline
+                installer_arg = step.installer_abs
 
-        # Some installers default their own destination to a top-level
-        # "Games" folder regardless of which drives are actually available
-        # - a targeted, single-path workaround for that one convention (see
-        # SandboxSpec.games_fallback_dir).
-        games_dir = work_dir / "Games"
-        games_dir.mkdir(exist_ok=True)
-        if disc_source is not None:
-            _route_disc_games_dir(disc_source)
+            # Some installers default their own destination to a top-level "Games" folder regardless of which drives
+            # are actually available - a targeted, single-path workaround for that one convention (see
+            # SandboxSpec.games_fallback_dir).
+            games_dir = work_dir / "Games"
+            games_dir.mkdir(exist_ok=True)
+            if step.disc_source is not None:
+                _route_disc_games_dir(step.disc_source)
+            db_install_session_handler.update_session(install_session_id, {"step_index": index})
 
-        inner = _build_inner_command(installer_arg, proton_or_wine)
-        argv = _wrap_for_sandbox(
-            inner,
-            installer_abs=installer_abs,
-            work_dir=str(work_dir),
-            proton_prefix=str(prefix_dir) if prefix_dir is not None else None,
-            display=vnc.display,
-            proton_or_wine=proton_or_wine,
-            extra_env=extra_env,
-            installer_search_root=str(installer_search_root),
-            games_fallback_dir=str(games_dir),
-            # From a disc, the setup starts in its own folder, as when run from its drive.
-            chdir=str(Path(installer_abs).parent) if disc_source is not None and _uses_wine(installer_abs) else None,
-        )
-
-        log.info(f"Launching installer for session {hl(str(install_session_id))} via {hl('Proton' if is_proton else 'Wine')}")
-
-        # Only meaningful for the Windows/Wine path - collect_windows_install_files
-        # is the same "Program Files" discovery already used at finalize time,
-        # just run repeatedly instead of once after the fact. Native .sh/.run
-        # installers have no such discovery target either way.
-        stop_live_manifest = threading.Event()
-        live_manifest_thread: threading.Thread | None = None
-        if _uses_wine(installer_abs):
-            live_manifest_thread = threading.Thread(
-                target=_live_manifest_loop,
-                args=(work_dir, _wine_drive_c_root(prefix_dir, proton_or_wine), windows_baseline, stop_live_manifest),
-                daemon=True,
+            log.debug(
+                f"Install session {install_session_id} attempt {attempt}, step {index + 1}/{total}: "
+                f"installer {step.installer_abs}, source {step.source_abs}, {step.installer_bytes} bytes, "
+                f"search root {step.search_root}"
             )
-            live_manifest_thread.start()
-        _set_phase(install_session_id, InstallPhase.LAUNCHING, f"Launching {Path(installer_abs).name}, waiting for its first window")
-        timed_out = False
-        exit_code: int | None = None
-        try:
-            exit_code = _run_installer(argv, vnc.display, auto_mode_session=(install_session_id, work_dir))
-        except subprocess.TimeoutExpired:
-            timed_out = True
-        finally:
-            stop_live_manifest.set()
-            if live_manifest_thread is not None:
-                live_manifest_thread.join(timeout=2)
+            inner = _build_inner_command(installer_arg, proton_or_wine)
+            argv = _wrap_for_sandbox(
+                inner,
+                installer_abs=step.installer_abs,
+                work_dir=str(work_dir),
+                proton_prefix=str(prefix_dir) if prefix_dir is not None else None,
+                display=vnc.display,
+                proton_or_wine=proton_or_wine,
+                extra_env=extra_env,
+                installer_search_root=str(step.search_root),
+                games_fallback_dir=str(games_dir),
+                # From a disc, the setup starts in its own folder, as when run from its drive.
+                chdir=str(Path(step.installer_abs).parent) if step.disc_source is not None and not native else None,
+            )
 
-        if timed_out and not _install_output_looks_finished(work_dir):
-            # Genuinely stuck (something was still mid-write, or nothing
-            # was ever produced) - not safe to trust as a finished install.
-            _fail(install_session_id, "Installer timed out")
+            log.info(
+                f"Launching installer for session {hl(str(install_session_id))} via "
+                f"{hl('Proton' if is_proton else 'Wine') if not native else hl('native')}"
+                + (f", step {index + 1} of {total}" if total > 1 else "")
+            )
+
+            # Only meaningful for the Windows/Wine path - collect_windows_install_files is the same "Program Files"
+            # discovery already used at finalize time, just run repeatedly instead of once after the fact.
+            stop_live_manifest = threading.Event()
+            live_manifest_thread: threading.Thread | None = None
+            if not native:
+                live_manifest_thread = threading.Thread(
+                    target=_live_manifest_loop,
+                    args=(work_dir, _wine_drive_c_root(prefix_dir, proton_or_wine), windows_baseline, stop_live_manifest),
+                    daemon=True,
+                )
+                live_manifest_thread.start()
+            launch = f"Launching {Path(step.installer_abs).name}, waiting for its first window"
+            _set_phase(install_session_id, InstallPhase.LAUNCHING, launch if total == 1 else f"{launch} (step {index + 1} of {total})")
+            timed_out = False
+            try:
+                exit_code = _run_installer(argv, vnc.display, auto_mode_session=(install_session_id, work_dir))
+            except subprocess.TimeoutExpired:
+                timed_out = True
+            finally:
+                stop_live_manifest.set()
+                if live_manifest_thread is not None:
+                    live_manifest_thread.join(timeout=2)
+
+            if timed_out and not _install_output_looks_finished(work_dir):
+                # Genuinely stuck (something was still mid-write, or nothing was ever produced) - not safe to trust as
+                # a finished install, and the steps after it would build on something unfinished.
+                _fail(install_session_id, _step_label(index, total, "Installer timed out"))
+                return False
+            if timed_out:
+                log.warning(
+                    f"Install session {install_session_id} hit its timeout, but every discovered file looks finished "
+                    "and stable - most likely the installer reached its own final dialog (e.g. \"Finish\") and nobody "
+                    "was there to click it. Salvaging the install instead of discarding it."
+                )
+            if _cancelled(install_session_id):
+                return False
+            if index == 0 and total > 1 and not native:
+                after_first = _file_stats(collect_windows_install_files(prefix_dir, windows_baseline))
+
+        if _cancelled(install_session_id):
             return False
-        if timed_out:
-            log.warning(
-                f"Install session {install_session_id} hit its timeout, but every "
-                "discovered file looks finished and stable - most likely the "
-                'installer reached its own final dialog (e.g. "Finish") and '
-                "nobody was there to click it. Salvaging the install instead "
-                "of discarding it."
-            )
-
-        # Installer exited (or timed out but looks done): it's done writing,
-        # VNC is no longer needed. Set to None so the finally block below
-        # doesn't try to stop it again.
+        # Every installer is done writing: VNC is no longer needed. Set to None so the finally block below doesn't
+        # try to stop it again.
         _enter_streaming(install_session_id, vnc)
         vnc = None
+        installer_bytes = _sum_installer_bytes(installer_sizes)
         if native:
             _finalize_native_install(install_session_id, work_dir, exit_code, installer_bytes)
         else:
-            _finalize_install(
-                install_session_id,
-                _wine_drive_c_root(prefix_dir, proton_or_wine),
-                work_dir,
-                windows_baseline,
-                exit_code,
-                installer_bytes,
-            )
+            drive_c = _wine_drive_c_root(prefix_dir, proton_or_wine)
+            # Finalizing moves the files out of the prefix, so what the patches after the first changed is zipped now.
+            patch_zip: Path | None = None
+            if after_first is not None:
+                # The same root finalizing will use, so a patch's paths match the install's own (what a client extracts).
+                root = resolve_install_root(drive_c, collect_windows_install_files(prefix_dir, windows_baseline))
+                changed = _changed_since(after_first, prefix_dir, windows_baseline, root)
+                if changed:
+                    patch_zip = addons_handler.build_zip(changed)
+            try:
+                _finalize_install(
+                    install_session_id,
+                    drive_c,
+                    work_dir,
+                    windows_baseline,
+                    exit_code,
+                    installer_bytes,
+                )
+            except BaseException:
+                if patch_zip is not None:
+                    addons_handler.discard_zip(patch_zip)
+                raise
+            if patch_zip is not None:
+                _keep_patch(install_session_id, game, patch_zip, last_name)
     except InstallStoppedEarly as e:
         session = db_install_session_handler.get_session(install_session_id)
         if attempt < INSTALL_ATTEMPTS and session is not None and session.auto_mode:
@@ -796,12 +932,12 @@ def _run_install(install_session_id: int, attempt: int = 1) -> bool:
     finally:
         if vnc is not None:
             vnc.stop()
-        # Covers every exit path (done, failed, timed out) uniformly - a
-        # successful run's own _finalize_install has already removed it by
-        # the time we get here, so this is just a no-op then.
-        delete_live_manifest(work_dir)
-        if extract_temp_dir is not None:
-            extract_temp_dir.cleanup()
+        # Covers every exit path (done, failed, timed out) uniformly - a successful run's own _finalize_install has
+        # already removed it by the time we get here, so this is just a no-op then.
+        if work_dir is not None:
+            delete_live_manifest(work_dir)
+        for temp_dir in temp_dirs:
+            temp_dir.cleanup()
     return retry
 
 
@@ -1512,6 +1648,8 @@ def _focus_installer_window(env: dict, state: _FocusState) -> None:
 
 
 def _fail(install_session_id: int, error: str) -> None:
+    if _cancelled(install_session_id):
+        return  # cancelled: the process was killed, so whatever it left is not an error to report
     db_install_session_handler.update_session(
         install_session_id,
         {

@@ -89,11 +89,12 @@ class ModJobSchema(BaseModel):
 
 
 class GameSizesSchema(BaseModel):
-    """Disk the game takes on the server: its folder (the installers), the install caches and the saves."""
+    """Disk the game takes on the server: its folder (the installers), the install caches, the saves and the addons."""
 
     installer_bytes: int
     cache_bytes: int
     saves_bytes: int
+    addons_bytes: int = 0
     total_bytes: int
 
 

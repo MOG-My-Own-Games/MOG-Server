@@ -18,7 +18,7 @@ def world(monkeypatch, tmp_path: Path):
     cache.mkdir(parents=True)
     (cache / "files.bin").write_bytes(b"z" * 400)
     game = SimpleNamespace(id=1, fs_name="Game", size_bytes=None, library=SimpleNamespace(root_path=str(tmp_path)))
-    state = SimpleNamespace(saves=70, stored=[])
+    state = SimpleNamespace(saves=70, addons=0, stored=[])
     monkeypatch.setattr(
         sizes, "db_game_handler", SimpleNamespace(update_game=lambda gid, data: state.stored.append((gid, data)))
     )
@@ -28,6 +28,7 @@ def world(monkeypatch, tmp_path: Path):
         sizes, "db_install_session_handler", SimpleNamespace(get_sessions_for_game=lambda gid: [SimpleNamespace(id=9, state=InstallSessionState.DONE)])
     )
     monkeypatch.setattr(sizes, "db_saves_handler", SimpleNamespace(summary=lambda game_id: (2, state.saves)))
+    monkeypatch.setattr(sizes, "db_game_addons_handler", SimpleNamespace(total_size=lambda game_id: state.addons))
     monkeypatch.setattr(games.db_game_handler, "get_game", lambda _id: game)
 
     async def direct(fn, *args):
@@ -48,6 +49,15 @@ def test_sizes_split_the_folder_the_caches_and_the_saves(world):
     result = asyncio.run(games.get_game_sizes(SimpleNamespace(), 1))
 
     assert (result.installer_bytes, result.cache_bytes, result.saves_bytes, result.total_bytes) == (3500, 400, 70, 3970)
+    assert result.addons_bytes == 0
+
+
+def test_the_addons_of_the_game_are_a_part_of_its_size_of_their_own(world):
+    world.state.addons = 1200
+
+    result = asyncio.run(games.get_game_sizes(SimpleNamespace(), 1))
+
+    assert (result.addons_bytes, result.total_bytes) == (1200, 5170)
 
 
 def test_a_size_is_remembered_until_the_top_of_the_folder_changes(world, monkeypatch):

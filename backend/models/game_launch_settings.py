@@ -1,5 +1,5 @@
 """How a game is launched, kept on the server so every device of a game starts it the same way: the Proton build, the
-Wine settings winecfg changed and the winetricks verbs installed in its prefix. One row per game and device; a row with no
+Wine settings winecfg changed, the winetricks verbs installed in its prefix and the arguments the executable starts with. One row per game and device; a row with no
 device holds the settings for all of them."""
 
 from __future__ import annotations
@@ -19,6 +19,8 @@ WINECFG_REG_MAX_LENGTH = 64 * 1024
 # A winetricks verb (vcrun2019, dotnet48, d3dx9_43): the clients put them on a command line, so only what verbs are made of.
 WINETRICKS_VERB = re.compile(r"[a-z0-9][a-z0-9_.-]{0,39}")
 WINETRICKS_MAX_VERBS = 100
+# The arguments put after the executable at launch, as one line the client splits like a shell does.
+LAUNCH_ARGS_MAX_LENGTH = 1000
 
 
 class GameLaunchSettings(BaseModel):
@@ -34,3 +36,5 @@ class GameLaunchSettings(BaseModel):
     winecfg_reg: Mapped[str | None] = mapped_column(Text(), default=None)
     # The verbs installed in the prefix, to put into a new one (a reinstall, another device).
     winetricks: Mapped[list[Any] | None] = mapped_column(CustomJSON(), default=None)
+    # Put after the game's executable when it starts (e.g. -savetouserdir), as the person typed them.
+    launch_args: Mapped[str | None] = mapped_column(String(length=LAUNCH_ARGS_MAX_LENGTH), default=None)

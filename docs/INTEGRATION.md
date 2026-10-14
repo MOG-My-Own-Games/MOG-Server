@@ -19,6 +19,7 @@ together.
 - [7. After the download: what the client owns](#7-after-the-download-what-the-client-owns)
 - [8. Saves (optional)](#8-saves-optional)
 - [9. Mods (optional)](#9-mods-optional)
+- [9b. Game addons](#9b-game-addons-mods-patches-dlc-and-extras-kept-on-the-server-optional)
 - [10. Notifications and other endpoints](#10-notifications-and-other-endpoints)
 - [11. Deep links from the web UI](#11-deep-links-from-the-web-ui)
 - [12. What MOG Client does, by module](#12-what-mog-client-does-by-module)
@@ -162,6 +163,7 @@ done" is only one of the two conditions for finishing (see [6.5](#65-when-is-it-
 | `extract_only` | `true`: do not run anything, take the contents as they are (an archive unpacked, or the game's own files) as the install. `false`: run an installer even if the server would have extracted. Left out: the server decides. |
 | `auto_mode` | Let the server drive the installer's windows by itself (OCR driven). Left out: the server's default (`GET /api/games/install/defaults`). |
 | `manual_mode` | Do not pick an installer; wait for a person to ([5.4](#54-a-person-has-to-choose)). |
+| `steps` | The installers to run in order, as in the game's saved order (see [5.3](#53-deciding-what-to-run)). Left out: the saved order, else the installer picked as before. |
 | `proton_build` | Which Proton build to use; left out, the server's default. |
 | `ttl_seconds` | How long the install cache lives; left out, the server's default (7 days unless an admin changed it in Settings; a default of `0` means never); `0` or less means never. An admin who sets a default of days gives every cache that never expires that expiry, counted from then; `POST /api/games/install/cache/{session_id}/reset` (admin) starts one cache's expiry over from the default in force at that moment. The admin cache listing, `GET /api/games/install/cache`, carries each cache's `expires_at` (`null`: never). |
 
@@ -207,6 +209,21 @@ unpacking anything). A candidate has a `path`, `file_name`, `file_size_bytes`, a
 `executable (top level)`, `executable (nested)`, `disc image`, `archive`, `linux installer`) and a `category`
 (`game`, or an add-on: `dlc`, `mod`, `update`, `patch`, ...; add-ons are listed after the game and never picked
 by default). The answer also has `needs_manual_pick` (nothing was found) and `extract_suggested`.
+
+**Installer order.** A game keeps one ordered list of installers, `GET /api/games/{id}/install/order` to read it and
+`PUT /api/games/{id}/install/order` with `{"steps": [{"path": "...", "source_path": null}, ...]}` to replace it (an empty
+list clears it). The first step is the game's own installer, the others are patches; each `path` must be a file inside
+the game's folder. With a `source_path` (an archive or disc image of the game's own) `path` is the executable inside that archive. A path outside the folder, a file that does not
+exist or the same installer twice answers `400`; more than 20 steps answers `422`. The candidates answer carries the
+saved list as `order`. The list is stored per game, so it survives clearing the install cache.
+
+`POST /api/games/{id}/install` takes the same list as `steps` (the same shape). Left out, a request that names no
+installer runs the game's saved order when there is one; a request that names an installer or a source ignores it.
+A chain is run as it is: no detection and no extraction. Its installers run one after another inside one session:
+one VNC view, one Wine prefix, and the files are streamed once, after the last installer. The session shows
+`step_index` (0-based, the installer running now) and `step_total`. A step that fails, or times out without a finished
+install, stops the chain, and the error names it (`Step 2/3: ...`). All the installers of a chain must be Windows
+installers or all native ones. A chain that stops early in auto mode is run again from its first step.
 
 **`extract_suggested`** is what makes "this is not an installer" visible. It is true when nothing in the folder (or
 in the archive you asked about) looks like an installer: the server looks for known installer names
@@ -393,8 +410,8 @@ starts it the same way. They belong to the game, not to a user.
 
 | Call | What it does |
 | --- | --- |
-| `GET /api/games/{id}/launch-settings?device_id=N` | `{shared, device, devices}`: the settings for all devices, the ones for device `N` (`device_id` is optional), and the ones of each of the user's devices that has any (`[{device, proton, winecfg_reg, winetricks, updated_at}]`, for a web page like the server's Settings tab). Each of the first two is `null` or `{proton, winecfg_reg, winetricks, updated_at}`. |
-| `PUT /api/games/{id}/launch-settings` | Body `{scope: "device" \| "all", device_id, proton, winecfg_reg, winetricks}`. `device_id` is required for the `device` scope and must be one of the user's devices. Only the fields sent change; `null` clears one. |
+| `GET /api/games/{id}/launch-settings?device_id=N` | `{shared, device, devices}`: the settings for all devices, the ones for device `N` (`device_id` is optional), and the ones of each of the user's devices that has any (`[{device, proton, winecfg_reg, winetricks, launch_args, updated_at}]`, for a web page like the server's Settings tab). Each of the first two is `null` or `{proton, winecfg_reg, winetricks, launch_args, updated_at}`. |
+| `PUT /api/games/{id}/launch-settings` | Body `{scope: "device" \| "all", device_id, proton, winecfg_reg, winetricks, launch_args}`. `device_id` is required for the `device` scope and must be one of the user's devices. Only the fields sent change; `null` clears one. |
 | `DELETE /api/games/{id}/launch-settings?scope=device\|all&device_id=N` | Remove one scope's settings. |
 
 - `proton` is the **name** of a build (`GE-Proton9-1`), never a path, up to 200 characters: paths differ between devices.
@@ -405,6 +422,9 @@ starts it the same way. They belong to the game, not to a user.
 - `winetricks` is the list of winetricks verbs installed in the game's prefix (`["vcrun2019", "d3dx9"]`, at most 100,
   each made of lowercase letters, digits, `_`, `.` and `-`, once each), so a reinstall or another device can install them
   into its own prefix. A client takes the verbs of both entries together. They go on a command line: check them again.
+- `launch_args` is the text put after the game's executable when it starts (`-savetouserdir`, `-windowed -fullscreen`), up to
+  1000 characters on one line, no control characters. It is what the person typed: a client splits it like a shell does, so
+  it is a line of arguments, never a command. A device uses its own entry when it has one, else the shared one.
 - Any signed-in user who can see the game can change the shared entry.
 - Settings can be deleted (the server's Settings tab of a game has a Delete button for each entry). A client that took
   or sent settings for a game and then finds `shared` and `device` both `null` should treat that as deleted and go back to
@@ -497,6 +517,34 @@ A game folder on the server can have a `mods` folder: each top-level folder or a
 
 MOG Client does not install mods: it only fetches them into the game's `mods` folder. Percent-encode the mod's name.
 
+## 9b. Game addons: mods, patches, DLC and extras kept on the server (optional)
+
+An addon is a zip of the files a mod, a patch, a DLC or an extra added on top of a game, kept on the server **for good**: it is not
+part of the install cache, so its expiry and clearing it leave addons alone (`MOG_BASE_PATH/addons`, one folder per
+entity). The zip's member names are paths relative to the game's install folder, the same ones the install manifest uses,
+so extracting it over the installed game puts the files where they belong. A client may also put files of the game's Wine
+prefix in it, under the reserved top folder `__prefix__/drive_c/...` (old games write outside their own folder); the server
+keeps such members as they are and a client extracts that folder into its own prefix.
+
+Two ways make one, with the same result:
+
+- **On the server.** An install that runs more than one installer (see [5.3](#53-deciding-what-to-run)) keeps what the
+  patches after the first changed as one `patch` addon, named after the last file installed.
+- **On a client.** The client runs a mod, patch, DLC or extra on its own copy of the game, zips what changed and uploads it.
+
+| Call | What it does |
+| --- | --- |
+| `GET /api/games/{id}/addons` | `[{id, game_id, category, name, size_bytes, file_count, user_id, session_id, created_at}]`. `category` is `mod`, `patch`, `dlc` or `extra`. An extra is any other addon: a generic set of files added on top of a game. |
+| `GET /api/games/addons` | Every addon of every game, for a cache view. |
+| `POST /api/games/{id}/addons` | Multipart form: `category`, `name` and `file` (the zip). `201` with the addon. `400` for a wrong category, an empty name, a file that is not a zip, or a member path that leaves the game's folder; `413` over the size limit (`ADDONS_MAX_BYTES`, 8 GiB by default). It never overwrites: each upload is a new addon. |
+| `GET /api/games/{id}/addons/{addon_id}/download` | The zip. |
+| `PATCH /api/games/{id}/addons/{addon_id}` | JSON `{name}`: rename it (the name is sanitized like on upload; content and category stay). Only an admin or the user who added it (`403` otherwise); `400` for an empty name. |
+| `DELETE /api/games/{id}/addons/{addon_id}` | Delete it. Only an admin or the user who added it (`403` otherwise). |
+
+A client that applies an addon extracts the zip over the game and records the files in its install manifest, so they are
+never taken for save files. MOG offers basic modding and is **not a mod manager**: there is no load order, no conflict
+resolution and no enabling or disabling. Use dedicated software for that.
+
 ## 10. Notifications and other endpoints
 
 `GET /api/notifications` returns `{notifications: [...], unread: N}`. A notification has an `id`, a `kind`, a `title`,
@@ -529,6 +577,7 @@ If you want to see a working implementation, these are the files to read in
 | `transfer.py` | The download loop (manifest polling, parallel workers, stall detection, vanished files), verify-and-repair, and the session poll. |
 | `manager.py` | The whole install: start or resume, download, verify, record, then entries (executable, launch script, desktop entry, Steam shortcut). |
 | `mods.py` | Fetching a mod (prepare, follow the zipping, resumable download, cancel). |
+| `addons.py` | Running a mod, patch, DLC or extra as a layer on an installed game: what it changed is sent to the server as an addon, or an addon the server kept is extracted over the game. Both go through the install ledger, so the files are not saves. |
 | `saves/` | Devices, finding a game's save files (Wine prefix or native folders), the archive format, backup and restore with the policy of [8.4](#84-the-policy-mog-client-follows). |
 | `launcher.py`, `gameplay.py`, `steam.py` | Executable discovery, launch commands per engine, watching the running game, Steam shortcuts. |
 | `protocol.py` | The `mog://` link and registering it with the system. |

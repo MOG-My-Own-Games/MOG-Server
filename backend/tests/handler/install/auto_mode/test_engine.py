@@ -195,3 +195,48 @@ class TestReadmeQuestion:
         for question in ("Would you like to view the release notes?", "Vuoi visualizzare il file readme ora?"):
             action, _ = plan_action(self._page(question), CATALOG, ScreenMemory())
             assert action is not None and action.match.entry.category == "decline", question
+
+
+def test_a_sliver_of_artwork_read_as_a_short_word_is_not_pressed_instead_of_the_real_button():
+    """Caught live (Sacrifice's license page): a 15x5 px blob on the window's edge was read as "ja" (yes) and clicked at its
+    own spot, which does nothing, while the real Yes button is 18x11. Every attempt on the blob was one less for the button."""
+    from handler.install.auto_mode.matcher import find_matches
+
+    license_text = [
+        Word(text="Do you accept all the terms of the preceding License Agreement?", left=178, top=368, width=400, height=10, conf=95.0, line_id=(3, 0, 0)),
+    ]
+    sliver = Word(text="ja", left=651, top=220, width=15, height=5, conf=90.0, line_id=(1, 0, 0))
+    yes = Word(text="Yes", left=501, top=437, width=18, height=11, conf=95.0, line_id=(2, 0, 0))
+    page = [*license_text, sliver, yes]
+
+    assert [m.label for m in find_matches(page, CATALOG)] == ["yes"]
+    action, _ = plan_action(page, CATALOG, ScreenMemory())
+    assert action.kind == "key" and action.key == "Return"  # the license's Yes is the default button, see the test below
+
+
+def test_yes_on_a_license_page_is_answered_with_return_the_default_button_not_a_click():
+    """Caught live (Sacrifice): clicks on the license page's Yes did nothing, but Return accepted it."""
+    page = [
+        Word(text="Do you accept all the terms of the preceding License Agreement?", left=178, top=368, width=400, height=10, conf=95.0, line_id=(3, 0, 0)),
+        Word(text="Yes", left=501, top=437, width=18, height=11, conf=95.0, line_id=(2, 0, 0)),
+        Word(text="No", left=589, top=437, width=14, height=11, conf=95.0, line_id=(2, 1, 0)),
+    ]
+
+    action, _ = plan_action(page, CATALOG, ScreenMemory())
+
+    assert action.kind == "key" and action.key == "Return" and action.alt is False
+
+
+def test_yes_on_a_license_page_comes_before_an_ok_read_off_its_text():
+    """Caught live (Sacrifice): the license page's text had an "Ok" that auto mode pressed (and Alt+n'd) again and again before
+    it tried the real Yes, and an installer that is answered No on a license closes."""
+    page = [
+        Word(text="Do you accept all the terms of the preceding License Agreement?", left=178, top=368, width=400, height=10, conf=95.0, line_id=(3, 0, 0)),
+        Word(text="Ok", left=300, top=200, width=20, height=11, conf=95.0, line_id=(4, 0, 0)),
+        Word(text="Yes", left=501, top=437, width=18, height=11, conf=95.0, line_id=(2, 0, 0)),
+        Word(text="No", left=589, top=437, width=14, height=11, conf=95.0, line_id=(2, 1, 0)),
+    ]
+
+    action, _ = plan_action(page, CATALOG, ScreenMemory())
+
+    assert action.match.entry.category == "agree" and action.key == "Return"

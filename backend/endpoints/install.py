@@ -35,18 +35,22 @@ from endpoints.responses.install import (
     InstallDefaultsSchema,
     InstallFileSchema,
     InstallFilesSchema,
+    InstallOrderForm,
+    InstallOrderSchema,
     InstallSessionSchema,
     InstallQueueForm,
     InstallStartForm,
     InstallStreamFileSchema,
     ModCacheEntrySchema,
+    InstallStepForm,
+    InstallStepSchema,
     InstallStreamManifestSchema,
     ProtonBuildSchema,
     ProtonBuildsSchema,
 )
 from handler import mods as mods_handler
 from handler.auth import AdminUser, CurrentUser
-from handler.database import db_game_handler, db_install_session_handler
+from handler.database import db_game_handler, db_install_session_handler, db_install_steps_handler
 from handler.filesystem import fs_game_handler
 from handler.filesystem.installer_detection import ARCHIVE_SOURCE_KINDS, looks_portable, pick_default_installer
 from handler.install import bandwidth
@@ -60,6 +64,7 @@ from handler.install.manifest import (
 )
 from handler.install.proton_builds import get_download_progress, is_extracting, list_proton_builds, remove_build
 from handler.install.proton_builds import enqueue_download as enqueue_proton_download
+from handler.install.runner import CANCELLED_ERROR
 from handler.install.runner import cancel_install as runner_cancel_install
 from handler.install.runner import dispatch_queue, start_or_queue
 from logger.logger import log
@@ -80,6 +85,7 @@ _VNC_HOST = "127.0.0.1"
 
 def _session_schema(session: InstallSession) -> InstallSessionSchema:
     schema = InstallSessionSchema.model_validate(session)
+    schema.step_total = len(session.steps) if session.steps else 1
     if session.state == InstallSessionState.QUEUED:
         schema.queue_position = db_install_session_handler.queue_position(session.id)
     return schema
@@ -172,6 +178,7 @@ async def get_install_candidates(
 
     return InstallCandidatesSchema(
         game_id=game.id,
+        order=[InstallStepSchema.model_validate(step) for step in db_install_steps_handler.list_for_game(game.id)],
         candidates=[
             InstallCandidateSchema(path=c.path, file_name=c.file_name, file_size_bytes=c.file_size_bytes, rank=c.rank, kind=c.kind, category=c.category)
             for c in candidates
@@ -179,6 +186,50 @@ async def get_install_candidates(
         needs_manual_pick=len(candidates) == 0,
         extract_suggested=extract_suggested(candidates) if source is not None else looks_portable(candidates),
     )
+
+
+def _validated_steps(game, steps: list[InstallStepForm]) -> list[dict]:
+    """The steps as stored: every file must be inside the game's folder and none may be listed twice."""
+    seen: set[tuple[str, str | None]] = set()
+    checked: list[dict] = []
+    for step in steps:
+        try:
+            # With a source, `path` is the executable inside that archive and can only be checked when it is unpacked.
+            fs_game_handler.resolve_installer_abs_path(game, step.source_path or step.path)
+        except (ValueError, FileNotFoundError) as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+        key = (step.path, step.source_path)
+        if key in seen:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Installer listed twice: {step.path}")
+        seen.add(key)
+        checked.append({"path": step.path, "source_path": step.source_path})
+    return checked
+
+
+@router.get("/{id}/install/order")
+async def get_install_order(user: CurrentUser, id: Annotated[int, PathVar(ge=1)]) -> InstallOrderSchema:
+    """The installers of a game in the order they run: the first is the game's own, the others are patches."""
+    if db_game_handler.get_game(id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    steps = db_install_steps_handler.list_for_game(id)
+    return InstallOrderSchema(game_id=id, steps=[InstallStepSchema.model_validate(step) for step in steps])
+
+
+@router.put("/{id}/install/order")
+async def put_install_order(
+    user: CurrentUser, id: Annotated[int, PathVar(ge=1)], form: InstallOrderForm
+) -> InstallOrderSchema:
+    """Replace the saved order of a game's installers. Every step must be a file inside the game's directory, and the
+    same installer cannot appear twice."""
+    game = db_game_handler.get_game(id)
+    if game is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
+    steps = _validated_steps(game, form.steps)
+
+    saved = db_install_steps_handler.replace(id, steps)
+    log.debug(f"Install order: game {id} now has {len(saved)} step(s), changed by user {user.id}")
+    return InstallOrderSchema(game_id=id, steps=[InstallStepSchema.model_validate(step) for step in saved])
 
 
 async def _archive_needs_no_installer(game, installer_path: str | None, source_path: str | None) -> bool:
@@ -223,34 +274,47 @@ async def start_install_session(
     own_sessions = [x for x in game_sessions if x.user_id == user.id]
     existing = _pick_reusable_session(own_sessions)
 
-    installer_path = data.installer_path
-    source_path = data.source_path
     manual_mode = data.manual_mode if data.manual_mode is not None else default_manual_mode()
-    if installer_path is None and source_path is None:
-        candidates = fs_game_handler.get_installer_candidates(game)
-        default = pick_default_installer(candidates)
-        # A folder with no installer in it is probably the game itself: nothing is run unless the person picks
-        # an executable, or asks to use the files as they are (`extract_only`).
-        if default is not None and not looks_portable(candidates):
-            if default.kind in ARCHIVE_SOURCE_KINDS:
-                source_path = default.path
-            else:
-                installer_path = default.path
-    extract_only = data.extract_only
-    if extract_only is None:
-        extract_only = await _archive_needs_no_installer(game, installer_path, source_path)
-    extract_only = bool(extract_only)
-    if extract_only:
-        # An archive named (or the default pick) is unpacked as it is; with none, the game's own files are taken.
-        if source_path is None and installer_path is not None:
-            try:
-                probe = Path(fs_game_handler.resolve_installer_abs_path(game, installer_path))
-            except (ValueError, FileNotFoundError) as e:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
-            if is_archive_candidate(probe):
-                source_path, installer_path = installer_path, None
-        installer_path = None
-    needs_manual_pick = (manual_mode and not extract_only) or (not installer_path and not source_path and not extract_only)
+    # The installers to run in order: the ones the request names, else the game's saved order. A chain is run as it is,
+    # with no detection and no extraction.
+    chain: list[dict] | None = None
+    if data.steps:
+        chain = _validated_steps(game, data.steps)
+    elif data.installer_path is None and data.source_path is None:
+        saved = db_install_steps_handler.list_for_game(game.id)
+        chain = [{"path": step.path, "source_path": step.source_path} for step in saved] or None
+    if chain:
+        installer_path, source_path = chain[0]["path"], chain[0]["source_path"]
+        extract_only = False
+        needs_manual_pick = False
+    else:
+        installer_path = data.installer_path
+        source_path = data.source_path
+        if installer_path is None and source_path is None:
+            candidates = fs_game_handler.get_installer_candidates(game)
+            default = pick_default_installer(candidates)
+            # A folder with no installer in it is probably the game itself: nothing is run unless the person picks
+            # an executable, or asks to use the files as they are (`extract_only`).
+            if default is not None and not looks_portable(candidates):
+                if default.kind in ARCHIVE_SOURCE_KINDS:
+                    source_path = default.path
+                else:
+                    installer_path = default.path
+        extract_only = data.extract_only
+        if extract_only is None:
+            extract_only = await _archive_needs_no_installer(game, installer_path, source_path)
+        extract_only = bool(extract_only)
+        if extract_only:
+            # An archive named (or the default pick) is unpacked as it is; with none, the game's own files are taken.
+            if source_path is None and installer_path is not None:
+                try:
+                    probe = Path(fs_game_handler.resolve_installer_abs_path(game, installer_path))
+                except (ValueError, FileNotFoundError) as e:
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+                if is_archive_candidate(probe):
+                    source_path, installer_path = installer_path, None
+            installer_path = None
+        needs_manual_pick = (manual_mode and not extract_only) or (not installer_path and not source_path and not extract_only)
 
     initial_state = InstallSessionState.AWAITING_INSTALLER if needs_manual_pick else InstallSessionState.DETECTING
     previous_state = existing.state if existing else None
@@ -271,6 +335,8 @@ async def start_install_session(
                 "auto_mode": auto_mode,
                 "manual_mode": manual_mode,
                 "extract_only": extract_only,
+                "steps": chain,
+                "step_index": 0,
                 "auto_status": None,
                 "auto_detail": None,
                 "state": initial_state,
@@ -295,6 +361,8 @@ async def start_install_session(
                 auto_mode=auto_mode,
                 manual_mode=manual_mode,
                 extract_only=extract_only,
+                steps=chain,
+                step_index=0,
                 expires_at=resolve_expires_at(data.ttl_seconds),
             )
         )
@@ -354,7 +422,7 @@ async def cancel_install(
         session.id,
         {
             "state": InstallSessionState.FAILED,
-            "error": "Cancelled",
+            "error": CANCELLED_ERROR,
             "vnc_url": None,
             "vnc_web_port": None,
             "vnc_token": None,

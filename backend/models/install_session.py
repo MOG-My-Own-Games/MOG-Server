@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import enum
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import (
     TIMESTAMP,
@@ -20,6 +20,7 @@ from sqlalchemy import false as sa_false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from models.base import BaseModel
+from utils.database import CustomJSON
 
 if TYPE_CHECKING:
     from models.game import Game
@@ -109,6 +110,12 @@ class InstallSession(BaseModel):
     # extracted from. NULL when the installer is run straight from the game's
     # files; then `installer_path` is relative to the extracted tree instead.
     source_path: Mapped[str | None] = mapped_column(String(1000), default=None)
+    # The installers this session runs, in order, as [{"path", "source_path"}, ...] (see models/install_step.py).
+    # NULL is the single installer named by installer_path/source_path, as before. When set, its first entry is
+    # also what installer_path/source_path hold.
+    steps: Mapped[list[Any] | None] = mapped_column(CustomJSON(), default=None)
+    # Which of `steps` is running (0-based) while the session is INSTALLING or STREAMING.
+    step_index: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     # Proton build id chosen for this run (see handler.install.proton_builds).
     # NULL falls back to the first installed build the manager discovers.
     proton_build: Mapped[str | None] = mapped_column(String(255), default=None)

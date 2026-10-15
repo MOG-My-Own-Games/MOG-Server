@@ -199,11 +199,11 @@ class TestManualMatchEndpoints:
         from endpoints import games
 
         saved = {}
-        found = SimpleNamespace(id=1, name="Some Game") if game else None
+        found = SimpleNamespace(id=1, name="Some Game", library_id=1) if game else None
         monkeypatch.setattr(games.db_game_handler, "get_game", lambda _id: found)
         monkeypatch.setattr(games.db_game_handler, "update_game", lambda gid, data: saved.update(data) or SimpleNamespace(**data))
         monkeypatch.setattr(games.GameSchema, "model_validate", staticmethod(lambda obj: obj))
-        return asyncio.run(getattr(games, coro_fn)(SimpleNamespace(), 1, *args)), saved
+        return asyncio.run(getattr(games, coro_fn)(SimpleNamespace(id=1, is_admin=True, hidden_library_ids=[]), 1, *args)), saved
 
     def test_search_uses_the_typed_query_or_the_game_name(self, monkeypatch):
         asked = []

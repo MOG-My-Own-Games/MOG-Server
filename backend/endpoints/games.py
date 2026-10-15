@@ -6,6 +6,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Path, Query, UploadFile, status
 from fastapi.responses import FileResponse
+from handler.visibility import check_visible
 from handler.auth import AdminUser, CurrentUser
 from handler.database import db_game_handler, db_install_session_handler, db_saves_handler
 from handler.filesystem import fs_game_handler
@@ -109,9 +110,7 @@ async def delete_missing_game(
 
     A game that still has saves is refused with 409 `has_saves` (and what would be lost) unless
     `delete_saves` says to delete those too."""
-    game = db_game_handler.get_game(id)
-    if game is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    game = check_visible(user, db_game_handler.get_game(id))
     if not game.missing_from_fs:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Game is not missing from disk")
     versions, size_bytes = db_saves_handler.summary(game_id=id)
@@ -127,9 +126,7 @@ async def delete_missing_game(
 
 @router.get("/{id}")
 async def get_game(user: CurrentUser, id: Annotated[int, Path(ge=1)]) -> GameSchema:
-    game = db_game_handler.get_game(id)
-    if game is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    game = check_visible(user, db_game_handler.get_game(id))
     installed = game.id in _installed_game_ids(user.id)
     saves_only = game.missing_from_fs and game.id in db_saves_handler.game_ids_with_saves()
     last_played = db_saves_handler.last_saved_by_game(user.id).get(game.id)
@@ -164,9 +161,7 @@ def _serve_image(url: str | None, max_height: int | None = None) -> FileResponse
 @router.get("/{id}/cover")
 async def get_game_cover(user: CurrentUser, id: Annotated[int, Path(ge=1)]) -> FileResponse:
     """The cover through this server (cached, shrunk), for clients that cannot reach the CDN quickly."""
-    game = db_game_handler.get_game(id)
-    if game is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    game = check_visible(user, db_game_handler.get_game(id))
     url = game.cover_path or ((game.igdb_metadata or {}).get("cover") or {}).get("url")
     return await run_in_threadpool(_serve_image, url, COVER_MAX_HEIGHT)
 
@@ -182,9 +177,7 @@ def _chosen_url(game, kind: str) -> str | None:
 async def get_media_candidates(user: AdminUser, id: Annotated[int, Path(ge=1)]) -> dict:
     """Every artwork the providers offer for this game, by kind, with the current choice and the
     providers' own default for each: what the scrape dialog shows."""
-    game = db_game_handler.get_game(id)
-    if game is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    game = check_visible(user, db_game_handler.get_game(id))
     found = await run_in_threadpool(media_handler.candidates, game)
     return {"candidates": found, "defaults": media_handler.defaults(found), "selected": game.media or {}}
 
@@ -193,9 +186,7 @@ async def get_media_candidates(user: AdminUser, id: Annotated[int, Path(ge=1)]) 
 async def choose_media(user: AdminUser, id: Annotated[int, Path(ge=1)], data: MediaSelectionForm) -> GameSchema:
     """Set the artwork used for each kind named in the body (null clears it). Only images from
     the providers' own hosts are accepted."""
-    game = db_game_handler.get_game(id)
-    if game is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    game = check_visible(user, db_game_handler.get_game(id))
     media = dict(game.media or {})
     update: dict = {}
     uploaded = media_uploads.uploaded_kinds(media)
@@ -227,9 +218,7 @@ async def upload_game_media(
     WebP or GIF up to 10 MiB; it replaces the earlier choice of that kind, and a scrape does not replace it."""
     if kind not in media_handler.KINDS:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-    game = db_game_handler.get_game(id)
-    if game is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    game = check_visible(user, db_game_handler.get_game(id))
     data = await file.read(media_uploads.MAX_UPLOAD_BYTES + 1)
     try:
         url = await run_in_threadpool(media_uploads.store, id, kind, data)
@@ -251,9 +240,7 @@ async def get_game_media(user: CurrentUser, id: Annotated[int, Path(ge=1)], kind
     """One kind of the game's artwork through this server (cached), for clients building their own entries."""
     if kind not in media_handler.KINDS:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-    game = db_game_handler.get_game(id)
-    if game is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    game = check_visible(user, db_game_handler.get_game(id))
     return await run_in_threadpool(_serve_image, _chosen_url(game, kind), COVER_MAX_HEIGHT if kind == "cover" else None)
 
 
@@ -261,9 +248,7 @@ async def get_game_media(user: CurrentUser, id: Annotated[int, Path(ge=1)], kind
 async def get_game_videos(user: CurrentUser, id: Annotated[int, Path(ge=1)]) -> dict:
     """The game's intro and gameplay videos (YouTube ids, to be embedded), in the order to show them: from
     IGDB when it lists them, else searched for. A search that fails just leaves that video out."""
-    game = db_game_handler.get_game(id)
-    if game is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    game = check_visible(user, db_game_handler.get_game(id))
     videos = await run_in_threadpool(
         video_handler.find_videos, game.id, game.name, (game.igdb_metadata or {}).get("videos")
     )
@@ -274,19 +259,14 @@ async def get_game_videos(user: CurrentUser, id: Annotated[int, Path(ge=1)]) -> 
 async def get_game_screenshot(
     user: CurrentUser, id: Annotated[int, Path(ge=1)], index: Annotated[int, Path(ge=0)]
 ) -> FileResponse:
-    game = db_game_handler.get_game(id)
-    if game is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    game = check_visible(user, db_game_handler.get_game(id))
     shots = (game.igdb_metadata or {}).get("screenshots") or []
     url = shots[index].get("url") if index < len(shots) else None
     return await run_in_threadpool(_serve_image, url, None)
 
 
 def _visible_game(user, game_id: int):
-    game = db_game_handler.get_game(game_id)
-    if game is None or (not user.is_admin and game.library_id in user.hidden_library_ids):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-    return game
+    return check_visible(user, db_game_handler.get_game(game_id))
 
 
 def _mod_of(user, game_id: int, name: str):
@@ -373,9 +353,7 @@ async def download_game_mod(user: CurrentUser, id: Annotated[int, Path(ge=1)], n
 @router.get("/{id}/size")
 async def get_game_size(user: CurrentUser, id: Annotated[int, Path(ge=1)]) -> GameSizeSchema:
     """What the game's folder (or file) takes on the server's disk."""
-    game = db_game_handler.get_game(id)
-    if game is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    game = check_visible(user, db_game_handler.get_game(id))
     sizes = await run_in_threadpool(game_sizes, game)
     return GameSizeSchema(size_bytes=sizes.installer, file_count=sizes.files)
 
@@ -383,9 +361,7 @@ async def get_game_size(user: CurrentUser, id: Annotated[int, Path(ge=1)]) -> Ga
 @router.get("/{id}/save-paths")
 async def get_game_save_paths(user: CurrentUser, id: Annotated[int, Path(ge=1)]) -> SavePathsSchema:
     """Where the game keeps its saves on Linux, when the community manifest knows (a client asks for a native game)."""
-    game = db_game_handler.get_game(id)
-    if game is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    game = check_visible(user, db_game_handler.get_game(id))
     names = (game.name, (game.igdb_metadata or {}).get("name"))
     return SavePathsSchema(paths=ludusavi_handler.paths_for(*names))
 
@@ -393,9 +369,7 @@ async def get_game_save_paths(user: CurrentUser, id: Annotated[int, Path(ge=1)])
 @router.get("/{id}/sizes")
 async def get_game_sizes(user: CurrentUser, id: Annotated[int, Path(ge=1)]) -> GameSizesSchema:
     """The game's folder, its install caches and its saves, and their total (remembered between calls)."""
-    game = db_game_handler.get_game(id)
-    if game is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    game = check_visible(user, db_game_handler.get_game(id))
     sizes = await run_in_threadpool(game_sizes, game)
     return GameSizesSchema(
         installer_bytes=sizes.installer,
@@ -405,16 +379,11 @@ async def get_game_sizes(user: CurrentUser, id: Annotated[int, Path(ge=1)]) -> G
         total_bytes=sizes.total,
     )
 
-    cover = body.get("cover_path")
-    if cover and cover != current.cover_path and media_handler.selection(cover) is None and not media_uploads.is_upload(cover):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="cover_path: not an image from a known provider")
 
 @router.get("/{id}/files")
 async def get_game_files(user: CurrentUser, id: Annotated[int, Path(ge=1)]) -> GameFilesSchema:
     """The game's own files in its library (not the install cache)."""
-    game = db_game_handler.get_game(id)
-    if game is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    game = check_visible(user, db_game_handler.get_game(id))
     detected = await run_in_threadpool(fs_game_handler.list_game_files_flat, game)
     return GameFilesSchema(
         root_path=str(fs_game_handler.get_game_root_abs_path(game)),
@@ -436,6 +405,9 @@ async def update_game(user: AdminUser, id: Annotated[int, Path(ge=1)], data: Gam
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
 
     body = data.model_dump(exclude_unset=True)
+    cover = body.get("cover_path")
+    if cover and cover != current.cover_path and media_handler.selection(cover) is None and not media_uploads.is_upload(cover):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="cover_path: not an image from a known provider")
     changed = {k for k, v in body.items() if getattr(current, k) != v}
     rematch = changed & {"name", "igdb_id", "sgdb_id"}
     if rematch:
@@ -456,9 +428,7 @@ async def update_game(user: AdminUser, id: Annotated[int, Path(ge=1)], data: Gam
 async def scrape_one_game(user: AdminUser, id: Annotated[int, Path(ge=1)]) -> GameSchema:
     """Re-fetch this game's metadata and cover from the providers, replacing what is
     stored (by its IGDB/SteamGridDB id when set, otherwise by name)."""
-    game = db_game_handler.get_game(id)
-    if game is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    game = check_visible(user, db_game_handler.get_game(id))
     applied = await run_in_threadpool(refresh_game, game, frozenset(), True)
     if not applied:
         raise HTTPException(
@@ -472,9 +442,7 @@ async def scrape_one_game(user: AdminUser, id: Annotated[int, Path(ge=1)]) -> Ga
 async def search_igdb(
     user: AdminUser, id: Annotated[int, Path(ge=1)], query: Annotated[str | None, Query()] = None
 ) -> list[dict]:
-    game = db_game_handler.get_game(id)
-    if game is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    game = check_visible(user, db_game_handler.get_game(id))
     return await run_in_threadpool(igdb_handler.search_games, query or search_name(game.name))
 
 
@@ -502,9 +470,7 @@ async def search_hltb(
     user: AdminUser, id: Annotated[int, Path(ge=1)], query: Annotated[str | None, Query()] = None
 ) -> list[dict]:
     """HowLongToBeat games for the name, each with the times it has: {id, name, metadata}."""
-    game = db_game_handler.get_game(id)
-    if game is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    game = check_visible(user, db_game_handler.get_game(id))
     try:
         return await run_in_threadpool(hltb_handler.search_games, query or search_name(game.name))
     except hltb_handler.HLTBUnavailable as e:
@@ -530,9 +496,7 @@ async def apply_hltb_match(user: AdminUser, id: Annotated[int, Path(ge=1)], hltb
 async def search_sgdb(
     user: AdminUser, id: Annotated[int, Path(ge=1)], query: Annotated[str | None, Query()] = None
 ) -> list[str]:
-    game = db_game_handler.get_game(id)
-    if game is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    game = check_visible(user, db_game_handler.get_game(id))
     return await run_in_threadpool(sgdb_handler.search_grids, query or search_name(game.name))
 
 

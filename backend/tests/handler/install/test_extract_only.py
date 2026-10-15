@@ -305,7 +305,7 @@ def start(monkeypatch, tmp_path):
     paths = {"Hearthlands.rar": archive, "setup.exe": plain}
     monkeypatch.setattr(endpoint, "db_install_session_handler", Handler())
     monkeypatch.setattr(
-        endpoint.db_game_handler, "get_game", lambda _id: SimpleNamespace(id=1, name="Hearthlands")
+        endpoint.db_game_handler, "get_game", lambda _id: SimpleNamespace(id=1, name="Hearthlands", library_id=1)
     )
     monkeypatch.setattr(
         endpoint.fs_game_handler, "resolve_installer_abs_path", lambda game, rel: str(paths[rel])
@@ -330,7 +330,7 @@ def start(monkeypatch, tmp_path):
     monkeypatch.setattr(endpoint, "resolve_expires_at", lambda ttl: None)
 
     def go(**form):
-        user = SimpleNamespace(id=3)
+        user = SimpleNamespace(id=3, is_admin=False, hidden_library_ids=[])
         return asyncio.run(endpoint.start_install_session(user, 1, InstallStartForm(**form)))
 
     return SimpleNamespace(go=go, made=made, enqueued=enqueued)
@@ -407,10 +407,10 @@ def test_a_normal_start_is_not_extract_only(start):
 
 
 def _candidates_of(monkeypatch, found):
-    monkeypatch.setattr(endpoint.db_game_handler, "get_game", lambda _id: SimpleNamespace(id=1, name="Metroid"))
+    monkeypatch.setattr(endpoint.db_game_handler, "get_game", lambda _id: SimpleNamespace(id=1, name="Metroid", library_id=1))
     monkeypatch.setattr(endpoint.fs_game_handler, "get_installer_candidates", lambda game: found)
     monkeypatch.setattr(endpoint.db_install_steps_handler, "list_for_game", lambda game_id: [])
-    return asyncio.run(endpoint.get_install_candidates(SimpleNamespace(id=3), 1))
+    return asyncio.run(endpoint.get_install_candidates(SimpleNamespace(id=3, is_admin=False, hidden_library_ids=[]), 1))
 
 
 def test_a_folder_with_only_game_executables_is_suggested_to_be_extracted(monkeypatch):

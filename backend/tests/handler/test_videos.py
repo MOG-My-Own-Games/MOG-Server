@@ -200,9 +200,9 @@ def test_the_endpoint_returns_the_videos_and_404s_for_an_unknown_game(monkeypatc
     monkeypatch.setattr(games, "run_in_threadpool", direct)
     monkeypatch.setattr(vh, "find_videos", lambda *args: [vh._entry("intro", A, "Trailer", "igdb")])
     expected = {"videos": [vh._entry("intro", A, "Trailer", "igdb")]}
-    assert asyncio.run(games.get_game_videos(SimpleNamespace(), 7)) == expected
+    assert asyncio.run(games.get_game_videos(SimpleNamespace(id=1, is_admin=True, hidden_library_ids=[]), 7)) == expected
     with pytest.raises(HTTPException) as err:
-        asyncio.run(games.get_game_videos(SimpleNamespace(), 99))
+        asyncio.run(games.get_game_videos(SimpleNamespace(id=1, is_admin=True, hidden_library_ids=[]), 99))
     assert err.value.status_code == 404
 
 

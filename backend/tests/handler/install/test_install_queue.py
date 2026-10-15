@@ -143,7 +143,7 @@ def endpoint(queue, monkeypatch):
     monkeypatch.setattr(install_endpoint, "default_auto_mode", lambda: False)
     monkeypatch.setattr(install_endpoint, "purge_superseded_sessions", lambda *a, **k: 0)
     monkeypatch.setattr(runner, "dispatch_queue", lambda: 0)
-    user = SimpleNamespace(id=1)
+    user = SimpleNamespace(id=1, is_admin=True, hidden_library_ids=[])
 
     def start(game_id):
         return asyncio.run(install_endpoint.start_install_session(user, game_id, InstallStartForm(installer_path="setup.exe")))

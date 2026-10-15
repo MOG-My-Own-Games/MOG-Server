@@ -37,3 +37,21 @@ def test_games_in_a_hidden_library_do_not_move_the_users_revision(db):
 
     assert db_game_handler.revision([hidden.id]) == before
     assert db_game_handler.revision() != before
+
+
+def test_a_game_of_a_hidden_library_is_as_good_as_absent_for_a_plain_user():
+    from types import SimpleNamespace
+
+    import pytest
+    from fastapi import HTTPException
+    from handler.visibility import check_visible
+
+    game = SimpleNamespace(id=1, library_id=4)
+    plain = SimpleNamespace(is_admin=False, hidden_library_ids=[4])
+    admin = SimpleNamespace(is_admin=True, hidden_library_ids=[])
+    assert check_visible(admin, game) is game
+    assert check_visible(SimpleNamespace(is_admin=False, hidden_library_ids=[9]), game) is game
+    for user, found in ((plain, game), (admin, None)):
+        with pytest.raises(HTTPException) as err:
+            check_visible(user, found)
+        assert err.value.status_code == 404

@@ -160,11 +160,11 @@ def test_the_endpoint_answers_by_the_games_own_name_or_igdbs(cache, monkeypatch)
     game = SimpleNamespace(name="stardew_valley_gog", igdb_metadata={"name": "Stardew Valley"})
     monkeypatch.setattr(games_endpoint.db_game_handler, "get_game", lambda id: game if id == 1 else None)
 
-    found = asyncio.run(games_endpoint.get_game_save_paths(SimpleNamespace(), 1))
+    found = asyncio.run(games_endpoint.get_game_save_paths(SimpleNamespace(id=1, is_admin=True, hidden_library_ids=[]), 1))
     assert found.paths == ["<xdgConfig>/StardewValley/Saves"]
 
     from fastapi import HTTPException
 
     with pytest.raises(HTTPException) as err:
-        asyncio.run(games_endpoint.get_game_save_paths(SimpleNamespace(), 2))
+        asyncio.run(games_endpoint.get_game_save_paths(SimpleNamespace(id=1, is_admin=True, hidden_library_ids=[]), 2))
     assert err.value.status_code == 404

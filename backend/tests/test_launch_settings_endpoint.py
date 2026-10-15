@@ -94,6 +94,23 @@ def test_the_device_scope_needs_a_device(api):
         {"scope": "all", "winetricks": ["-q"]},
         {"scope": "all", "winetricks": ["Vcrun2019"]},
         {"scope": "all", "winetricks": [f"v{n}" for n in range(101)]},
+        # a setting's value goes on a command line too
+        {"scope": "all", "winetricks": ["vd=1280 x 1024"]},
+        {"scope": "all", "winetricks": ["vd=1280x1024; rm -rf ~"]},
+        {"scope": "all", "winetricks": ["vd=$(id)"]},
+        {"scope": "all", "winetricks": ["renderer=gdi|sh"]},
+        {"scope": "all", "winetricks": ["renderer=gdi&sh"]},
+        {"scope": "all", "winetricks": ["renderer=`id`"]},
+        {"scope": "all", "winetricks": ["renderer='gdi'"]},
+        {"scope": "all", "winetricks": ["vd=../../etc"]},
+        {"scope": "all", "winetricks": ["vd=a\nb"]},
+        {"scope": "all", "winetricks": ["vd="]},
+        {"scope": "all", "winetricks": ["=gdi"]},
+        {"scope": "all", "winetricks": ["vd=a=b"]},
+        {"scope": "all", "winetricks": ["VD=gdi"]},
+        {"scope": "all", "winetricks": ["-vd=gdi"]},
+        {"scope": "all", "winetricks": ["vd=" + "x" * 41]},
+        {"scope": "all", "winetricks": ["v" * 41 + "=gdi"]},
     ],
 )
 def test_oversized_or_unknown_fields_are_refused(api, body):
@@ -143,21 +160,74 @@ def test_winetricks_verbs_are_kept_once_each_in_order_for_a_scope_and_listed_for
     assert api.get("/api/games/5/launch-settings").json()["shared"]["winetricks"] is None
 
 
-def test_launch_arguments_are_kept_per_scope_and_listed_for_the_web_ui(api):
+def test_winetricks_settings_with_a_value_sit_in_the_list_beside_the_flags(api):
+    api.put("/api/games/5/launch-settings", json={"scope": "all", "winetricks": ["vcrun2019", "renderer=gdi", "vd=1280x1024", "mwo=force"]})
+
+    body = api.get("/api/games/5/launch-settings").json()
+
+    assert body["shared"]["winetricks"] == ["vcrun2019", "renderer=gdi", "vd=1280x1024", "mwo=force"]
+
+
+def test_a_setting_has_one_value_a_later_one_replaces_an_earlier_in_the_place_it_had(api):
+    sent = ["vd=1280x1024", "vcrun2019", "renderer=gdi", "vd=1920x1080", "vcrun2019"]
+    api.put("/api/games/5/launch-settings", json={"scope": "all", "winetricks": sent})
+
+    assert api.get("/api/games/5/launch-settings").json()["shared"]["winetricks"] == ["vd=1920x1080", "vcrun2019", "renderer=gdi"]
+
+
+def test_flags_still_work_as_before_and_the_values_a_device_sets_are_its_own_row(api):
+    deck = _device(api, "uid-bbbbbbbb", "deck")
+    api.put("/api/games/5/launch-settings", json={"scope": "all", "winetricks": ["vcrun2019", "vd=1280x1024"]})
+    api.put("/api/games/5/launch-settings", json={"scope": "device", "device_id": deck, "winetricks": ["vd=1920x1080"]})
+
+    body = api.get("/api/games/5/launch-settings", params={"device_id": deck}).json()
+
+    assert body["shared"]["winetricks"] == ["vcrun2019", "vd=1280x1024"]  # the rows are kept apart; a client lets the device's value win
+    assert body["device"]["winetricks"] == ["vd=1920x1080"]
+
+
+def test_launch_arguments_are_tags_kept_per_scope_and_listed_for_the_web_ui(api):
     device = _device(api)
 
-    api.put("/api/games/5/launch-settings", json={"scope": "all", "launch_args": "-windowed"})
-    api.put("/api/games/5/launch-settings", json={"scope": "device", "device_id": device, "launch_args": "-savetouserdir"})
+    api.put("/api/games/5/launch-settings", json={"scope": "all", "launch_args": ["-windowed", "-res 1280 720", "-windowed"]})
+    api.put("/api/games/5/launch-settings", json={"scope": "device", "device_id": device, "launch_args": ["-savetouserdir"]})
     body = api.get("/api/games/5/launch-settings", params={"device_id": device}).json()
 
-    assert body["shared"]["launch_args"] == "-windowed"
-    assert body["device"]["launch_args"] == "-savetouserdir"
-    assert body["devices"][0]["launch_args"] == "-savetouserdir"
+    assert body["shared"]["launch_args"] == ["-windowed", "-res 1280 720"]  # once each, in order
+    assert body["device"]["launch_args"] == ["-savetouserdir"]
+    assert body["devices"][0]["launch_args"] == ["-savetouserdir"]
 
 
-def test_a_null_clears_the_launch_arguments_and_they_are_one_line(api):
-    api.put("/api/games/5/launch-settings", json={"scope": "all", "launch_args": "-windowed"})
+def test_a_null_clears_the_launch_arguments_and_a_tag_is_one_short_line(api):
+    api.put("/api/games/5/launch-settings", json={"scope": "all", "launch_args": ["-windowed"]})
 
     assert api.put("/api/games/5/launch-settings", json={"scope": "all", "launch_args": None}).json()["launch_args"] is None
-    assert api.put("/api/games/5/launch-settings", json={"scope": "all", "launch_args": "-a\n-b"}).status_code == 422
-    assert api.put("/api/games/5/launch-settings", json={"scope": "all", "launch_args": "x" * 1001}).status_code == 422
+    for bad in (["-a\n-b"], ["x" * 201], [" -a"], ["-a "], [""], ["-a\x00"], "-windowed", [f"-t{n}" for n in range(51)]):
+        assert api.put("/api/games/5/launch-settings", json={"scope": "all", "launch_args": bad}).status_code == 422, bad
+
+
+def test_adding_and_removing_tags_changes_the_list_the_server_holds_so_two_editors_do_not_undo_each_other(api):
+    url = "/api/games/5/launch-settings"
+    api.put(url, json={"scope": "all", "launch_args": ["-a", "-b", "-c"]})
+
+    # the web page took "-b" out, and a client, which never saw that, put "-d" in: both stay
+    api.put(url, json={"scope": "all", "launch_args_remove": ["-b"]})
+    after = api.put(url, json={"scope": "all", "launch_args_add": ["-d", "-a"]}).json()
+
+    assert after["launch_args"] == ["-a", "-c", "-d"]  # "-a" was there: not twice; "-d" goes at the end
+    assert api.put(url, json={"scope": "all", "launch_args_add": ["-b"], "launch_args_remove": ["-b", "-c"]}).json()["launch_args"] == ["-a", "-d", "-b"]
+
+
+def test_a_change_to_tags_makes_the_list_when_there_is_none_and_an_empty_one_makes_nothing(api):
+    url = "/api/games/5/launch-settings"
+    api.put(url, json={"scope": "all", "proton": "GE-Proton10-1"})
+
+    assert api.put(url, json={"scope": "all", "launch_args_add": [], "launch_args_remove": []}).json()["launch_args"] is None
+    assert api.put(url, json={"scope": "all", "launch_args_add": ["-w"]}).json()["launch_args"] == ["-w"]
+
+
+def test_replacing_the_list_and_changing_it_are_not_sent_together(api):
+    body = {"scope": "all", "launch_args": ["-a"], "launch_args_add": ["-b"]}
+
+    assert api.put("/api/games/5/launch-settings", json=body).status_code == 422
+

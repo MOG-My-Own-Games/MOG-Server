@@ -411,7 +411,7 @@ starts it the same way. They belong to the game, not to a user.
 | Call | What it does |
 | --- | --- |
 | `GET /api/games/{id}/launch-settings?device_id=N` | `{shared, device, devices}`: the settings for all devices, the ones for device `N` (`device_id` is optional), and the ones of each of the user's devices that has any (`[{device, proton, winecfg_reg, winetricks, launch_args, updated_at}]`, for a web page like the server's Settings tab). Each of the first two is `null` or `{proton, winecfg_reg, winetricks, launch_args, updated_at}`. |
-| `PUT /api/games/{id}/launch-settings` | Body `{scope: "device" \| "all", device_id, proton, winecfg_reg, winetricks, launch_args}`. `device_id` is required for the `device` scope and must be one of the user's devices. Only the fields sent change; `null` clears one. |
+| `PUT /api/games/{id}/launch-settings` | Body `{scope: "device" \| "all", device_id, proton, winecfg_reg, winetricks, launch_args, launch_args_add, launch_args_remove}`. `device_id` is required for the `device` scope and must be one of the user's devices. Only the fields sent change; `null` clears one. |
 | `DELETE /api/games/{id}/launch-settings?scope=device\|all&device_id=N` | Remove one scope's settings. |
 
 - `proton` is the **name** of a build (`GE-Proton9-1`), never a path, up to 200 characters: paths differ between devices.
@@ -419,12 +419,23 @@ starts it the same way. They belong to the game, not to a user.
 - `winecfg_reg` is a Windows registry export (`.reg` text, up to 64 KiB) of what winecfg changed in the game's prefix.
   The server stores it as it is and does not read it. A client must treat it as untrusted input and import only the
   keys it expects (MOG Client takes nothing outside `HKEY_CURRENT_USER\Software\Wine`).
-- `winetricks` is the list of winetricks verbs installed in the game's prefix (`["vcrun2019", "d3dx9"]`, at most 100,
-  each made of lowercase letters, digits, `_`, `.` and `-`, once each), so a reinstall or another device can install them
-  into its own prefix. A client takes the verbs of both entries together. They go on a command line: check them again.
-- `launch_args` is the text put after the game's executable when it starts (`-savetouserdir`, `-windowed -fullscreen`), up to
-  1000 characters on one line, no control characters. It is what the person typed: a client splits it like a shell does, so
-  it is a line of arguments, never a command. A device uses its own entry when it has one, else the shared one.
+- `winetricks` is the list of winetricks entries kept for the game's prefix (`["vcrun2019", "d3dx9", "renderer=gdi",
+  "vd=1280x1024"]`, at most 100), so a reinstall or another device can apply them to its own prefix. An entry is a verb
+  (lowercase letters, digits, `_`, `.` and `-`, up to 40) or a setting with a value, `name=value`, where the value is 1 to
+  40 letters, digits or `_ . , : + -` (no space, quote, `$`, `;`, `|`, `&`, `/`, `\` or second `=`). There is one entry
+  for each name: when a list holds the same name twice, the later one replaces the earlier (`vd=1920x1080` after
+  `vd=1280x1024`), in the place the name first had. A client takes the entries of both rows together, and for a name both
+  have, the device's value wins. A client applies an entry again when its value changed; taking one out of the list does
+  not undo it in a prefix. They go on a command line: check them again.
+- `launch_args` is the list of arguments put after the game's executable, as **tags** (`["-savetouserdir", "-res 1280 720",
+  "--nosound"]`): each tag is one option with what belongs to it, up to 50 of 200 characters each, one line, no spaces at the
+  ends, once each. A client splits each tag like a shell does and puts the words after the executable, in the order of the
+  list: they are arguments, never a command. `null` means none were set; a device uses its own entry when it has one, else
+  the shared one. Text typed by a person is split into tags at each word that starts with `-` or `--` (a negative number is a
+  value): `-res 1280 720 -windowed` is `["-res 1280 720", "-windowed"]`. Because the list is made of tags, two editors can be
+  merged: `PUT` takes `launch_args` to replace the list, or `launch_args_add` and `launch_args_remove` (lists of tags, not with
+  `launch_args`) to change the list the server holds by now, so a tag one editor put in is not lost when another edits.
+  A client keeps the tags it last agreed on with the server and merges its list, the server's and that one by tag.
 - Any signed-in user who can see the game can change the shared entry.
 - Settings can be deleted (the server's Settings tab of a game has a Delete button for each entry). A client that took
   or sent settings for a game and then finds `shared` and `device` both `null` should treat that as deleted and go back to

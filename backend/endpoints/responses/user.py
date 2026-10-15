@@ -17,7 +17,7 @@ class UserSchema(BaseModel):
 
 
 class UserCreateForm(BaseModel):
-    username: str
+    username: str = Field(min_length=1, max_length=64, pattern=r"^[\w.@+-]+$")
     password: str = Field(min_length=PASSWORD_MIN_LENGTH)
     role: Role = Role.USER
 

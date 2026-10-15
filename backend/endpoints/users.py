@@ -10,12 +10,14 @@ from config import RESOURCES_BASE_PATH
 from endpoints.responses.user import PasswordChangeForm, UserCreateForm, UserSchema, UserUpdateForm
 from handler.auth import AdminUser, CurrentUser, hash_password, verify_password
 from handler.database import db_saves_handler, db_user_handler
+from handler import media_uploads
 from handler.saves import purge_user
+from models.user import Role
+from utils.image_cache import _kind_of
 
 router = APIRouter(prefix="/users", tags=["users"])
 
 _AVATAR_DIR = Path(RESOURCES_BASE_PATH) / "avatars"
-_ALLOWED_AVATAR_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}
 
 
 @router.get("/me")
@@ -51,9 +53,18 @@ async def create_user(user: AdminUser, data: UserCreateForm) -> UserSchema:
     return UserSchema.model_validate(created)
 
 
+def _stops_being_an_active_admin(changes: dict) -> bool:
+    return changes.get("enabled") is False or ("role" in changes and changes["role"] != Role.ADMIN)
+
+
 @router.put("/{id}")
 async def update_user(user: AdminUser, id: Annotated[int, PathVar(ge=1)], data: UserUpdateForm) -> UserSchema:
     update_data = data.model_dump(exclude_unset=True, exclude={"password"})
+    target = db_user_handler.get_user(id)
+    if target is not None and target.is_admin and target.enabled and _stops_being_an_active_admin(update_data):
+        others = [u for u in db_user_handler.get_all_users() if u.id != id and u.is_admin and u.enabled]
+        if not others:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="There must stay one enabled admin")
     if data.password:
         update_data["hashed_password"] = hash_password(data.password)
     updated = db_user_handler.update_user(id, update_data)
@@ -83,13 +94,19 @@ async def upload_avatar(user: CurrentUser, id: Annotated[int, PathVar(ge=1)], fi
     """A user can set their own avatar; an admin can set anyone's."""
     if id != user.id and not user.is_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN)
-    ext = _ALLOWED_AVATAR_TYPES.get(file.content_type or "")
-    if ext is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Must be a PNG, JPEG or WebP image")
+    # What the file really is decides, not what the client says it is; the size is bounded before it is read whole.
+    data = await file.read(media_uploads.MAX_UPLOAD_BYTES + 1)
+    try:
+        checked = await run_in_threadpool(media_uploads.check, data)
+    except media_uploads.UploadRefused as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Must be a PNG, JPEG or WebP image: {e}") from e
 
     _AVATAR_DIR.mkdir(parents=True, exist_ok=True)
-    dest = _AVATAR_DIR / f"{id}{ext}"
-    dest.write_bytes(await file.read())
+    dest = _AVATAR_DIR / f"{id}{_kind_of(checked)[0]}"
+    for old in _AVATAR_DIR.glob(f"{id}.*"):  # a picture of another type from before goes
+        if old != dest:
+            old.unlink(missing_ok=True)
+    dest.write_bytes(checked)
 
     updated = db_user_handler.update_user(id, {"avatar_path": f"/resources/avatars/{dest.name}"})
     if updated is None:

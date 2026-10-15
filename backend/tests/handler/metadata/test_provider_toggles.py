@@ -96,7 +96,7 @@ def test_the_settings_answer_says_whether_each_provider_is_on(stored, monkeypatc
     result = asyncio.run(settings_endpoint.get_settings(SimpleNamespace()))
 
     assert (result.igdb_enabled, result.steamgriddb_enabled, result.hltb_enabled) == (False, True, True)
-    assert result.igdb_client_id == "id" and result.igdb_client_secret == "secret"  # still there
+    assert result.igdb_client_id == "id" and result.igdb_client_secret == settings_endpoint.mask_secret("secret")  # still there, masked
 
 
 def test_a_provider_that_is_off_is_not_validated(stored, monkeypatch):

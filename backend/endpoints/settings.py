@@ -16,8 +16,21 @@ from utils.install_cache import apply_default_ttl
 router = APIRouter(prefix="/settings", tags=["settings"])
 
 
+SECRET_FIELDS = ("igdb_client_secret", "steamgriddb_api_key")
+
+
+def mask_secret(value: str | None) -> str | None:
+    """What the API shows of a provider key: never the key. Long enough ones keep their last four characters, so a person
+    can tell which key is saved."""
+    if not value:
+        return value
+    return "\u2022\u2022\u2022\u2022" + (value[-4:] if len(value) >= 12 else "")
+
+
 def _schema(row: Settings) -> SettingsSchema:
     fields = {name: getattr(row, name) for name in SettingsSchema.model_fields}
+    for name in SECRET_FIELDS:
+        fields[name] = mask_secret(fields[name])
     fields["igdb_enabled"] = igdb_handler.enabled_in(row)
     fields["steamgriddb_enabled"] = sgdb_handler.enabled_in(row)
     fields["hltb_enabled"] = hltb_handler.enabled_in(row)
@@ -40,6 +53,10 @@ async def update_settings(user: AdminUser, data: SettingsUpdateForm) -> Settings
     without this a client saving just one (e.g. the cache TTL) would send
     the rest as their Pydantic default (None) and silently wipe them."""
     changes = data.model_dump(exclude_unset=True)
+    current = db_settings_handler.get_settings()
+    for name in SECRET_FIELDS:  # a form that sends back the masked value it was shown means "unchanged"
+        if name in changes and changes[name] and changes[name] == mask_secret(getattr(current, name)):
+            del changes[name]
     row = db_settings_handler.update_settings(changes)
     if "install_cache_ttl_days" in changes:
         apply_default_ttl()

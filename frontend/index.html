@@ -246,11 +246,12 @@
             <div class="card">
               <h3>Launch settings</h3>
               <p class="muted small">The Proton build, the winecfg changes, the winetricks verbs and the launch arguments MOG Client keeps here for this game. A device uses its own entry and, for what that lacks, the one for all devices.</p>
-              <p id="launch-settings-empty" class="muted" hidden>Nothing is set for this game yet. Choose a Proton version, open winecfg or run winetricks from the game's Linux Options in MOG Client.</p>
+              <p id="launch-settings-empty" class="muted" hidden>Nothing is set for this game yet. Add launch arguments or winetricks settings here, or choose a Proton version or open winecfg from the game's Linux Options in MOG Client.</p>
               <table id="launch-settings-table" class="data-table" hidden>
                 <thead><tr><th>For</th><th>Proton</th><th>winecfg</th><th>winetricks</th><th>Arguments</th><th>Changed</th><th></th></tr></thead>
                 <tbody id="launch-settings-body"></tbody>
               </table>
+              <button id="launch-args-add" type="button" hidden>Add launch settings</button>
             </div>
           </div>
 
@@ -392,7 +393,10 @@
 
           <div id="settings-tab-libraries" class="tab-panel">
             <div class="card">
-              <h3>Your libraries</h3>
+              <div class="card-head">
+                <h3>Your libraries</h3>
+                <button id="open-add-library" type="button">Add library</button>
+              </div>
               <ul id="settings-library-list" class="library-list"></ul>
             </div>
             <div class="card">
@@ -415,14 +419,6 @@
                 <div><strong>Group duplicate games</strong><p class="muted small">Games sharing the same IGDB match show as one entry with its versions (this browser only).</p></div>
                 <label class="switch"><input type="checkbox" id="setting-group-games" /><span class="slider"></span></label>
               </div>
-            </div>
-            <div class="card">
-              <h3>Add a library</h3>
-              <form id="add-library-form" class="add-library-form">
-                <input id="lib-name" type="text" placeholder="Name" required />
-                <input id="lib-path" type="text" placeholder="Path inside container, e.g. /library" required />
-                <button type="submit">Add library</button>
-              </form>
             </div>
           </div>
 
@@ -637,6 +633,52 @@
         <button id="extract-modal-install" type="button" class="button-secondary">Try to install</button>
         <button id="extract-modal-extract" type="button">Extract as it is</button>
       </div>
+    </div>
+  </div>
+
+  <div id="add-library-modal" class="modal" hidden>
+    <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="add-library-title">
+      <h3 id="add-library-title">Add a library</h3>
+      <form id="add-library-form" class="add-library-form">
+        <input id="lib-name" type="text" placeholder="Name" required />
+        <input id="lib-path" type="text" placeholder="Path inside container, e.g. /library" required />
+        <p id="add-library-error" class="muted small" hidden></p>
+        <div class="modal-footer">
+          <button id="add-library-cancel" type="button" class="button-secondary">Cancel</button>
+          <button type="submit">Add library</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="launch-edit-modal" class="modal" hidden>
+    <div class="modal-panel launch-edit-panel" role="dialog" aria-modal="true" aria-labelledby="launch-edit-title">
+      <h3 id="launch-edit-title">Launch settings</h3>
+      <p id="launch-edit-who" class="muted small"></p>
+      <form id="launch-edit-form">
+        <h4>Arguments</h4>
+        <p class="muted small">Put after the game's executable. Each tag is an option with what goes with it: type arguments and press + (or Enter), and they split at each <code>-</code> or <code>--</code>.</p>
+        <ul id="launch-tags" class="chip-row launch-chips"></ul>
+        <div class="launch-add">
+          <input id="launch-tag-input" type="text" placeholder="e.g. -windowed -res 1280 720" maxlength="400" autocomplete="off" />
+          <button id="launch-tag-add" type="button" title="Add what is typed as tags" aria-label="Add what is typed as tags">+</button>
+        </div>
+        <h4>Winetricks</h4>
+        <p class="muted small">Verbs and settings kept for the game's prefix. A setting has one value: adding another value for a name replaces it. Taking an entry out of the list does not undo it in a prefix.</p>
+        <ul id="launch-wt-list" class="chip-row launch-chips"></ul>
+        <div class="launch-add">
+          <input id="wt-name" type="text" list="wt-names" placeholder="Setting, e.g. vd" maxlength="40" autocomplete="off" />
+          <datalist id="wt-names"></datalist>
+          <input id="wt-value" type="text" list="wt-values" placeholder="Value, e.g. 1280x1024" maxlength="40" autocomplete="off" />
+          <datalist id="wt-values"></datalist>
+          <button id="wt-add" type="button">Add setting</button>
+        </div>
+        <p id="launch-edit-error" class="muted small" hidden></p>
+        <div class="modal-footer">
+          <button id="launch-edit-cancel" type="button" class="button-secondary">Cancel</button>
+          <button type="submit">Save</button>
+        </div>
+      </form>
     </div>
   </div>
 

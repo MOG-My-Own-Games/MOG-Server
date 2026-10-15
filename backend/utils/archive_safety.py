@@ -37,6 +37,23 @@ def _check_name(name: str) -> str:
     return str(path)
 
 
+def check_members(members: list[zipfile.ZipInfo], max_bytes: int = MAX_UNCOMPRESSED_BYTES) -> tuple[int, int]:
+    """(declared bytes, files) of the members of a zip, from its listing alone, without reading any content: every name must
+    stay inside the folder it is extracted to, no member may be a link, and the count and the declared size are bounded
+    (an extraction never writes more than a member declares). Raises ArchiveError otherwise."""
+    if len(members) > MAX_MEMBERS:
+        raise ArchiveError(f"too many entries ({len(members)})")
+    files = [m for m in members if not m.is_dir()]
+    for member in members:
+        _check_name(member.filename)
+        if stat.S_ISLNK(member.external_attr >> 16):
+            raise ArchiveError(f"symbolic link in archive: {member.filename!r}")
+    total = sum(m.file_size for m in files)
+    if total > max_bytes:
+        raise ArchiveError("archive expands beyond the allowed size")
+    return total, len(files)
+
+
 def inspect_archive(path: Path) -> ArchiveInfo:
     """Validate the zip at `path` and return what it holds. Raises ArchiveError otherwise."""
     if not zipfile.is_zipfile(path):

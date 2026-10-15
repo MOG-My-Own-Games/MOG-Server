@@ -357,6 +357,15 @@ code {
 .library-actions { display: flex; gap: 0.4em; flex-shrink: 0; }
 
 .add-library-form { display: flex; flex-direction: column; gap: 0.5em; max-width: 360px; }
+.card-head { display: flex; justify-content: space-between; align-items: center; gap: 1em; }
+.launch-edit-panel { width: min(640px, 96vw); }
+.launch-edit-panel h4 { margin: 1em 0 0.2em; }
+.launch-chips { list-style: none; padding: 0; }
+.launch-chips .chip { display: inline-flex; align-items: center; gap: 0.3em; }
+.chip-remove { background: none; border: none; color: var(--muted); padding: 0 0.2em; cursor: pointer; font-size: 1.1em; line-height: 1; }
+.chip-remove:hover { color: var(--danger); }
+.launch-add { display: flex; gap: 0.5em; margin: 0.4em 0; }
+.launch-add input { flex: 1; min-width: 0; }
 
 .main { flex: 1; padding: 1.5em; overflow-y: auto; }
 #view-game.loading > :not(.back-link) { visibility: hidden; }

@@ -94,8 +94,13 @@ COPY ./docker/icewm-preferences /etc/icewm-preferences
 RUN mkdir -p /opt/proton && chmod 755 /opt/proton
 
 WORKDIR /src
-COPY ./pyproject.toml /src/
-RUN pip install --no-cache-dir -e .
+COPY ./pyproject.toml ./uv.lock /src/
+# The versions and hashes of uv.lock, not whatever is newest the day the image is built: the lock is what was tested.
+RUN pip install --no-cache-dir uv && \
+    uv export --frozen --no-dev --no-emit-project --quiet -o /tmp/requirements.txt && \
+    pip install --no-cache-dir --require-hashes -r /tmp/requirements.txt && \
+    pip install --no-cache-dir --no-deps -e . && \
+    pip uninstall -y uv && rm -f /tmp/requirements.txt
 
 COPY ./backend /src/backend
 COPY ./frontend /src/frontend

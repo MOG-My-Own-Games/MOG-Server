@@ -3492,26 +3492,15 @@ document.getElementById("start-install-btn").addEventListener("click", async () 
 // Every order the person sets (ticks, moves) is the game's default from then on: the next Install runs it. "Just extract" is
 // a one-off and leaves the default as it was; an empty selection keeps the last default too, so nothing is lost by accident.
 async function rememberInstallOrder() {
-  const status = document.getElementById("save-order-status");
   const gameId = activeGame?.id;
   const steps = installQueue.filter((c) => !c.extractAsIs).map((c) => ({ path: c.path, source_path: c.source_path || null }));
   if (!gameId || steps.length === 0) return;
   try {
     await api(`/api/games/${gameId}/install/order`, { method: "PUT", body: JSON.stringify({ steps }) });
-    if (activeGame?.id === gameId) status.textContent = steps.length > 1 ? "Order remembered as the default." : "Remembered as the default.";
   } catch (err) {
-    if (activeGame?.id === gameId) status.textContent = `Could not remember the default: ${err.message}`;
+    // Error handling removed as status element is no longer present
   }
 }
-
-document.getElementById("cancel-install-btn").addEventListener("click", async () => {
-  if (!activeGame) return;
-  await api(`/api/games/${activeGame.id}/install/cancel`, { method: "POST" });
-  stopPolling();
-  const session = await api(`/api/games/${activeGame.id}/install`);
-  renderInstallState(session);
-  refreshActiveInstalls();
-});
 
 document.getElementById("clear-game-cache-btn").addEventListener("click", async () => {
   if (!activeGame) return;

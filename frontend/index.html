@@ -101,6 +101,13 @@
         <section id="view-game" class="view" hidden>
           <a href="#" class="back-link">&laquo; Back to library</a>
 
+          <!-- Game not found -->
+          <div id="game-not-found" class="not-found-screen">
+            <div class="not-found-code">404</div>
+            <p class="not-found-text">Game not found</p>
+            <img src="assets/mog-question.png" alt="" class="not-found-image" />
+          </div>
+
           <div class="game-header" id="game-header">
             <div class="game-header-art" id="game-header-art" aria-hidden="true"></div>
             <div class="game-header-cover">
@@ -199,7 +206,6 @@
                 <div id="game-candidates" class="section"></div>
                 <p id="chain-warning" class="notice small" hidden>A patch may ask where the game is installed. If it does, you will have to answer in the installer screen by hand.</p>
                 <div class="page-actions">
-                  <span id="save-order-status" class="muted small"></span>
                 </div>
 
                 <label class="field-label">Proton / Wine build

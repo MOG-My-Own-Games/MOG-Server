@@ -111,7 +111,7 @@ class TestMediaEndpoints:
         monkeypatch.setattr(games.db_game_handler, "get_game", lambda _id: game)
         monkeypatch.setattr(games.db_game_handler, "update_game", lambda gid, data: saved.update(data) or SimpleNamespace(**{**game.__dict__, **data}))
         monkeypatch.setattr(games.GameSchema, "model_validate", staticmethod(lambda obj: obj))
-        result = asyncio.run(games.choose_media(SimpleNamespace(), 1, MediaSelectionForm(**body)))
+        result = asyncio.run(games.choose_media(SimpleNamespace(id=1, is_admin=True, hidden_library_ids=[]), 1, MediaSelectionForm(**body)))
         return result, saved
 
     def test_choosing_stores_the_url_with_its_source_and_moves_the_cover_path(self, monkeypatch):

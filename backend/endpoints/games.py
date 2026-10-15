@@ -405,6 +405,9 @@ async def get_game_sizes(user: CurrentUser, id: Annotated[int, Path(ge=1)]) -> G
         total_bytes=sizes.total,
     )
 
+    cover = body.get("cover_path")
+    if cover and cover != current.cover_path and media_handler.selection(cover) is None and not media_uploads.is_upload(cover):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="cover_path: not an image from a known provider")
 
 @router.get("/{id}/files")
 async def get_game_files(user: CurrentUser, id: Annotated[int, Path(ge=1)]) -> GameFilesSchema:
@@ -538,9 +541,10 @@ async def apply_sgdb_cover(user: AdminUser, id: Annotated[int, Path(ge=1)], cove
     current = db_game_handler.get_game(id)
     if current is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-    update: dict = {"cover_path": cover_path}
     chosen = media_handler.selection(cover_path)
-    if chosen is not None:  # the cover picked here is the game's chosen cover
-        update["media"] = {**(current.media or {}), "cover": chosen}
+    if chosen is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="cover_path: not an image from a known provider")
+    # The cover picked here is the game's chosen cover.
+    update: dict = {"cover_path": cover_path, "media": {**(current.media or {}), "cover": chosen}}
     game = db_game_handler.update_game(id, update)
     return GameSchema.model_validate(game)

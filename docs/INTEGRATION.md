@@ -229,6 +229,13 @@ one VNC view, one Wine prefix, and the files are streamed once, after the last i
 install, stops the chain, and the error names it (`Step 2/3: ...`). All the installers of a chain must be Windows
 installers or all native ones. A chain that stops early in auto mode is run again from its first step.
 
+**Just copy as a step.** A step whose `path` is `mog:copy` is not an installer: it is the game's own files, used as they
+are (with a `source_path`, that archive or disc image, unpacked). It can only be the first step, so it is the game and the
+installers after it are patches; anywhere else the request answers `400`. A copy alone is the extraction `extract_only`
+asks for. A copy followed by installers puts the files under `Program Files` in the session's Wine prefix, in a folder named
+for the game, and runs the installers on top, so what they change is kept as their patch. They have to be Windows
+installers (a native installer after a copy fails the session at step 2).
+
 **`extract_suggested`** is what makes "this is not an installer" visible. It is true when nothing in the folder (or
 in the archive you asked about) looks like an installer: the server looks for known installer names
 (`gog-*`, `setup*`, `install.exe`, and any name containing "setup" or "install", never an "uninstall"), archives and

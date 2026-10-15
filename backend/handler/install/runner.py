@@ -45,6 +45,7 @@ from config import (
 from handler.database import db_game_handler, db_install_session_handler
 from handler.filesystem import fs_game_handler
 from handler.install.archive_prescan import extract_and_rescan, is_archive_candidate, source_phase, unwrap_platform_builds
+from handler.install.copy_step import is_copy_step
 from utils.archives import extract_archive
 from handler.install.auto_mode.runtime import start_auto_mode
 from handler.notifications import notify_auto_mode_failed, notify_install_small
@@ -531,6 +532,8 @@ def _steps_of(session: InstallSession) -> list[tuple[str | None, str | None]]:
 
 def _normalize_step(game, installer_path: str | None, source_path: str | None) -> tuple[str | None, str | None]:
     """An archive named as the installer (no source) is read as the source, as sessions started that way always were."""
+    if is_copy_step(installer_path):
+        return installer_path, source_path
     if source_path is None and installer_path:
         probe = fs_game_handler.resolve_installer_abs_path(game, installer_path)
         if is_archive_candidate(Path(probe)):
@@ -682,6 +685,19 @@ def _run_install(install_session_id: int, attempt: int = 1) -> bool:
         _run_extract_only(install_session_id, game, pairs[0][1])
         return False
 
+    # A copy is the game itself as a step: first, with the installers after it as patches, or alone, as an extraction.
+    copy_first = is_copy_step(pairs[0][0])
+    copy_source = pairs[0][1] if copy_first else None
+    if any(is_copy_step(installer) for installer, _source in pairs[1:]):
+        _fail(install_session_id, "Just copy has to be the first step")
+        return False
+    if copy_first:
+        pairs = pairs[1:]
+        if not pairs:
+            _run_extract_only(install_session_id, game, copy_source)
+            return False
+    offset = 1 if copy_first else 0
+
     work_dir: Path | None = None
     vnc: VncSession | None = None
     temp_dirs: list[TemporaryDirectory[str]] = []
@@ -697,7 +713,8 @@ def _run_install(install_session_id: int, attempt: int = 1) -> bool:
     after_first: dict[Path, tuple[int, int]] | None = None
     last_name = ""
     try:
-        for index, (inner_installer, source_rel) in enumerate(pairs):
+        for position, (inner_installer, source_rel) in enumerate(pairs):
+            index = position + offset
             try:
                 step = _prepare_step(install_session_id, game, inner_installer, source_rel, total)
             except (ValueError, FileNotFoundError) as e:
@@ -711,11 +728,17 @@ def _run_install(install_session_id: int, attempt: int = 1) -> bool:
             last_name = Path(step.installer_abs).name
             step_wine = _uses_wine(step.installer_abs)
 
-            if index == 0:
+            if position == 0:
                 work_dir = ensure_session_cache_dir(install_session_id)
                 # A native installer (.sh/.run, GOG's MojoSetup among them) runs as it is: no Proton, no Wine prefix.
                 # Its HOME and temporary files go inside the session's cache, the one place it may write.
                 native = not step_wine
+                if native and copy_first:
+                    _fail(
+                        install_session_id,
+                        _step_label(1, total, "it is a native installer, and a copy puts the game where Windows installers look"),
+                    )
+                    return False
                 if native:
                     extra_env = _native_env(work_dir)
                 else:
@@ -779,6 +802,17 @@ def _run_install(install_session_id: int, attempt: int = 1) -> bool:
                         save_baseline(prefix_dir, windows_baseline)
                     else:
                         windows_baseline = saved_baseline
+                if copy_first:
+                    _set_phase(install_session_id, InstallPhase.EXTRACTING, "Copying the game's files")
+                    problem = _copy_into_prefix(game, copy_source, _wine_drive_c_root(prefix_dir, proton_or_wine))
+                    _set_phase(install_session_id, None, None)
+                    if problem:
+                        _fail(install_session_id, _step_label(0, total, problem))
+                        return False
+                    if _cancelled(install_session_id):
+                        return False
+                    # The copy is the game: what the installers after it change is the patch.
+                    after_first = _file_stats(collect_windows_install_files(prefix_dir, windows_baseline))
             elif step_wine == native:
                 kind = "Windows" if step_wine else "native"
                 first = "Windows" if not native else "native"
@@ -1176,6 +1210,22 @@ def _copy_game_files(game, work_dir: Path) -> str | None:
         except OSError:
             shutil.copy2(src, dest)
     return None
+
+
+def _copy_into_prefix(game, source_rel: str | None, prefix_root: Path) -> str | None:
+    """The copy step of a chain: the game's own files (or the archive named, unpacked) as they are, in the folder an
+    installer would have made under Program Files, so the installers after it find the game there. Returns what went
+    wrong, or None."""
+    name = Path(getattr(game, "fs_name", None) or f"game-{game.id}").name
+    dest = prefix_root / "drive_c" / "Program Files" / name
+    dest.mkdir(parents=True, exist_ok=True)
+    if source_rel is None:
+        return _copy_game_files(game, dest)
+    try:
+        source_abs = Path(fs_game_handler.resolve_installer_abs_path(game, source_rel))
+    except (ValueError, FileNotFoundError) as e:
+        return str(e)
+    return extract_archive(source_abs, dest)
 
 
 def _run_extract_only(install_session_id: int, game, source_rel: str | None) -> None:

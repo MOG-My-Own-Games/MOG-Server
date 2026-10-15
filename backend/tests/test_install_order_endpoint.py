@@ -162,3 +162,26 @@ def test_a_start_with_a_bad_step_is_refused(started):
     response = started.post("/api/games/5/install", json={"steps": [{"path": "../outside.exe"}]})
 
     assert response.status_code == 400
+
+
+def test_just_copy_is_a_step_that_can_come_first_and_is_kept_with_the_others(api):
+    body = {"steps": [{"path": "mog:copy"}, {"path": "patch1.exe"}]}
+
+    assert api.put("/api/games/5/install/order", json=body).status_code == 200
+    got = api.get("/api/games/5/install/order").json()
+
+    assert [s["path"] for s in got["steps"]] == ["mog:copy", "patch1.exe"]
+
+
+def test_just_copy_anywhere_but_first_is_refused(api):
+    body = {"steps": [{"path": "setup.exe"}, {"path": "mog:copy"}]}
+
+    refused = api.put("/api/games/5/install/order", json=body)
+
+    assert refused.status_code == 400 and "first" in refused.json()["detail"]
+
+
+def test_just_copy_naming_an_archive_that_is_not_there_is_refused(api):
+    refused = api.put("/api/games/5/install/order", json={"steps": [{"path": "mog:copy", "source_path": "gone.rar"}]})
+
+    assert refused.status_code == 400

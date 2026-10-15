@@ -210,3 +210,95 @@ def test_a_cancel_during_an_installer_keeps_the_cancel_reason_and_finalizes_noth
     assert db.session.error == runner.CANCELLED_ERROR and db.session.state == InstallSessionState.FAILED
     assert chain.finalized == []
     assert len(chain.installers) == 1
+
+
+def test_a_copy_first_puts_the_game_in_the_prefix_and_the_installers_after_it_run_as_patches(chain, monkeypatch):
+    copied = []
+    monkeypatch.setattr(runner, "_copy_into_prefix", lambda game, source, root: copied.append((source, root)))
+    snapshots = []
+    monkeypatch.setattr(runner, "collect_windows_install_files", lambda prefix, baseline: snapshots.append(prefix) or [])
+    monkeypatch.setattr(runner, "_file_stats", lambda files: {})
+    db = FakeDb([("mog:copy", None), ("patch1.exe", None), ("patch2.exe", None)])
+    monkeypatch.setattr(runner, "db_install_session_handler", db)
+
+    assert runner._run_install(1) is False
+
+    assert len(copied) == 1 and copied[0][0] is None  # once, of the game's own files
+    assert [argv[-1].rsplit("/", 1)[-1] for argv in chain.installers] == ["patch1.exe", "patch2.exe"]  # the copy runs nothing
+    assert chain.vnc_started == 1 and chain.streamed == 1 and len(chain.finalized) == 1
+    assert db.session.step_index == 2 and len(snapshots) >= 1  # the copy is the first of three steps; patches are measured from it
+
+
+def test_a_failed_copy_names_the_first_step_and_runs_no_installer(chain, monkeypatch):
+    monkeypatch.setattr(runner, "_copy_into_prefix", lambda game, source, root: "the game's files are not there")
+    db = FakeDb([("mog:copy", None), ("patch1.exe", None)])
+    monkeypatch.setattr(runner, "db_install_session_handler", db)
+
+    runner._run_install(1)
+
+    assert db.session.state == InstallSessionState.FAILED
+    assert db.session.error == "Step 1/2: the game's files are not there"
+    assert chain.installers == [] and chain.finalized == []
+
+
+def test_a_copy_cannot_be_followed_by_a_native_installer(chain, monkeypatch):
+    monkeypatch.setattr(runner, "_copy_into_prefix", lambda *a: None)
+    db = FakeDb([("mog:copy", None), ("lost.sh", None)])
+    monkeypatch.setattr(runner, "db_install_session_handler", db)
+
+    runner._run_install(1)
+
+    assert db.session.state == InstallSessionState.FAILED
+    assert db.session.error.startswith("Step 2/2: it is a native installer")
+    assert chain.installers == []
+
+
+def test_a_copy_that_is_not_first_fails_the_session(chain, monkeypatch):
+    db = FakeDb([("setup.exe", None), ("mog:copy", None)])
+    monkeypatch.setattr(runner, "db_install_session_handler", db)
+
+    runner._run_install(1)
+
+    assert db.session.state == InstallSessionState.FAILED and "first" in db.session.error
+    assert chain.installers == []
+
+
+def test_a_copy_alone_in_a_chain_is_an_extraction(chain, monkeypatch):
+    extracted = []
+    monkeypatch.setattr(runner, "_run_extract_only", lambda sid, game, source: extracted.append(source))
+    db = FakeDb([("mog:copy", "Game.rar")])
+    monkeypatch.setattr(runner, "db_install_session_handler", db)
+
+    assert runner._run_install(1) is False
+
+    assert extracted == ["Game.rar"] and chain.installers == [] and chain.vnc_started == 0
+
+
+def test_the_copy_puts_the_games_files_under_program_files_in_a_folder_named_for_the_game(monkeypatch, tmp_path):
+    library = tmp_path / "library" / "Zero Zone"
+    (library / "ZZone").mkdir(parents=True)
+    (library / "ZZone" / "ZeroZone.exe").write_bytes(b"MZ")
+    monkeypatch.setattr(runner.fs_game_handler, "get_game_root_abs_path", lambda game: library)
+    prefix = tmp_path / "prefix"
+
+    problem = runner._copy_into_prefix(SimpleNamespace(id=3, fs_name="Zero Zone"), None, prefix)
+
+    assert problem is None
+    assert (prefix / "drive_c" / "Program Files" / "Zero Zone" / "ZZone" / "ZeroZone.exe").read_bytes() == b"MZ"
+
+
+def test_the_copy_of_an_archive_unpacks_it_into_the_same_place(monkeypatch, tmp_path):
+    archive = tmp_path / "Game.rar"
+    archive.write_bytes(b"rar")
+    monkeypatch.setattr(runner.fs_game_handler, "resolve_installer_abs_path", lambda game, rel: str(archive))
+    seen = []
+
+    def extract(source, dest):
+        seen.append((source, dest))
+        (dest / "game.exe").write_bytes(b"MZ")
+
+    monkeypatch.setattr(runner, "extract_archive", extract)
+    prefix = tmp_path / "prefix"
+
+    assert runner._copy_into_prefix(SimpleNamespace(id=3, fs_name="Game"), "Game.rar", prefix) is None
+    assert seen == [(archive, prefix / "drive_c" / "Program Files" / "Game")]

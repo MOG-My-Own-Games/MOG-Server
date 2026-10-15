@@ -58,6 +58,7 @@ from handler.filesystem.installer_detection import ARCHIVE_SOURCE_KINDS, looks_p
 from handler.install import bandwidth
 from handler.install.defaults import default_auto_mode, default_download_workers, default_manual_mode
 from handler.install.archive_prescan import extract_suggested, is_archive_candidate, list_source_candidates
+from handler.install.copy_step import COPY_STEP, is_copy_step
 from handler.install.manifest import (
     find_manifest_entry,
     regular_file_in,
@@ -199,10 +200,15 @@ def _validated_steps(game, steps: list[InstallStepForm]) -> list[dict]:
     """The steps as stored: every file must be inside the game's folder and none may be listed twice."""
     seen: set[tuple[str, str | None]] = set()
     checked: list[dict] = []
-    for step in steps:
+    for position, step in enumerate(steps):
+        if is_copy_step(step.path) and position != 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Just copy has to be the first step")
         try:
             # With a source, `path` is the executable inside that archive and can only be checked when it is unpacked.
-            fs_game_handler.resolve_installer_abs_path(game, step.source_path or step.path)
+            # A copy has no file of its own: only the archive it unpacks, when it names one.
+            named = step.source_path if is_copy_step(step.path) else (step.source_path or step.path)
+            if named is not None:
+                fs_game_handler.resolve_installer_abs_path(game, named)
         except (ValueError, FileNotFoundError) as e:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
         key = (step.path, step.source_path)
@@ -288,14 +294,20 @@ async def start_install_session(
     elif data.installer_path is None and data.source_path is None:
         saved = db_install_steps_handler.list_for_game(game.id)
         chain = [{"path": step.path, "source_path": step.source_path} for step in saved] or None
+    # A copy with nothing after it is the extraction of an archive, or of the game's own files, as it always was.
+    copy_alone = bool(chain) and len(chain) == 1 and is_copy_step(chain[0]["path"])
+    copy_source = chain[0]["source_path"] if copy_alone else None
+    if copy_alone:
+        chain = None
     if chain:
-        installer_path, source_path = chain[0]["path"], chain[0]["source_path"]
+        copy_first = is_copy_step(chain[0]["path"])
+        installer_path, source_path = (None if copy_first else chain[0]["path"]), chain[0]["source_path"]
         extract_only = False
         needs_manual_pick = False
     else:
         installer_path = data.installer_path
-        source_path = data.source_path
-        if installer_path is None and source_path is None:
+        source_path = copy_source if copy_alone else data.source_path
+        if installer_path is None and source_path is None and not copy_alone:
             candidates = fs_game_handler.get_installer_candidates(game)
             default = pick_default_installer(candidates)
             # A folder with no installer in it is probably the game itself: nothing is run unless the person picks
@@ -305,7 +317,7 @@ async def start_install_session(
                     source_path = default.path
                 else:
                     installer_path = default.path
-        extract_only = data.extract_only
+        extract_only = True if copy_alone else data.extract_only
         if extract_only is None:
             extract_only = await _archive_needs_no_installer(game, installer_path, source_path)
         extract_only = bool(extract_only)

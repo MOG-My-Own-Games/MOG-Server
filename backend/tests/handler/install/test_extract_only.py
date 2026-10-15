@@ -398,6 +398,32 @@ def test_a_folder_with_a_known_installer_is_still_run_by_itself(start, monkeypat
     assert session.installer_path == "setup.exe" and start.enqueued == [7]
 
 
+def test_a_copy_step_alone_is_the_extraction_of_the_games_own_files(start):
+    session = start.go(steps=[{"path": "mog:copy"}])
+    assert session.extract_only and start.made[-1].steps is None and session.installer_path is None and session.source_path is None
+    assert session.state == InstallSessionState.INSTALLING and start.enqueued == [7]
+
+
+def test_a_copy_step_alone_with_an_archive_extracts_that_archive(start):
+    session = start.go(steps=[{"path": "mog:copy", "source_path": "Hearthlands.rar"}])
+    assert session.extract_only and start.made[-1].steps is None and session.source_path == "Hearthlands.rar"
+
+
+def test_a_copy_step_before_installers_makes_a_chain_whose_first_step_is_the_copy(start):
+    session = start.go(steps=[{"path": "mog:copy"}, {"path": "setup.exe"}])
+    assert session.extract_only is False
+    assert start.made[-1].steps == [{"path": "mog:copy", "source_path": None}, {"path": "setup.exe", "source_path": None}]
+    assert session.installer_path is None and session.source_path is None
+
+
+def test_a_copy_step_after_an_installer_is_refused(start):
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as refused:
+        start.go(steps=[{"path": "setup.exe"}, {"path": "mog:copy"}])
+    assert refused.value.status_code == 400 and "first" in refused.value.detail
+
+
 def test_a_normal_start_is_not_extract_only(start):
     session = start.go()
     assert session.extract_only is False

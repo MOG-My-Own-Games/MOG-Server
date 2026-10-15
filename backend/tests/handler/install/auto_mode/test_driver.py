@@ -167,3 +167,16 @@ def test_a_stray_no_read_from_a_description_does_not_stop_the_closer_passes():
     assert _needs_deep_pass([_caption("No", 0)], catalog) is True  # not a way forward on an ordinary page
     close_prompt = [_caption("Do you want to close", 0), _caption("the setup?", 1), _caption("No", 2)]
     assert _needs_deep_pass(close_prompt, catalog) is False  # but the answer to "close the installer?" is
+
+
+def test_the_word_close_in_a_sentence_does_not_stop_the_closer_passes():
+    """Regression test: a skinned wizard's welcome page says "... click proceed to continue or close to exit installation",
+    and the whole-page read took that "close" for the page's button, so the closer passes that read the real Proceed never
+    ran and auto mode reported "needs help" with Proceed on screen. Close is only a way forward on an old GOG EULA page."""
+    from handler.install.auto_mode.driver import _needs_deep_pass
+
+    catalog = load_catalog()
+    sentence = [_caption("or close to exit installation", 0), _caption("Close", 1)]
+    assert _needs_deep_pass(sentence, catalog) is True
+    eula = [_caption("Save as .txt", 0), _caption("Close", 1)]
+    assert _needs_deep_pass(eula, catalog) is False

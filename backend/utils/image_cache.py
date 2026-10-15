@@ -15,12 +15,14 @@ from pathlib import Path
 import httpx
 from PIL import Image
 
-from config import RESOURCES_BASE_PATH
+from config import IMAGE_CACHE_PATH
 from logger.logger import log
 
-CACHE_DIR = Path(RESOURCES_BASE_PATH) / "imagecache"
+CACHE_DIR = Path(IMAGE_CACHE_PATH)
 COVER_MAX_HEIGHT = 600
 FETCH_TIMEOUT = 20.0
+MAX_IMAGE_BYTES = 25 * 1024 * 1024
+MAX_REDIRECTS = 3
 
 
 def _shrink(data: bytes, max_height: int) -> bytes:
@@ -85,23 +87,44 @@ def cached_local(source: Path, max_height: int) -> Path | None:
     return path
 
 
+def _download(url: str) -> bytes | None:
+    """The picture at `url`, only from a provider's own host (so the server is never made to fetch an address of somebody's
+    choosing), through at most MAX_REDIRECTS redirects that each pass the same check. None when it cannot be had."""
+    from handler.media import source_of
+
+    for _ in range(MAX_REDIRECTS + 1):
+        if source_of(url) is None:
+            log.warning(f"Not fetching an image from a host that is not a provider's: {url}")
+            return None
+        try:
+            response = httpx.get(url, timeout=FETCH_TIMEOUT, follow_redirects=False)
+            if response.is_redirect:
+                url = str(response.next_request.url) if response.next_request else ""
+                continue
+            response.raise_for_status()
+        except httpx.HTTPError as e:
+            log.warning(f"Could not fetch image {url}: {e}")
+            return None
+        data = response.content
+        if len(data) > MAX_IMAGE_BYTES or _kind_of(data)[0] == ".bin":
+            log.warning(f"Not keeping {url}: it is not an image, or too large")
+            return None
+        return data
+    return None
+
+
 def cached_image(url: str, max_height: int | None = None) -> Path | None:
     """Local file for `url`, downloading it on first use. None if it cannot be fetched.
     With `max_height` the image is shrunk to a JPEG of that height (covers); otherwise it is kept
     exactly as the provider sent it."""
-    if not url.startswith(("http://", "https://")):
-        return None
     key = hashlib.sha1(f"{url}|{max_height}".encode()).hexdigest()
     hit = next(iter(CACHE_DIR.glob(f"{key}.*")), None) if CACHE_DIR.is_dir() else None
     if hit is not None and hit.suffix != ".tmp":
         return hit
-    try:
-        response = httpx.get(url, timeout=FETCH_TIMEOUT, follow_redirects=True)
-        response.raise_for_status()
-    except httpx.HTTPError as e:
-        log.warning(f"Could not fetch image {url}: {e}")
+    data = _download(url)
+    if data is None:
         return None
-    data = _shrink(response.content, max_height) if max_height else _usable_everywhere(response.content)
+    data = _shrink(data, max_height) if max_height else _usable_everywhere(data)
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     path = CACHE_DIR / f"{key}{_kind_of(data)[0]}"
     tmp = path.with_suffix(".tmp")

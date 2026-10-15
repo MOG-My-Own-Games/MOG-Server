@@ -143,10 +143,45 @@ def test_a_png_keeps_its_transparency_and_type(monkeypatch, tmp_path):
     monkeypatch.setattr(image_cache, "CACHE_DIR", tmp_path)
     out = io.BytesIO()
     Image.new("RGBA", (4, 4), (0, 0, 0, 0)).save(out, "PNG")
-    monkeypatch.setattr(image_cache.httpx, "get", lambda url, **kw: SimpleNamespace(content=out.getvalue(), raise_for_status=lambda: None))
+    monkeypatch.setattr(image_cache.httpx, "get", lambda url, **kw: SimpleNamespace(content=out.getvalue(), is_redirect=False, raise_for_status=lambda: None))
 
     path = image_cache.cached_image("https://cdn2.steamgriddb.com/logo.png")
 
     assert path.suffix == ".png" and image_cache.media_type(path) == "image/png"
     assert Image.open(path).mode == "RGBA"
     assert image_cache.cached_image("https://cdn2.steamgriddb.com/logo.png") == path  # second time: from the cache
+
+
+def test_an_address_that_is_not_a_providers_is_never_fetched(monkeypatch, tmp_path):
+    """The cover address is typed by an admin: the server must not be made to call whatever host it names."""
+    monkeypatch.setattr(image_cache, "CACHE_DIR", tmp_path)
+    calls = []
+    monkeypatch.setattr(image_cache.httpx, "get", lambda url, **kw: calls.append(url))
+
+    for url in ("http://169.254.169.254/latest/meta-data", "http://localhost:5000/api/users", "https://evil.example/steamgriddb.com/a.png"):
+        assert image_cache.cached_image(url) is None
+    assert calls == []
+
+
+def test_a_redirect_to_another_host_is_not_followed(monkeypatch, tmp_path):
+    monkeypatch.setattr(image_cache, "CACHE_DIR", tmp_path)
+    calls = []
+
+    def get(url, **kw):
+        calls.append(url)
+        target = SimpleNamespace(url="http://127.0.0.1:5000/secret")
+        return SimpleNamespace(is_redirect=True, next_request=target)
+
+    monkeypatch.setattr(image_cache.httpx, "get", get)
+
+    assert image_cache.cached_image("https://cdn2.steamgriddb.com/a.png") is None
+    assert calls == ["https://cdn2.steamgriddb.com/a.png"]
+
+
+def test_something_that_is_not_an_image_is_not_kept(monkeypatch, tmp_path):
+    monkeypatch.setattr(image_cache, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(
+        image_cache.httpx, "get", lambda url, **kw: SimpleNamespace(content=b"<html>", is_redirect=False, raise_for_status=lambda: None)
+    )
+    assert image_cache.cached_image("https://cdn2.steamgriddb.com/a.png") is None
+    assert list(tmp_path.iterdir()) == []

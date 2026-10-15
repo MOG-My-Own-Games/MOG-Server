@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import secrets
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -37,6 +38,11 @@ def _ensure_dirs() -> None:
             # managed mount) - log it rather than crashing the whole server over
             # a directory it may not actually need to create itself.
             log.warning(f"Could not create {path}: {e}")
+
+
+def _remove_public_image_cache() -> None:
+    """Provider pictures used to be cached under the resources folder, which is served without authentication."""
+    shutil.rmtree(Path(RESOURCES_BASE_PATH) / "imagecache", ignore_errors=True)
 
 
 def _run_migrations() -> None:
@@ -107,6 +113,7 @@ def _fail_orphaned_installs() -> None:
 
 def run_startup_tasks() -> None:
     _ensure_dirs()
+    _remove_public_image_cache()
     _run_migrations()
     _ensure_default_admin()
     log_level.apply(db_settings_handler.get_settings())

@@ -7,6 +7,7 @@ from utils import image_cache
 class _Response:
     def __init__(self, content):
         self.content = content
+        self.is_redirect = False
 
     def raise_for_status(self):
         pass
@@ -23,8 +24,8 @@ def test_cover_is_downloaded_once_and_shrunk(monkeypatch, tmp_path):
     calls = []
     monkeypatch.setattr(image_cache.httpx, "get", lambda url, **kw: calls.append(url) or _Response(_png(1200, 1800)))
 
-    first = image_cache.cached_image("https://cdn.example/c.png", 600)
-    second = image_cache.cached_image("https://cdn.example/c.png", 600)
+    first = image_cache.cached_image("https://cdn2.steamgriddb.com/c.png", 600)
+    second = image_cache.cached_image("https://cdn2.steamgriddb.com/c.png", 600)
 
     assert first == second and len(calls) == 1
     assert Image.open(first).height == 600
@@ -38,7 +39,7 @@ def test_non_http_urls_and_failures_give_none(monkeypatch, tmp_path):
         raise image_cache.httpx.ConnectError("down")
 
     monkeypatch.setattr(image_cache.httpx, "get", boom)
-    assert image_cache.cached_image("https://cdn.example/x.png") is None
+    assert image_cache.cached_image("https://cdn2.steamgriddb.com/x.png") is None
 
 
 def test_webp_is_stored_as_png(monkeypatch, tmp_path):

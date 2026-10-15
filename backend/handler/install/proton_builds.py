@@ -19,6 +19,7 @@ in-process dict - no cross-process registry needed.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shutil
@@ -53,6 +54,14 @@ def default_build_id() -> str:
     return configured or INSTALL_DEFAULT_PROTON_BUILD or _FALLBACK_BUILD_ID
 
 
+_BUILD_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
+
+
+def is_valid_build_id(build_id: str) -> bool:
+    """A build id is a folder name under PROTON_INSTALL_ROOT: no separator, and never `.` or `..`."""
+    return _BUILD_ID.fullmatch(build_id) is not None
+
+
 @dataclass(frozen=True, slots=True)
 class ProtonBuild:
     """One Proton build the server knows about."""
@@ -71,6 +80,8 @@ class ProtonBuild:
     download_url: str | None = None
     # Approximate tarball size in bytes, only set for upstream builds.
     size_bytes: int | None = None
+    # SHA-256 of the tarball as GitHub reports it for the release asset; None when the release lacks one.
+    sha256: str | None = None
 
 
 def _scan_proton_root(root: str) -> list[ProtonBuild]:
@@ -142,6 +153,13 @@ def _github_get(url: str, params: dict[str, object] | None = None):
         return None
 
 
+def _sha256_of(asset: dict) -> str | None:
+    """The `sha256:<hex>` digest GitHub lists for a release asset, as the bare hex."""
+    digest = str(asset.get("digest") or "")
+    prefix, _, value = digest.partition(":")
+    return value.lower() if prefix == "sha256" and re.fullmatch(r"[0-9a-fA-F]{64}", value) else None
+
+
 def _fetch_latest_source(repo: str, suffix: str, build_id: str, label: str) -> list[ProtonBuild]:
     """The newest release of a repo whose builds share one fixed id."""
     data = _github_get(f"https://api.github.com/repos/{repo}/releases/latest")
@@ -160,6 +178,7 @@ def _fetch_latest_source(repo: str, suffix: str, build_id: str, label: str) -> l
                     source="upstream",
                     download_url=asset.get("browser_download_url"),
                     size_bytes=asset.get("size"),
+                    sha256=_sha256_of(asset),
                 )
             ]
     return []
@@ -202,6 +221,7 @@ def _fetch_ge_latest_per_major() -> list[ProtonBuild]:
                 source="upstream",
                 download_url=asset.get("browser_download_url"),
                 size_bytes=asset.get("size"),
+                sha256=_sha256_of(asset),
             )
         )
     return builds
@@ -264,6 +284,10 @@ def _download_proton_build(build_id: str) -> None:
     """Download + extract one Proton build, then register it on disk."""
     import httpx
 
+    if not is_valid_build_id(build_id):
+        log.error(f"Cannot download Proton build {build_id!r}: not a valid build id")
+        _DOWNLOAD_PROGRESS.pop(build_id, None)
+        return
     match = next((b for b in _fetch_upstream() if b.id == build_id), None)
     if match is None or not match.download_url:
         log.error(f"Cannot download Proton build {build_id}: no matching release found")
@@ -290,6 +314,7 @@ def _download_proton_build(build_id: str) -> None:
     log.info(f"Downloading Proton {hl(build_id)} from {hl(match.download_url)}")
     total = match.size_bytes or 0
     downloaded = 0
+    digest = hashlib.sha256()
     try:
         with httpx.Client(timeout=600, follow_redirects=True) as client:
             with client.stream("GET", str(match.download_url)) as resp:
@@ -297,8 +322,13 @@ def _download_proton_build(build_id: str) -> None:
                 with tmp_file.open("wb") as f:
                     for chunk in resp.iter_bytes(chunk_size=256 * 1024):
                         f.write(chunk)
+                        digest.update(chunk)
                         downloaded += len(chunk)
                         _DOWNLOAD_PROGRESS[build_id] = (downloaded, total)
+        if match.sha256 is None:
+            log.warning(f"GitHub lists no checksum for Proton {build_id}: it cannot be verified")
+        elif digest.hexdigest() != match.sha256:
+            raise RuntimeError("the download does not match the checksum GitHub lists for it")
     except Exception as e:  # noqa: BLE001 - surfaced via log, download thread has no caller to raise to
         log.error(f"Proton download {build_id} failed: {e}")
         tmp_file.unlink(missing_ok=True)
@@ -336,6 +366,8 @@ def _download_proton_build(build_id: str) -> None:
 
 def remove_build(build_id: str) -> None:
     """Remove a runtime-downloaded Proton build from disk."""
+    if not is_valid_build_id(build_id):
+        return
     dest = Path(PROTON_INSTALL_ROOT) / build_id
     if not dest.exists():
         return

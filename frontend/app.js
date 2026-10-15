@@ -1621,12 +1621,30 @@ function renderLibraryList(containerId, { clickable, showScrape = false, allowDe
   }
 }
 
+// The add-library form is a modal opened from "Your libraries"; a failure stays in it, so the name is not typed again.
+const addLibraryModal = document.getElementById("add-library-modal");
+const addLibraryError = document.getElementById("add-library-error");
+document.getElementById("open-add-library").addEventListener("click", () => {
+  addLibraryError.hidden = true;
+  addLibraryModal.hidden = false;
+  document.getElementById("lib-name").focus();
+});
+document.getElementById("add-library-cancel").addEventListener("click", () => {
+  addLibraryModal.hidden = true;
+});
 document.getElementById("add-library-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const name = document.getElementById("lib-name").value;
   const root_path = document.getElementById("lib-path").value;
-  await api("/api/libraries", { method: "POST", body: JSON.stringify({ name, root_path }) });
+  try {
+    await api("/api/libraries", { method: "POST", body: JSON.stringify({ name, root_path }) });
+  } catch (err) {
+    addLibraryError.textContent = `Could not add the library: ${err.message}`;
+    addLibraryError.hidden = false;
+    return;
+  }
   document.getElementById("add-library-form").reset();
+  addLibraryModal.hidden = true;
   await refreshLibraries();
   renderLibraryList("settings-library-list", { clickable: false, showScrape: true, allowDelete: true });
 });
@@ -1883,7 +1901,9 @@ async function loadLaunchSettings(gameId) {
   const table = document.getElementById("launch-settings-table");
   const empty = document.getElementById("launch-settings-empty");
   const body = document.getElementById("launch-settings-body");
+  const add = document.getElementById("launch-args-add");
   table.hidden = true;
+  add.hidden = true;
   empty.hidden = true;
   body.replaceChildren();
   let answer;
@@ -1899,6 +1919,9 @@ async function loadLaunchSettings(gameId) {
   for (const d of answer.devices || []) rows.push({ label: d.device.name, ...d, scope: "device", deviceId: d.device.id });
   empty.hidden = rows.length > 0;
   table.hidden = rows.length === 0;
+  // Arguments alone for all devices: nothing else is set, so the rest stays at the launcher's defaults.
+  add.hidden = !!answer.shared;
+  add.onclick = () => openLaunchEdit(gameId, { label: "All devices", scope: "all", launch_args: null, winetricks: null });
   for (const row of rows) {
     const tr = document.createElement("tr");
     const cell = (text) => {
@@ -1921,8 +1944,8 @@ async function loadLaunchSettings(gameId) {
       details.append(summary, pre);
       reg.appendChild(details);
     }
-    cell(row.winetricks && row.winetricks.length ? row.winetricks.join(", ") : "None");
-    cell(row.launch_args || "None");
+    chipCell(cell(""), row.winetricks);
+    chipCell(cell(""), launchTagsOf(row.launch_args));
     cell(new Date(row.updated_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }));
     const remove = document.createElement("button");
     remove.type = "button";
@@ -1940,10 +1963,272 @@ async function loadLaunchSettings(gameId) {
       }
       loadLaunchSettings(gameId);
     });
-    cell("").appendChild(remove);
+    const edit = document.createElement("button");
+    edit.type = "button";
+    edit.textContent = "Edit";
+    edit.addEventListener("click", () => openLaunchEdit(gameId, row));
+    const actions = cell("");
+    actions.append(edit, " ", remove);
     body.appendChild(tr);
   }
 }
+
+// Launch arguments are tags: each is one option with what goes with it ("-res 1280 720", "--nosound"). The page and the clients
+// edit the same list, so the page sends what it added and what it took out, and the server merges that into the list it holds.
+const LAUNCH_TAG_MAX = 200;
+const LAUNCH_TAGS_MAX = 50;
+
+// A list from the server as tags: an older server sent the text of the arguments.
+function launchTagsOf(value) {
+  if (Array.isArray(value)) return value;
+  return typeof value === "string" && value ? splitLaunchTags(value) : [];
+}
+
+// What a shell makes of a line, close enough for arguments: words, with single and double quotes and a backslash. null when a quote stays open.
+function shellWords(text) {
+  const words = [];
+  let word = null;
+  let quote = null;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quote === "'") {
+      if (c === "'") quote = null;
+      else word += c;
+    } else if (quote === '"') {
+      if (c === '"') quote = null;
+      else if (c === "\\" && i + 1 < text.length && '"\\$`'.includes(text[i + 1])) word += text[++i];
+      else word += c;
+    } else if (c === "'" || c === '"') {
+      quote = c;
+      word = word ?? "";
+    } else if (c === "\\" && i + 1 < text.length) {
+      word = (word ?? "") + text[++i];
+    } else if (/\s/.test(c)) {
+      if (word !== null) words.push(word);
+      word = null;
+    } else {
+      word = (word ?? "") + c;
+    }
+  }
+  if (quote) return null;
+  if (word !== null) words.push(word);
+  return words;
+}
+
+function shellQuote(word) {
+  return word !== "" && /^[A-Za-z0-9_@%+=:,./-]+$/.test(word) ? word : "'" + word.replace(/'/g, "'\"'\"'") + "'";
+}
+
+// Typed arguments as tags: a new tag starts at each word that begins with "-" or "--" (a negative number is a value), and the
+// words after it, up to the next such word, belong to it. The same rule as the server's and the client's.
+function splitLaunchTags(text) {
+  let words = shellWords(text);
+  let join = (group) => group.map(shellQuote).join(" ");
+  if (words === null) {
+    words = text.split(/\s+/).filter(Boolean); // a quote left open: the words as they are
+    join = (group) => group.join(" ");
+  }
+  const tags = [];
+  let group = [];
+  for (const word of words) {
+    if (word.startsWith("-") && !/^-\d+(\.\d+)?$/.test(word) && group.length) {
+      tags.push(join(group));
+      group = [];
+    }
+    group.push(word);
+  }
+  if (group.length) tags.push(join(group));
+  return [...new Set(tags)];
+}
+
+const WINETRICKS_NAME = /^[a-z0-9][a-z0-9_.-]{0,39}$/;
+const WINETRICKS_VALUE = /^[A-Za-z0-9_.,:+-]{1,40}$/;
+// Winetricks settings the usual games ask for, to suggest as the person types (any other name or value is fine too).
+const WINETRICKS_SUGGESTIONS = {
+  vd: ["off", "800x600", "1024x768", "1280x720", "1280x1024", "1600x900", "1920x1080"],
+  renderer: ["gdi", "gl", "vulkan"],
+  csmt: ["on", "off"],
+  mwo: ["enable", "disable", "force"],
+  sound: ["alsa", "pulse", "disabled"],
+};
+
+// One entry for each name: a later one replaces an earlier one with the same name ("vd=1920x1080" after "vd=1280x1024"), in the place it had.
+function normalizeWinetricks(entries) {
+  const kept = new Map();
+  for (const entry of entries) kept.set(entry.split("=", 1)[0], entry);
+  return [...kept.values()];
+}
+
+function chipCell(td, items) {
+  if (!items || !items.length) {
+    td.textContent = "None";
+    return;
+  }
+  const rowOfChips = document.createElement("div");
+  rowOfChips.className = "chip-row";
+  for (const item of items) {
+    const chip = document.createElement("span");
+    chip.className = "chip";
+    chip.textContent = item;
+    rowOfChips.appendChild(chip);
+  }
+  td.appendChild(rowOfChips);
+}
+
+// Edit a row of the launch settings: its argument tags and its winetricks entries.
+let launchEdit = null;
+
+function openLaunchEdit(gameId, row) {
+  const tags = launchTagsOf(row.launch_args);
+  const entries = Array.isArray(row.winetricks) ? row.winetricks : [];
+  launchEdit = { gameId, scope: row.scope, deviceId: row.deviceId ?? null, tags: [...tags], tagsAtStart: [...tags], entries: [...entries], entriesAtStart: [...entries] };
+  document.getElementById("launch-edit-who").textContent = `For ${row.label}.`;
+  document.getElementById("launch-edit-error").hidden = true;
+  for (const id of ["launch-tag-input", "wt-name", "wt-value"]) document.getElementById(id).value = "";
+  renderLaunchEdit();
+  document.getElementById("launch-edit-modal").hidden = false;
+  document.getElementById("launch-tag-input").focus();
+}
+
+function renderLaunchEdit() {
+  const fill = (listId, items, remove) => {
+    const list = document.getElementById(listId);
+    list.replaceChildren();
+    if (!items.length) {
+      const none = document.createElement("li");
+      none.className = "muted small";
+      none.textContent = "None";
+      list.appendChild(none);
+    }
+    for (const item of items) {
+      const li = document.createElement("li");
+      li.className = "chip";
+      li.append(item + " ");
+      const x = document.createElement("button");
+      x.type = "button";
+      x.className = "chip-remove";
+      x.textContent = "×";
+      x.title = `Remove ${item}`;
+      x.setAttribute("aria-label", `Remove ${item}`);
+      x.addEventListener("click", () => remove(item));
+      li.appendChild(x);
+      list.appendChild(li);
+    }
+  };
+  fill("launch-tags", launchEdit.tags, (tag) => {
+    launchEdit.tags = launchEdit.tags.filter((t) => t !== tag);
+    renderLaunchEdit();
+  });
+  fill("launch-wt-list", launchEdit.entries, (entry) => {
+    launchEdit.entries = launchEdit.entries.filter((e) => e !== entry);
+    renderLaunchEdit();
+  });
+}
+
+function launchEditError(text) {
+  const error = document.getElementById("launch-edit-error");
+  error.textContent = text;
+  error.hidden = !text;
+}
+
+// What is typed in the arguments field, as tags, after the ones listed (one that is there is not added again).
+function addLaunchTags() {
+  const input = document.getElementById("launch-tag-input");
+  const typed = splitLaunchTags(input.value);
+  if (typed.some((t) => t.length > LAUNCH_TAG_MAX || /[\u0000-\u001f\u007f]/.test(t))) {
+    launchEditError(`An argument is one line of up to ${LAUNCH_TAG_MAX} characters.`);
+    return;
+  }
+  for (const tag of typed) if (!launchEdit.tags.includes(tag) && launchEdit.tags.length < LAUNCH_TAGS_MAX) launchEdit.tags.push(tag);
+  input.value = "";
+  launchEditError("");
+  renderLaunchEdit();
+}
+
+// A winetricks setting (name and value) or, with no value, a verb; a name that is in the list gets the new value.
+function addWinetricksEntry() {
+  const name = document.getElementById("wt-name").value.trim();
+  const value = document.getElementById("wt-value").value.trim();
+  if (!WINETRICKS_NAME.test(name) || (value && !WINETRICKS_VALUE.test(value))) {
+    launchEditError("A name is lowercase letters, digits, _ . -; a value is letters, digits and _ . , : + - with no spaces (and may be left empty for a plain verb).");
+    return;
+  }
+  if (launchEdit.entries.length >= 100 && !launchEdit.entries.some((e) => e.split("=", 1)[0] === name)) {
+    launchEditError("That is as many winetricks entries as the server keeps.");
+    return;
+  }
+  launchEdit.entries = normalizeWinetricks([...launchEdit.entries, value ? `${name}=${value}` : name]);
+  document.getElementById("wt-name").value = "";
+  document.getElementById("wt-value").value = "";
+  launchEditError("");
+  renderLaunchEdit();
+}
+
+function suggestWinetricksValues() {
+  const values = document.getElementById("wt-values");
+  values.replaceChildren();
+  for (const value of WINETRICKS_SUGGESTIONS[document.getElementById("wt-name").value.trim()] || []) {
+    const option = document.createElement("option");
+    option.value = value;
+    values.appendChild(option);
+  }
+}
+
+(function setUpLaunchEdit() {
+  const names = document.getElementById("wt-names");
+  for (const name of Object.keys(WINETRICKS_SUGGESTIONS)) {
+    const option = document.createElement("option");
+    option.value = name;
+    names.appendChild(option);
+  }
+  document.getElementById("wt-name").addEventListener("input", suggestWinetricksValues);
+  document.getElementById("launch-tag-add").addEventListener("click", addLaunchTags);
+  document.getElementById("wt-add").addEventListener("click", addWinetricksEntry);
+  // Enter in a field adds what is typed there, not the whole form.
+  document.getElementById("launch-tag-input").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      addLaunchTags();
+    }
+  });
+  for (const id of ["wt-name", "wt-value"]) {
+    document.getElementById(id).addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        addWinetricksEntry();
+      }
+    });
+  }
+  document.getElementById("launch-edit-cancel").addEventListener("click", () => {
+    document.getElementById("launch-edit-modal").hidden = true;
+  });
+  document.getElementById("launch-edit-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (document.getElementById("launch-tag-input").value.trim()) addLaunchTags(); // typed and not added: Save takes it too
+    if (document.getElementById("wt-name").value.trim()) addWinetricksEntry();
+    if (!document.getElementById("launch-edit-error").hidden) return;
+    const edit = launchEdit;
+    // The arguments go as what was added and what was taken out, so what another editor changed meanwhile is kept.
+    const body = { scope: edit.scope, device_id: edit.deviceId };
+    const added = edit.tags.filter((t) => !edit.tagsAtStart.includes(t));
+    const removed = edit.tagsAtStart.filter((t) => !edit.tags.includes(t));
+    if (added.length || removed.length) {
+      body.launch_args_add = added;
+      body.launch_args_remove = removed;
+    }
+    if (JSON.stringify(edit.entries) !== JSON.stringify(edit.entriesAtStart)) body.winetricks = edit.entries.length ? edit.entries : null;
+    if (Object.keys(body).length > 2) {
+      try {
+        await api(`/api/games/${edit.gameId}/launch-settings`, { method: "PUT", body: JSON.stringify(body) });
+      } catch (err) {
+        launchEditError(`Could not save: ${err.message}`);
+        return;
+      }
+    }
+    document.getElementById("launch-edit-modal").hidden = true;
+    loadLaunchSettings(edit.gameId);
+  });
+})();
 
 // "Last played: 8 Oct 2026, 01:40 on karasu": the newest saved version, and the machine that made it. Nothing for a game never played.
 function renderLastPlayed(game) {

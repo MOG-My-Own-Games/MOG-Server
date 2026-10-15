@@ -9,7 +9,25 @@ posture unit-testable.
 
 from __future__ import annotations
 
+import os
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+
+# What the installer may see of the server's environment. The server's own settings (admin password, provider keys) live
+# there, and an installer is untrusted code that could write them into its output, which a client then downloads. Only the
+# names the runtime needs, and the prefixes of the variables that tune Wine, Proton and the graphics stack, are passed on.
+SANDBOX_ENV_NAMES = frozenset({"PATH", "HOME", "USER", "LOGNAME", "LANG", "LANGUAGE", "TZ", "TERM"})
+SANDBOX_ENV_PREFIXES = ("LC_", "WINE", "PROTON_", "DXVK_", "VKD3D_", "MESA_", "VK_", "LIBGL_", "DRI_", "__GL", "__NV")
+
+
+def sandbox_environ(environ: Mapping[str, str] | None = None) -> dict[str, str]:
+    """The part of `environ` (the process's own by default) that an installer is given."""
+    source = os.environ if environ is None else environ
+    return {
+        key: value
+        for key, value in source.items()
+        if key in SANDBOX_ENV_NAMES or key.startswith(SANDBOX_ENV_PREFIXES)
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +96,8 @@ def build_bwrap_command(
         "--unshare-net",
         "--die-with-parent",
         "--new-session",
+        # Nothing of the server's environment reaches the installer: the few variables it needs are set again below.
+        "--clearenv",
         # Minimal read-only system view.
         "--ro-bind",
         "/usr",
@@ -137,6 +157,12 @@ def build_bwrap_command(
         args += ["--bind", spec.proton_prefix, spec.proton_prefix]
     if spec.games_fallback_dir is not None:
         args += ["--bind", spec.games_fallback_dir, "/Games"]
+
+    # What the spec sets itself replaces the inherited value instead of being set twice.
+    own = {"DISPLAY", "WINEPREFIX", *(key for key, _ in spec.extra_env)}
+    for key, value in sandbox_environ().items():
+        if key not in own:
+            args += ["--setenv", key, value]
 
     # Point Wine/Proton and X clients at the sandboxed prefix and virtual display.
     args += ["--setenv", "DISPLAY", spec.display]

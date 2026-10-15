@@ -52,3 +52,33 @@ class TestEnsureDefaultAdmin:
         _ensure_default_admin()
 
         db.update_user.assert_not_called()
+
+
+@patch("startup.db_user_handler")
+class TestPlaceholderAdminPassword:
+    def test_a_missing_password_gives_the_first_admin_a_random_one(self, db, monkeypatch):
+        monkeypatch.delenv("MOG_ADMIN_PASSWORD", raising=False)
+        db.get_all_users.return_value = []
+
+        _ensure_default_admin()
+
+        created = db.add_user.call_args.args[0]
+        assert not verify_password("mog-admin", created.hashed_password)
+
+    def test_a_placeholder_is_never_used_as_the_password(self, db, monkeypatch):
+        monkeypatch.setenv("MOG_ADMIN_PASSWORD", "change-me")
+        db.get_all_users.return_value = []
+
+        _ensure_default_admin()
+
+        assert not verify_password("change-me", db.add_user.call_args.args[0].hashed_password)
+
+    def test_a_placeholder_does_not_overwrite_the_password_of_an_existing_admin(self, db, monkeypatch):
+        monkeypatch.setenv("MOG_ADMIN_PASSWORD", "change-me")
+        admin = _admin("mine")
+        db.get_all_users.return_value = [admin]
+        db.get_user_by_username.return_value = admin
+
+        _ensure_default_admin()
+
+        db.update_user.assert_not_called()

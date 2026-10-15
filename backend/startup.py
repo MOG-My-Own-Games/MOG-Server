@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import secrets
 import subprocess
 from pathlib import Path
 
@@ -43,22 +44,38 @@ def _run_migrations() -> None:
     subprocess.run(["alembic", "upgrade", "head"], check=True, cwd=Path(__file__).parent)
 
 
+# What env.template and the usual examples say: a password that anybody can guess, so it is never used.
+PLACEHOLDER_PASSWORDS = frozenset({"change-me", "changeme", "mog-admin", "admin", "password"})
+
+
 def _ensure_default_admin() -> None:
     """Create the admin from env vars if the users table is empty. After that,
     MOG_ADMIN_PASSWORD (when set) is the source of truth for that account's
-    password: a changed value is rewritten to the DB on every boot."""
+    password: a changed value is rewritten to the DB on every boot.
+
+    A missing password, or a placeholder from the template, is not used: the first admin gets a random one, shown once
+    in the log, and an existing account keeps the password it has."""
     username = os.getenv("MOG_ADMIN_USERNAME", "admin")
     env_password = os.getenv("MOG_ADMIN_PASSWORD")
+    placeholder = bool(env_password) and env_password.strip().lower() in PLACEHOLDER_PASSWORDS
+    if placeholder:
+        log.warning("MOG_ADMIN_PASSWORD is still a placeholder: it is ignored. Set a password of your own.")
+        env_password = None
     if not db_user_handler.get_all_users():
+        generated = env_password is None
+        password = env_password or secrets.token_urlsafe(16)
         db_user_handler.add_user(
             User(
                 username=username,
-                hashed_password=hash_password(env_password or "mog-admin"),
+                hashed_password=hash_password(password),
                 role=Role.ADMIN,
                 enabled=True,
             )
         )
-        log.warning(f"Created default admin user {username!r} - change its password (MOG_ADMIN_PASSWORD).")
+        if generated:
+            log.warning(f"Created admin user {username!r} with the password {password!r}: shown only now, change it.")
+        else:
+            log.warning(f"Created admin user {username!r}.")
         return
 
     admin = db_user_handler.get_user_by_username(username)

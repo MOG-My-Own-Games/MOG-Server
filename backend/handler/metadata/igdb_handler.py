@@ -126,11 +126,17 @@ def validate_credentials() -> bool:
     return _get_token() is not None
 
 
+def quote(text: str) -> str:
+    """`text` as the body of an IGDB query string: the backslash is escaped before the quote (or a trailing backslash would
+    swallow the closing quote and let the rest of the name become part of the query), and control characters are dropped."""
+    cleaned = "".join(c for c in text if c >= " " and c != "\x7f")
+    return cleaned.replace("\\", "\\\\").replace('"', '\\"')
+
+
 def search_games(name: str, limit: int = 10) -> list[dict[str, Any]]:
     """Search IGDB by name. Returns resolved game dicts (cover/screenshot
     URLs are already absolute, see _resolve_media)."""
-    escaped = name.replace('"', '\\"')
-    results = _query(f'search "{escaped}"; fields {_GAME_FIELDS}; limit {limit};')
+    results = _query(f'search "{quote(name)}"; fields {_GAME_FIELDS}; limit {limit};')
     return [_resolve_media(g) for g in results]
 
 

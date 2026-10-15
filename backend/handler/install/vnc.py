@@ -23,12 +23,11 @@ from config import INSTALL_VNC_PORT_MAX, INSTALL_VNC_PORT_MIN, INSTALL_VNC_RESOL
 from logger.formatter import highlight as hl
 from logger.logger import log
 
-# x11vnc listens on loopback - only websockify (same process, same network
-# namespace) talks to it, so it's never reachable directly. websockify binds
-# every interface so the server's own VNC proxy route (see
-# endpoints/install.py's install_vnc_http/ws) can reach it.
+# x11vnc and websockify both listen on loopback: only the server's own VNC proxy route (see endpoints/install.py's
+# install_vnc_http/ws, the same process and network namespace) talks to them, so neither is reachable from outside the
+# container, where the token check of that route would be bypassed.
 VNC_INTERNAL_HOST = "127.0.0.1"
-VNC_PUBLIC_HOST = "0.0.0.0"  # noqa: S104 - deliberately every interface, see above
+VNC_PUBLIC_HOST = "127.0.0.1"
 VNC_PASSWORD_BYTES = 18
 # Fixed, not matched to the browser's actual window: installers are small
 # dialog-sized windows, not full desktops, and a fixed server-side

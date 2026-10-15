@@ -10,7 +10,7 @@ from endpoints import addons as endpoints
 from handler import addons as addons_handler
 from handler.auth import get_current_user
 
-GAME = SimpleNamespace(id=5, name="Some Game")
+GAME = SimpleNamespace(id=5, name="Some Game", library_id=1)
 
 
 def _zip_bytes(members: dict[str, bytes]) -> bytes:
@@ -28,7 +28,7 @@ def api(db, tmp_path, monkeypatch):
     monkeypatch.setattr(endpoints, "db_game_handler", SimpleNamespace(get_game=lambda i: GAME if i == 5 else None))
     app = FastAPI()
     app.include_router(endpoints.router, prefix="/api")
-    state = SimpleNamespace(user=SimpleNamespace(id=1, is_admin=False))
+    state = SimpleNamespace(user=SimpleNamespace(id=1, is_admin=False, hidden_library_ids=[]))
     app.dependency_overrides[get_current_user] = lambda: state.user
     client = TestClient(app)
     client.state = state
@@ -78,10 +78,10 @@ def test_only_an_admin_or_the_uploader_can_delete(api):
     created = _upload(api, _zip_bytes({"a": b"x"})).json()
     url = f"/api/games/5/addons/{created['id']}"
 
-    api.state.user = SimpleNamespace(id=2, is_admin=False)
+    api.state.user = SimpleNamespace(id=2, is_admin=False, hidden_library_ids=[])
     assert api.delete(url).status_code == 403
 
-    api.state.user = SimpleNamespace(id=2, is_admin=True)
+    api.state.user = SimpleNamespace(id=2, is_admin=True, hidden_library_ids=[])
     assert api.delete(url).status_code == 200
     assert api.get("/api/games/5/addons").json() == []
 
@@ -107,10 +107,10 @@ def test_only_an_admin_or_the_uploader_can_rename(api):
     created = _upload(api, _zip_bytes({"a": b"x"})).json()
     url = f"/api/games/5/addons/{created['id']}"
 
-    api.state.user = SimpleNamespace(id=2, is_admin=False)
+    api.state.user = SimpleNamespace(id=2, is_admin=False, hidden_library_ids=[])
     assert api.patch(url, json={"name": "Other"}).status_code == 403
 
-    api.state.user = SimpleNamespace(id=2, is_admin=True)
+    api.state.user = SimpleNamespace(id=2, is_admin=True, hidden_library_ids=[])
     assert api.patch(url, json={"name": "Other"}).status_code == 200
     assert api.get("/api/games/5/addons").json()[0]["name"] == "Other"
 

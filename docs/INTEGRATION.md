@@ -59,8 +59,9 @@ Everything is per user: one user's sessions, saves and notifications are not ano
 The docker image listens on port 5000 inside; the mapped port is up to whoever runs it.
 
 **Authentication.** HTTP Basic, on every request, against the server's own users. There is no token and no
-session: send the `Authorization` header each time. A wrong or disabled account gets `401` with
-`WWW-Authenticate: Basic`. The server remembers a verified password for a few minutes, so sending it every time
+session: send the `Authorization` header each time. A request without the header gets `401` with
+`WWW-Authenticate: Basic`; a wrong or disabled account gets a plain `401`, so a browser does not open its own
+sign-in box. The server remembers a verified password for a few minutes, so sending it every time
 is cheap.
 
 ```bash
@@ -78,7 +79,8 @@ from "wrong password", and to read the server's version.
 (the `409` of device registration, see [8](#8-saves-optional)). The statuses you will meet are `401` (login),
 `404` (no such game, session, file, or an endpoint an older server does not have), `409` (a conflict you can
 resolve), `416` (a range is not available yet, see [6](#6-downloading-the-result)), `422` and `413` (a rejected
-upload) and, from an older server only, `429` (too many installs running at once: they are queued now).
+upload) and `429` (too many wrong passwords from one address for one user: wait for the seconds `Retry-After` says;
+an older server also answered `429` when too many installs ran at once, which are queued now).
 
 **Newer and older servers.** Optional features appear over time. A client should treat a `404` or `405` on an
 optional endpoint (game sizes, the library revision, mods, save sync, save paths, download workers) as "this
@@ -168,7 +170,9 @@ done" is only one of the two conditions for finishing (see [6.5](#65-when-is-it-
 | `ttl_seconds` | How long the install cache lives; left out, the server's default (7 days unless an admin changed it in Settings; a default of `0` means never); `0` or less means never. An admin who sets a default of days gives every cache that never expires that expiry, counted from then; `POST /api/games/install/cache/{session_id}/reset` (admin) starts one cache's expiry over from the default in force at that moment. The admin cache listing, `GET /api/games/install/cache`, carries each cache's `expires_at` (`null`: never). |
 
 The call is **idempotent while it runs**: if a session for the game is already `queued`, `installing` or `streaming`,
-it is returned as it is, so a second client asking for the same game finds the first one's work.
+it is returned as it is, so a second client of the same user asking for the same game finds the first one's work.
+When that session belongs to another user the answer is `409` and nothing of it is shown: its record carries the
+installer display's address and keys, which are for the person who started it.
 
 > **Check for a finished install before you start another.** A start for a game whose last session is already
 > `done` would run the installer again. MOG Client first does `GET /api/games/{id}/install`: when the answer is
@@ -411,8 +415,8 @@ starts it the same way. They belong to the game, not to a user.
 | Call | What it does |
 | --- | --- |
 | `GET /api/games/{id}/launch-settings?device_id=N` | `{shared, device, devices}`: the settings for all devices, the ones for device `N` (`device_id` is optional), and the ones of each of the user's devices that has any (`[{device, proton, winecfg_reg, winetricks, launch_args, updated_at}]`, for a web page like the server's Settings tab). Each of the first two is `null` or `{proton, winecfg_reg, winetricks, launch_args, updated_at}`. |
-| `PUT /api/games/{id}/launch-settings` | Body `{scope: "device" \| "all", device_id, proton, winecfg_reg, winetricks, launch_args, launch_args_add, launch_args_remove}`. `device_id` is required for the `device` scope and must be one of the user's devices. Only the fields sent change; `null` clears one. |
-| `DELETE /api/games/{id}/launch-settings?scope=device\|all&device_id=N` | Remove one scope's settings. |
+| `PUT /api/games/{id}/launch-settings` | Body `{scope: "device" \| "all", device_id, proton, winecfg_reg, winetricks, launch_args, launch_args_add, launch_args_remove}`. `device_id` is required for the `device` scope and must be one of the user's devices. Only the fields sent change; `null` clears one. The `all` scope is for an admin: another user gets `403`, and sets the same things for their own devices. |
+| `DELETE /api/games/{id}/launch-settings?scope=device\|all&device_id=N` | Remove one scope's settings (`scope=all` is for an admin, `403` otherwise). |
 
 - `proton` is the **name** of a build (`GE-Proton9-1`), never a path, up to 200 characters: paths differ between devices.
   A device uses its own entry when it has one, else the shared one.

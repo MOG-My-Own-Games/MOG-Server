@@ -16,17 +16,15 @@ from endpoints.responses.addons import GameAddonRenameForm, GameAddonSchema
 from handler import addons as addons_handler
 from handler.auth import CurrentUser
 from handler.database import db_game_addons_handler, db_game_handler
+from handler.visibility import check_visible
 from logger.logger import log
 
 router = APIRouter(prefix="/games", tags=["addons"])
 _CHUNK = 1024 * 1024
 
 
-def _game_or_404(game_id: int):
-    game = db_game_handler.get_game(game_id)
-    if game is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-    return game
+def _game_or_404(user, game_id: int):
+    return check_visible(user, db_game_handler.get_game(game_id))
 
 
 def _addon_of_game(game_id: int, addon_id: int):
@@ -39,12 +37,16 @@ def _addon_of_game(game_id: int, addon_id: int):
 @router.get("/addons")
 async def list_all_addons(user: CurrentUser) -> list[GameAddonSchema]:
     """Every entity of every game, for the install cache view."""
-    return [GameAddonSchema.model_validate(a) for a in db_game_addons_handler.list_all()]
+    rows = db_game_addons_handler.list_all()
+    if not user.is_admin and user.hidden_library_ids:
+        visible = {g.id for g in db_game_handler.get_all_games() if g.library_id not in user.hidden_library_ids}
+        rows = [a for a in rows if a.game_id in visible]
+    return [GameAddonSchema.model_validate(a) for a in rows]
 
 
 @router.get("/{id}/addons")
 async def list_addons(user: CurrentUser, id: Annotated[int, PathVar(ge=1)]) -> list[GameAddonSchema]:
-    _game_or_404(id)
+    _game_or_404(user, id)
     return [GameAddonSchema.model_validate(a) for a in db_game_addons_handler.list_for_game(id)]
 
 
@@ -57,7 +59,7 @@ async def add_addon(
     file: Annotated[UploadFile, File()],
 ) -> GameAddonSchema:
     """Keep a zip of files the user installed (the diff of a mod, patch, DLC or extra) as an entity of the game."""
-    _game_or_404(id)
+    _game_or_404(user, id)
     try:
         addons_handler.check_category(category)
         addons_handler.sanitize_name(name)
@@ -96,7 +98,7 @@ async def list_addon_files(
     addon_id: Annotated[int, PathVar(ge=1)],
 ) -> dict:
     """What an addon puts in the game's folder: its file count and the first files of it, with their sizes."""
-    _game_or_404(id)
+    _game_or_404(user, id)
     addon = _addon_of_game(id, addon_id)
     try:
         count, files = await asyncio.to_thread(addons_handler.list_files, addon, ADDON_FILES_LISTED)
@@ -111,7 +113,7 @@ async def download_addon(
     id: Annotated[int, PathVar(ge=1)],
     addon_id: Annotated[int, PathVar(ge=1)],
 ) -> FileResponse:
-    _game_or_404(id)
+    _game_or_404(user, id)
     addon = _addon_of_game(id, addon_id)
     path = addons_handler.content_path(addon)
     if not path.is_file():
@@ -127,7 +129,7 @@ async def rename_addon(
     form: GameAddonRenameForm,
 ) -> GameAddonSchema:
     """Give an entity another name. Its content, category and place on disk do not change."""
-    _game_or_404(id)
+    _game_or_404(user, id)
     addon = _addon_of_game(id, addon_id)
     if not user.is_admin and addon.user_id != user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only an admin or the person who added it can rename it")
@@ -146,7 +148,7 @@ async def delete_addon(
     id: Annotated[int, PathVar(ge=1)],
     addon_id: Annotated[int, PathVar(ge=1)],
 ) -> None:
-    _game_or_404(id)
+    _game_or_404(user, id)
     addon = _addon_of_game(id, addon_id)
     if not user.is_admin and addon.user_id != user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only an admin or the person who added it can delete it")

@@ -13,9 +13,10 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-from config import ADDONS_PATH
+from config import ADDONS_MAX_UNCOMPRESSED_BYTES, ADDONS_PATH
 from handler.database import db_game_addons_handler
 from logger.logger import log
+from utils.archive_safety import ArchiveError, check_members
 from models.game_addon import ADDON_CATEGORIES, ADDON_NAME_MAX_LENGTH, GameAddon
 
 CONTENT_FILE = "content.zip"
@@ -52,16 +53,15 @@ def content_path(addon: GameAddon) -> Path:
 
 
 def _check_zip(source: Path) -> tuple[int, int]:
-    """(bytes, files) of a zip whose members all stay inside the game's folder. Refused otherwise."""
+    """(bytes, files) of a zip whose members all stay inside the game's folder. Refused otherwise: a name that leaves the
+    folder, a link, too many files or more declared bytes than ADDONS_MAX_UNCOMPRESSED_BYTES."""
     if not zipfile.is_zipfile(source):
         raise AddonError("Not a zip archive")
-    with zipfile.ZipFile(source) as zf:
-        members = [info for info in zf.infolist() if not info.is_dir()]
-        for info in members:
-            member = Path(info.filename)
-            if member.is_absolute() or ".." in member.parts or "\\" in info.filename:
-                raise AddonError(f"Unsafe path in the archive: {info.filename}")
-    return sum(info.file_size for info in members), len(members)
+    try:
+        with zipfile.ZipFile(source) as zf:
+            return check_members(zf.infolist(), ADDONS_MAX_UNCOMPRESSED_BYTES)
+    except (ArchiveError, zipfile.BadZipFile) as e:
+        raise AddonError(f"Unsafe archive: {e}") from e
 
 
 def add_zip(

@@ -53,8 +53,6 @@ MAX_DEVICE_LOG_BYTES: Final[int] = 1024 * 1024
 
 MAX_SAVE_UPLOAD_BYTES: Final[int] = max(1, safe_int(_get_env("MAX_SAVE_UPLOAD_BYTES"), 512 * 1024 * 1024))
 
-AUTH_SECRET_KEY: Final[str] = _get_env("AUTH_SECRET_KEY") or "dev-insecure-secret-key"
-
 # --- Backups ---
 
 # A volume of its own, so a backup survives the data volume it protects. Without a directory there, backups are off.
@@ -70,6 +68,9 @@ BACKUP_HOUR: Final[int] = min(23, max(0, safe_int(_get_env("BACKUP_HOUR"), 3)))
 
 INSTALL_CACHE_PATH: Final[str] = f"{MOG_BASE_PATH}/cache/installs"
 
+# Provider pictures kept for the clients: served only through the authenticated endpoints, so not under RESOURCES_BASE_PATH.
+IMAGE_CACHE_PATH: Final[str] = f"{MOG_BASE_PATH}/cache/images"
+
 # Zips made on the fly of the folders under a game's mods folder, until a client has fetched them.
 MODS_CACHE_PATH: Final[str] = f"{MOG_BASE_PATH}/cache/mods"
 MODS_CACHE_MAX_AGE_HOURS: Final[int] = max(1, safe_int(_get_env("MODS_CACHE_MAX_AGE_HOURS"), 24))
@@ -78,6 +79,8 @@ MODS_CACHE_MAX_AGE_HOURS: Final[int] = max(1, safe_int(_get_env("MODS_CACHE_MAX_
 # caches above, so they survive clearing the installer cache. One folder per entity, under the data volume.
 ADDONS_PATH: Final[str] = f"{MOG_BASE_PATH}/addons"
 ADDONS_MAX_BYTES: Final[int] = max(1, safe_int(_get_env("ADDONS_MAX_BYTES"), 8 * 1024 * 1024 * 1024))
+# What an addon's files may add up to once unpacked (its zip is smaller): a client writes all of it to the game's folder.
+ADDONS_MAX_UNCOMPRESSED_BYTES: Final[int] = ADDONS_MAX_BYTES * 4
 
 INSTALL_CACHE_DEFAULT_TTL_DAYS: Final[int] = safe_int(
     _get_env("INSTALL_CACHE_DEFAULT_TTL_DAYS"), 7

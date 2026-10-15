@@ -116,3 +116,29 @@ def test_only_the_known_kinds_are_accepted():
     assert addons.check_category("extra") == "extra"
     with pytest.raises(addons.AddonError, match="mod, patch, dlc, extra"):
         addons.check_category("save")
+
+
+@pytest.mark.parametrize("name", ["C:/Windows/x.dll", "C:evil.dll", "a\\..\\b.txt", "/etc/cron.d/x"])
+def test_a_name_with_a_drive_or_a_backslash_or_a_root_is_refused(store, tmp_path, name):
+    source = _zip(tmp_path / "evil.zip", {name: b"x"})
+    with pytest.raises(addons.AddonError):
+        addons.add_zip(3, "mod", "Evil", source, user_id=1)
+
+
+def test_a_link_inside_the_zip_is_refused(store, tmp_path):
+    import stat
+
+    path = tmp_path / "link.zip"
+    with zipfile.ZipFile(path, "w") as zf:
+        info = zipfile.ZipInfo("Game/shortcut")
+        info.external_attr = (stat.S_IFLNK | 0o777) << 16
+        zf.writestr(info, "/etc/passwd")
+    with pytest.raises(addons.AddonError):
+        addons.add_zip(3, "mod", "Link", path, user_id=1)
+
+
+def test_a_zip_declaring_more_than_the_limit_is_refused(store, tmp_path, monkeypatch):
+    monkeypatch.setattr(addons, "ADDONS_MAX_UNCOMPRESSED_BYTES", 100)
+    source = _zip(tmp_path / "big.zip", {"Game/a.bin": b"x" * 101})
+    with pytest.raises(addons.AddonError):
+        addons.add_zip(3, "mod", "Big", source, user_id=1)

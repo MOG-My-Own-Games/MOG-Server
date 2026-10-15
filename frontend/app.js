@@ -84,10 +84,10 @@ async function api(path, opts = {}) {
   return resp.json();
 }
 
+// Quotes too: the result is also put inside attribute values, where a bare quote would end the value.
+const HTML_ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 function escapeHtml(s) {
-  const div = document.createElement("div");
-  div.textContent = s == null ? "" : String(s);
-  return div.innerHTML;
+  return (s == null ? "" : String(s)).replace(/[&<>"']/g, (c) => HTML_ESCAPES[c]);
 }
 
 function fmtBytes(n) {
@@ -2249,10 +2249,16 @@ async function openGamePage(id) {
     game = await api(`/api/games/${id}`);
   } catch (err) {
     view.classList.remove("loading");
-    document.getElementById("game-title").textContent = "Not found";
+    if (err.status === 404) {
+      activeGame = null;
+      view.classList.add("not-found");
+      return;
+    }
+    document.getElementById("game-title").textContent = "Could not load the game";
     document.getElementById("game-summary").textContent = err.message;
     return;
   }
+  view.classList.remove("not-found");
   activeGame = game;
   selectedCandidate = null;
 

@@ -16,7 +16,7 @@ import time
 from typing import Annotated
 
 import bcrypt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from handler.database import db_user_handler
@@ -34,6 +34,40 @@ AUTH_CACHE_SECONDS = 300
 _AUTH_CACHE_MAX = 1024
 _auth_key = os.urandom(32)
 _verified: dict[tuple[str, str], tuple[float, str]] = {}
+
+
+# Failed logins are counted per address and username. After a few free tries each further failure doubles the wait (up to
+# five minutes) before that pair is looked at again, so a password cannot be guessed at the pace of the network. A right
+# password ends it. Kept in memory: a restart forgives, which is enough against guessing.
+FAILURES_FREE = 5
+LOCK_MAX_SECONDS = 300
+_FAILURES_MAX = 4096
+_failures: dict[tuple[str, str], tuple[int, float]] = {}
+# Checked against when the user does not exist, so that a wrong name costs the same time as a wrong password.
+_DUMMY_HASH = bcrypt.hashpw(b"not-a-password", bcrypt.gensalt()).decode()
+
+
+def _failure_key(request: Request, username: str) -> tuple[str, str]:
+    return (request.client.host if request.client else "", username.lower())
+
+
+def _lock_remaining(key: tuple[str, str]) -> float:
+    count, last = _failures.get(key, (0, 0.0))
+    if count < FAILURES_FREE:
+        return 0.0
+    wait = min(LOCK_MAX_SECONDS, 2 ** (count - FAILURES_FREE))
+    return max(0.0, last + wait - time.monotonic())
+
+
+def _record_failure(key: tuple[str, str]) -> None:
+    if len(_failures) >= _FAILURES_MAX:
+        now = time.monotonic()
+        for stale in [k for k, (_, last) in _failures.items() if now - last > LOCK_MAX_SECONDS]:
+            _failures.pop(stale, None)
+        if len(_failures) >= _FAILURES_MAX:
+            _failures.clear()
+    count, _ = _failures.get(key, (0, 0.0))
+    _failures[key] = (count + 1, time.monotonic())
 
 
 def hash_password(password: str) -> str:
@@ -64,17 +98,28 @@ def _password_checks_out(username: str, password: str, hashed: str) -> bool:
 
 
 def get_current_user(
+    request: Request,
     credentials: Annotated[HTTPBasicCredentials, Depends(_security)],
 ) -> User:
+    key = _failure_key(request, credentials.username)
+    remaining = _lock_remaining(key)
+    if remaining > 0:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed logins, try again later",
+            headers={"Retry-After": str(int(remaining) + 1)},
+        )
     user = db_user_handler.get_user_by_username(credentials.username)
+    if user is None:
+        verify_password(credentials.password, _DUMMY_HASH)
     if user is None or not user.enabled or not _password_checks_out(
         credentials.username, credentials.password, user.hashed_password
     ):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid username or password",
-            headers={"WWW-Authenticate": "Basic"},
-        )
+        _record_failure(key)
+        # No Basic challenge here: the credentials were sent and are wrong, and a challenge makes a browser open its own
+        # sign-in box over the web UI's. A request with no credentials at all still gets it, from HTTPBasic.
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password")
+    _failures.pop(key, None)
     return user
 
 

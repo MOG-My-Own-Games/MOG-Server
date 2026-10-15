@@ -23,6 +23,13 @@ def _schema(row) -> LaunchSettingsSchema | None:
     return LaunchSettingsSchema.model_validate(row) if row is not None else None
 
 
+def _admin_for_shared(user) -> None:
+    """What is set for all devices is applied on every user's machines (a Proton build, registry settings, program
+    arguments), so only an admin may set it; anybody sets what is for their own devices."""
+    if not user.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only an admin sets what is shared by all devices")
+
+
 @router.get("/games/{id}/launch-settings")
 async def get_launch_settings(
     user: CurrentUser,
@@ -61,6 +68,8 @@ async def put_launch_settings(
     target = None
     if form.scope == "device":
         target = _own_device(user, form.device_id).id  # type: ignore[arg-type]
+    else:
+        _admin_for_shared(user)
     changes = form.model_dump(exclude_unset=True, include={"proton", "winecfg_reg", "winetricks", "launch_args"})
     log.debug(f"Launch settings: game {id} {form.scope} {target}, changing {sorted(changes)} for user {user.id}")
     patching = form.launch_args_add is not None or form.launch_args_remove is not None
@@ -77,6 +86,8 @@ async def delete_launch_settings(
 ) -> None:
     _visible_game(user, id)
     target = None
+    if scope == "all":
+        _admin_for_shared(user)
     if scope == "device":
         if device_id is None:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="device_id is required for the device scope")

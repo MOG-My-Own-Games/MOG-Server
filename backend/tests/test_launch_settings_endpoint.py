@@ -22,9 +22,11 @@ def api(db, monkeypatch):
     app = FastAPI()
     app.include_router(devices_endpoints.router, prefix="/api")
     app.include_router(launch_endpoints.router, prefix="/api")
-    user = SimpleNamespace(id=1, is_admin=False, hidden_library_ids=[])
+    user = SimpleNamespace(id=1, is_admin=True, hidden_library_ids=[])
     app.dependency_overrides[get_current_user] = lambda: user
-    return TestClient(app)
+    client = TestClient(app)
+    client.app_user = user
+    return client
 
 
 def _device(api, uid="uid-aaaaaaaa", hostname="karasu"):
@@ -231,3 +233,13 @@ def test_replacing_the_list_and_changing_it_are_not_sent_together(api):
 
     assert api.put("/api/games/5/launch-settings", json=body).status_code == 422
 
+
+
+def test_only_an_admin_sets_what_all_devices_share(api):
+    """What is shared is applied on every user's machines, so a plain user may set only what is for their own devices."""
+    api.app_user.is_admin = False
+    device = _device(api)
+
+    assert api.put("/api/games/5/launch-settings", json={"scope": "all", "launch_args": ["-x"]}).status_code == 403
+    assert api.delete("/api/games/5/launch-settings", params={"scope": "all"}).status_code == 403
+    assert api.put("/api/games/5/launch-settings", json={"scope": "device", "device_id": device, "launch_args": ["-x"]}).status_code == 200

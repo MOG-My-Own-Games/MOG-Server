@@ -66,6 +66,28 @@ async def log_requests(request, call_next):
     return response
 
 
+# The web UI loads its own script, the providers' pictures, YouTube's player and the release lookup of GitHub, nothing else.
+# Inline styles stay allowed: the UI sets a width on its progress bars. Not applied under /api: the installer display page
+# there is noVNC's own, with scripts of its own.
+FRONTEND_CSP = (
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; "
+    "connect-src 'self' https://api.github.com; frame-src 'self' https://www.youtube-nocookie.com; "
+    "object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+)
+
+
+@app.middleware("http")
+async def security_headers(request, call_next):
+    """What a browser is told about every response: no type guessing, no framing by another site, no referrer to others."""
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    response.headers.setdefault("Referrer-Policy", "same-origin")
+    if not request.url.path.startswith(("/api", "/resources")):
+        response.headers.setdefault("Content-Security-Policy", FRONTEND_CSP)
+    return response
+
+
 @app.middleware("http")
 async def revalidate_frontend(request, call_next):
     """Always revalidate the web UI's own files, so a new version is never shadowed by a stale cached script."""

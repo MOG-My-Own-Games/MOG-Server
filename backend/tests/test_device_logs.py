@@ -20,11 +20,14 @@ def logs(db, monkeypatch, tmp_path):
     return owner
 
 
-def request(body: bytes, length: int | None = None):
-    async def read():
-        return body
+def request(body: bytes, length: int | None = None, pieces: int = 1):
+    async def stream():
+        size = max(1, len(body) // pieces)
+        for start in range(0, len(body), size):
+            yield body[start : start + size]
 
-    return SimpleNamespace(body=read, headers={"content-length": str(len(body) if length is None else length)})
+    headers = {} if length == 0 else {"content-length": str(len(body) if length is None else length)}
+    return SimpleNamespace(stream=stream, headers=headers)
 
 
 def test_a_log_is_kept_and_a_newer_one_replaces_it(logs):
@@ -64,4 +67,10 @@ def test_a_device_that_never_sent_a_log_has_none_to_read(logs):
 def test_a_huge_upload_is_refused_before_it_is_read(logs):
     with pytest.raises(HTTPException) as err:
         asyncio.run(devices.put_device_log(logs, 7, request(b"x", length=10_000)))
+    assert err.value.status_code == 413
+
+
+def test_a_body_sent_in_pieces_without_a_length_is_still_bounded(logs):
+    with pytest.raises(HTTPException) as err:
+        asyncio.run(devices.put_device_log(logs, 7, request(b"x" * 500, length=0, pieces=5)))
     assert err.value.status_code == 413

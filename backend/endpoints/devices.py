@@ -80,9 +80,15 @@ def _own_device(user_id: int, id: int):
 async def put_device_log(user: CurrentUser, id: Annotated[int, Path(ge=1)], request: Request) -> None:
     """The client's log as plain text, replacing the one sent before. Only the newest part is kept."""
     _own_device(user.id, id)
-    if int(request.headers.get("content-length") or 0) > 2 * MAX_DEVICE_LOG_BYTES:
+    limit = 2 * MAX_DEVICE_LOG_BYTES
+    if int(request.headers.get("content-length") or 0) > limit:
         raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE)
-    await run_in_threadpool(device_logs.store, user.id, id, await request.body())
+    body = bytearray()
+    async for chunk in request.stream():  # counted as it comes: a body sent in pieces has no length to trust
+        body += chunk
+        if len(body) > limit:
+            raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE)
+    await run_in_threadpool(device_logs.store, user.id, id, bytes(body))
 
 
 @router.get("/{id}/log")

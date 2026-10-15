@@ -53,6 +53,21 @@ def hash_file_sha1(path: Path) -> str:
     return digest.hexdigest()
 
 
+def regular_file_in(cache_dir: Path, rel_path: str) -> Path | None:
+    """The file at `rel_path` under `cache_dir`, or None unless it is a regular file that really is inside it.
+
+    An installer can leave a symbolic link in its output, and the server would follow it to whatever it points at."""
+    candidate = cache_dir / rel_path
+    try:
+        if candidate.is_symlink() or not candidate.is_file():
+            return None
+        if not candidate.resolve().is_relative_to(cache_dir.resolve()):
+            return None
+    except OSError:
+        return None
+    return candidate
+
+
 def hash_files(
     paths: Iterable[Path],
     root: Path,
@@ -67,6 +82,8 @@ def hash_files(
     entries: list[ManifestEntry] = []
     hashed = 0
     for path in sorted(paths):
+        if path.is_symlink():
+            continue
         try:
             size = path.stat().st_size
         except OSError:
@@ -174,6 +191,8 @@ def scan_live_manifest(
     previous = previous or {}
     result: dict[str, LiveManifestEntry] = {}
     for path in candidates:
+        if path.is_symlink():
+            continue
         try:
             size = path.stat().st_size
         except OSError:

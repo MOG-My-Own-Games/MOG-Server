@@ -192,3 +192,17 @@ def test_has_mods_is_true_only_when_the_mods_folder_holds_something(game_root, t
     (bare / "Mods" / ".hidden").write_text("x")
     assert mods.has_mods(bare) is False
     assert mods.has_mods(tmp_path / "missing") is False
+
+
+def test_a_mod_that_is_a_link_out_of_the_game_folder_is_not_listed(tmp_path):
+    import os
+
+    from handler import mods
+
+    outside = tmp_path / "outside.zip"
+    outside.write_bytes(b"secret")
+    root = tmp_path / "game"
+    (root / "mods").mkdir(parents=True)
+    (root / "mods" / "good.zip").write_bytes(b"ok")
+    os.symlink(outside, root / "mods" / "bad.zip")
+    assert [m.name for m in mods.list_mods(root)] == ["good.zip"]

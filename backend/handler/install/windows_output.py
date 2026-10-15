@@ -86,7 +86,8 @@ def _iter_content_files(prefix_dir: Path):
     if not drive_c.is_dir():
         return
     for p in drive_c.rglob("*"):
-        if not p.is_file():
+        # A link made by the installer can point anywhere on the server, which would then hash and serve that file.
+        if p.is_symlink() or not p.is_file():
             continue
         if _is_blacklisted(p.relative_to(drive_c).parts):
             continue
@@ -182,8 +183,10 @@ def collect_extra_work_dir_files(work_dir: Path) -> list[Path]:
     for entry in entries:
         if entry.name in _SESSION_OWNED_TOP_LEVEL_NAMES:
             continue
+        if entry.is_symlink():
+            continue  # see _iter_content_files
         if entry.is_file():
             found.append(entry)
         elif entry.is_dir():
-            found.extend(p for p in entry.rglob("*") if p.is_file())
+            found.extend(p for p in entry.rglob("*") if p.is_file() and not p.is_symlink())
     return found

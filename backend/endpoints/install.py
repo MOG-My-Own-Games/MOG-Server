@@ -11,6 +11,7 @@ VNC proxy below talks to 127.0.0.1 instead of a worker hostname.
 from __future__ import annotations
 
 import asyncio
+import hmac
 import os
 import tempfile
 import zipfile
@@ -49,6 +50,7 @@ from endpoints.responses.install import (
     ProtonBuildsSchema,
 )
 from handler import mods as mods_handler
+from handler.visibility import check_visible
 from handler.auth import AdminUser, CurrentUser
 from handler.database import db_game_handler, db_install_session_handler, db_install_steps_handler
 from handler.filesystem import fs_game_handler
@@ -58,11 +60,18 @@ from handler.install.defaults import default_auto_mode, default_download_workers
 from handler.install.archive_prescan import extract_suggested, is_archive_candidate, list_source_candidates
 from handler.install.manifest import (
     find_manifest_entry,
+    regular_file_in,
     live_view_of_final_manifest,
     read_live_manifest,
     read_manifest,
 )
-from handler.install.proton_builds import get_download_progress, is_extracting, list_proton_builds, remove_build
+from handler.install.proton_builds import (
+    get_download_progress,
+    is_extracting,
+    is_valid_build_id,
+    list_proton_builds,
+    remove_build,
+)
 from handler.install.proton_builds import enqueue_download as enqueue_proton_download
 from handler.install.runner import CANCELLED_ERROR
 from handler.install.runner import cancel_install as runner_cancel_install
@@ -161,9 +170,7 @@ async def get_install_candidates(
     lists the executables inside it instead, read from its member listing
     without extracting anything.
     """
-    game = db_game_handler.get_game(id)
-    if game is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    game = check_visible(user, db_game_handler.get_game(id))
 
     if source is not None:
         try:
@@ -209,8 +216,7 @@ def _validated_steps(game, steps: list[InstallStepForm]) -> list[dict]:
 @router.get("/{id}/install/order")
 async def get_install_order(user: CurrentUser, id: Annotated[int, PathVar(ge=1)]) -> InstallOrderSchema:
     """The installers of a game in the order they run: the first is the game's own, the others are patches."""
-    if db_game_handler.get_game(id) is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    check_visible(user, db_game_handler.get_game(id))
     steps = db_install_steps_handler.list_for_game(id)
     return InstallOrderSchema(game_id=id, steps=[InstallStepSchema.model_validate(step) for step in steps])
 
@@ -221,9 +227,7 @@ async def put_install_order(
 ) -> InstallOrderSchema:
     """Replace the saved order of a game's installers. Every step must be a file inside the game's directory, and the
     same installer cannot appear twice."""
-    game = db_game_handler.get_game(id)
-    if game is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    game = check_visible(user, db_game_handler.get_game(id))
 
     steps = _validated_steps(game, form.steps)
 
@@ -262,13 +266,14 @@ async def start_install_session(
     `manual_mode=True`, sits in AWAITING_INSTALLER - a client should then
     show the VNC view and let the user pick a file by hand before retrying.
     """
-    game = db_game_handler.get_game(id)
-    if game is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    game = check_visible(user, db_game_handler.get_game(id))
 
     game_sessions = db_install_session_handler.get_sessions_for_game(game.id)
     running = next((x for x in game_sessions if x.state in RUNNING_INSTALL_STATES | {InstallSessionState.QUEUED}), None)
     if running:
+        if running.user_id != user.id:
+            # Its schema carries the installer display's address and keys, which are for whoever started it.
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This game is being installed by another user")
         return _session_schema(running)
 
     own_sessions = [x for x in game_sessions if x.user_id == user.id]
@@ -530,17 +535,18 @@ async def download_install_stream_file(
     if entry is None:
         final_entries = read_manifest(cache_dir)
         final_entry = find_manifest_entry(final_entries, file_path) if final_entries else None
-        if not final_entry:
+        served = regular_file_in(cache_dir, final_entry.path) if final_entry else None
+        if served is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-        return FileResponse(
-            path=cache_dir / final_entry.path, filename=Path(final_entry.path).name, media_type="application/octet-stream"
-        )
+        return FileResponse(path=served, filename=Path(final_entry.path).name, media_type="application/octet-stream")
 
     start, end = _parse_range(request.headers.get("range"), entry.sealed_bytes)
     if start is None:
         return Response(status_code=status.HTTP_416_RANGE_NOT_SATISFIABLE, headers={"Retry-After": "1"})
 
-    file_on_disk = cache_dir / entry.path
+    file_on_disk = regular_file_in(cache_dir, entry.path)
+    if file_on_disk is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     try:
         # The live manifest is a snapshot: the file may be gone or shorter than it says by now.
         on_disk = file_on_disk.stat().st_size
@@ -598,11 +604,10 @@ async def download_install_file(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     entries = read_manifest(session_cache_dir(session.id))
     entry = find_manifest_entry(entries, file_path) if entries else None
-    if entry is None:
+    served = regular_file_in(session_cache_dir(session.id), entry.path) if entry else None
+    if served is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-    return FileResponse(
-        path=session_cache_dir(session.id) / entry.path, filename=Path(entry.path).name, media_type="application/octet-stream"
-    )
+    return FileResponse(path=served, filename=Path(entry.path).name, media_type="application/octet-stream")
 
 
 @router.get("/{id}/install/download")
@@ -626,7 +631,9 @@ async def download_install_zip(
     def build_zip() -> None:
         with zipfile.ZipFile(tmp.name, "w", zipfile.ZIP_DEFLATED) as zf:
             for entry in entries:
-                zf.write(cache_dir / entry.path, arcname=entry.path)
+                source = regular_file_in(cache_dir, entry.path)
+                if source is not None:
+                    zf.write(source, arcname=entry.path)
 
     await asyncio.to_thread(build_zip)
     return FileResponse(
@@ -640,6 +647,11 @@ async def download_install_zip(
 # --- Proton builds ---
 
 
+def _check_build_id(build_id: str) -> None:
+    if not is_valid_build_id(build_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No such Proton build")
+
+
 @router.get("/install/proton-builds")
 async def get_proton_builds(user: CurrentUser) -> ProtonBuildsSchema:
     builds = await asyncio.to_thread(list_proton_builds)
@@ -650,17 +662,20 @@ async def get_proton_builds(user: CurrentUser) -> ProtonBuildsSchema:
 
 @router.post("/install/proton/{build_id}/download")
 async def download_proton_build(user: AdminUser, build_id: str) -> dict:
+    _check_build_id(build_id)
     enqueue_proton_download(build_id)
     return {"build_id": build_id}
 
 
 @router.get("/install/proton/{build_id}/progress")
 async def proton_download_progress(user: CurrentUser, build_id: str) -> dict:
+    _check_build_id(build_id)
     return {"build_id": build_id, "progress": get_download_progress(build_id), "extracting": is_extracting(build_id)}
 
 
 @router.delete("/install/proton/{build_id}")
 async def remove_proton_build_route(user: AdminUser, build_id: str) -> None:
+    _check_build_id(build_id)
     await asyncio.to_thread(remove_build, build_id)
 
 
@@ -767,7 +782,8 @@ async def clear_one_install_cache(user: AdminUser, session_id: Annotated[int, Pa
 # (where the token lives) anyway. The actual sensitive channel (remote
 # control + live pixels) is the websocket below, which does check the token.
 
-_VNC_PROXY_DROP_REQUEST_HEADERS = {"host", "content-length", "connection"}
+# The user's own credentials are never passed to the bridge: it has no use for them.
+_VNC_PROXY_DROP_REQUEST_HEADERS = {"host", "content-length", "connection", "authorization", "cookie"}
 _VNC_PROXY_DROP_RESPONSE_HEADERS = _VNC_PROXY_DROP_REQUEST_HEADERS | {"content-encoding", "server", "date", "transfer-encoding"}
 
 
@@ -777,6 +793,8 @@ async def install_vnc_http(port: Annotated[int, PathVar(ge=1, le=65535)], path: 
     The pixel data itself goes over install_vnc_ws; this only ever serves
     vnc.html and its JS/CSS."""
     if db_install_session_handler.get_running_session_for_port(port) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    if ".." in path.replace("\\", "/").split("/"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
 
     upstream_url = f"http://{_VNC_HOST}:{port}/{path}"
@@ -797,6 +815,7 @@ async def install_vnc_http(port: Annotated[int, PathVar(ge=1, le=65535)], path: 
         # crashes, since the cached JS can reference DOM elements the cached
         # HTML doesn't define.
         response_headers["Cache-Control"] = "no-store"
+        response_headers["Referrer-Policy"] = "no-referrer"  # the page's own address carries the keys
         return Response(content=body, status_code=upstream_response.status, headers=response_headers, media_type=upstream_response.content_type)
 
 
@@ -807,7 +826,7 @@ async def install_vnc_ws(websocket: WebSocket, port: Annotated[int, PathVar(ge=1
     vnc_token (see this module's own note on the VNC proxy above)."""
     token = websocket.query_params.get("token")
     session = db_install_session_handler.get_running_session_for_port(port)
-    if not token or session is None or session.vnc_token != token:
+    if not token or session is None or not session.vnc_token or not hmac.compare_digest(session.vnc_token, token):
         await websocket.close(code=4403)
         return
 

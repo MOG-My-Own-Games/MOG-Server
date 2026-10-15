@@ -55,6 +55,14 @@ def _measure(path: Path) -> tuple[int, int]:
     return size, count
 
 
+def _inside(root: Path, path: Path) -> bool:
+    """Whether `path` really is under `root`: a link leading elsewhere is not served."""
+    try:
+        return path.resolve().is_relative_to(root.resolve())
+    except OSError:
+        return False
+
+
 def list_mods(game_root: Path) -> list[Mod]:
     found: dict[str, Mod] = {}
     for folder in _mods_folders(game_root):
@@ -63,7 +71,7 @@ def list_mods(game_root: Path) -> list[Mod]:
         except OSError:
             continue
         for entry in entries:
-            if entry.name.startswith(".") or entry.name in found:
+            if entry.name.startswith(".") or entry.name in found or not _inside(game_root, entry):
                 continue
             if entry.is_dir():
                 size, count = _measure(entry)
@@ -186,6 +194,8 @@ def _run_zip(game_id: int, mod: Mod, job: ZipJob, on_done) -> None:
             for dirpath, _dirs, files in os.walk(mod.path):
                 for name in sorted(files):
                     full = Path(dirpath) / name
+                    if not _inside(mod.path, full):
+                        continue  # a link out of the mod's folder
                     rel = f"{mod.name}/{full.relative_to(mod.path).as_posix()}"
                     method = zipfile.ZIP_STORED if full.suffix.lower() in STORED_EXTENSIONS else zipfile.ZIP_DEFLATED
                     try:

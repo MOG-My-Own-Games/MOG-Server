@@ -2318,7 +2318,6 @@ async function openGamePage(id) {
   gameAddons = [];
   cacheFiles = null;
   gameSaves = null;
-  document.getElementById("save-order-status").textContent = "";
   setSavesStatus("");
   filesSubtab = "all";
   renderFilesTab();

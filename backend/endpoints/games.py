@@ -12,7 +12,7 @@ from handler.database import db_game_handler, db_install_session_handler, db_sav
 from handler.filesystem import fs_game_handler
 from handler.filesystem.installer_detection import category_for_path
 from handler import media as media_handler
-from handler import media_uploads
+from handler import local_icons, media_uploads
 from handler import video_handler
 from handler.metadata import hltb_handler, igdb_handler, ludusavi_handler, sgdb_handler
 from handler import mods as mods_handler
@@ -182,6 +182,14 @@ async def get_media_candidates(user: AdminUser, id: Annotated[int, Path(ge=1)]) 
     return {"candidates": found, "defaults": media_handler.defaults(found), "selected": game.media or {}}
 
 
+@router.get("/{id}/media/local-icons")
+async def get_local_icons(user: AdminUser, id: Annotated[int, Path(ge=1)]) -> dict:
+    """Only the icons found in the game's own folder (the `local` ones of the icon candidates), without asking the providers:
+    what the edit form offers beside an upload. Declared before `/media/{kind}`, which would take it for a kind."""
+    game = check_visible(user, db_game_handler.get_game(id))
+    return {"candidates": await run_in_threadpool(local_icons.candidates, game)}
+
+
 @router.put("/{id}/media")
 async def choose_media(user: AdminUser, id: Annotated[int, Path(ge=1)], data: MediaSelectionForm) -> GameSchema:
     """Set the artwork used for each kind named in the body (null clears it). Only images from
@@ -197,6 +205,13 @@ async def choose_media(user: AdminUser, id: Annotated[int, Path(ge=1)], data: Me
             media.pop(kind, None)
             if kind == "cover":
                 update["cover_path"] = None
+            continue
+        if kind == "icon" and (found := local_icons.read(url, id)) is not None:  # an icon of the game's folder becomes an upload
+            try:
+                url = await run_in_threadpool(media_uploads.store, id, "icon", found)
+            except media_uploads.UploadRefused as e:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+            media[kind] = {"url": url, "source": media_uploads.UPLOAD}
             continue
         chosen = media_handler.selection(url)
         if chosen is None and media_uploads.is_upload(url) and url == (game.media or {}).get(kind, {}).get("url"):

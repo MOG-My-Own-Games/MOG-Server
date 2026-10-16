@@ -2775,7 +2775,8 @@ function renderMediaChoices(data, game) {
       const tile = document.createElement("button");
       tile.type = "button";
       tile.className = "media-choice";
-      tile.title = `${option.source === "igdb" ? "IGDB" : "SteamGridDB"}${option.width ? `, ${option.width}x${option.height}` : ""}`;
+      const sourceName = { igdb: "IGDB", local: option.label || "The game's files" }[option.source] || "SteamGridDB";
+      tile.title = `${sourceName}${option.width ? `, ${option.width}x${option.height}` : ""}`;
       tile.classList.toggle("selected", option.url === chosen());
       const img = document.createElement("img");
       img.src = option.thumb || option.url;
@@ -2784,7 +2785,7 @@ function renderMediaChoices(data, game) {
       tile.appendChild(img);
       const source = document.createElement("span");
       source.className = "media-source";
-      source.textContent = option.source === "igdb" ? "IGDB" : "SGDB";
+      source.textContent = { igdb: "IGDB", local: "FILE" }[option.source] || "SGDB";
       tile.appendChild(source);
       tile.addEventListener("click", () => pick(option.url, tile));
       row.appendChild(tile);
@@ -2792,7 +2793,7 @@ function renderMediaChoices(data, game) {
     if (options.length === 0) {
       const empty = document.createElement("span");
       empty.className = "muted small";
-      empty.textContent = "Nothing on offer from the providers.";
+      empty.textContent = "Nothing on offer from the providers or the game's files.";
       row.appendChild(empty);
     }
     section.appendChild(row);
@@ -2845,6 +2846,51 @@ document.addEventListener("keydown", (e) => {
 
 // The "Your own artwork" part of the edit form: a row per kind of artwork with what is used now, an upload and (for the person's
 // own upload) a way to take it away. An upload is used at once; Save in the form is for the text fields only.
+let localIcons = []; // the icons found in the game's own files, for the edit form (see loadLocalIcons)
+
+async function loadLocalIcons() {
+  localIcons = [];
+  try {
+    localIcons = (await api(`/api/games/${activeGame.id}/media/local-icons`)).candidates;
+  } catch {
+    // the edit form still works without them
+  }
+  renderEditMedia();
+}
+
+// The icons of the game's .exe and .ico files, to pick from: the choice is copied as the game's own upload.
+function localIconsRow(status) {
+  const wrap = document.createElement("div");
+  wrap.className = "edit-media-local";
+  const title = document.createElement("span");
+  title.className = "muted small";
+  title.textContent = localIcons.length ? "From the game's files:" : "No icons found in the game's folder.";
+  wrap.appendChild(title);
+  const tiles = document.createElement("div");
+  tiles.className = "media-row media-icon";
+  for (const option of localIcons) {
+    const tile = document.createElement("button");
+    tile.type = "button";
+    tile.className = "media-choice";
+    tile.title = `${option.label}, ${option.width}x${option.height}`;
+    const img = document.createElement("img");
+    img.src = option.thumb || option.url;
+    img.alt = "";
+    tile.appendChild(img);
+    tile.addEventListener("click", async () => {
+      try {
+        applyMediaChange(await api(`/api/games/${activeGame.id}/media`, { method: "PUT", body: JSON.stringify({ icon: option.url }) }));
+        status.textContent = `The icon of ${option.label} is now the game's icon.`;
+      } catch (err) {
+        status.textContent = `Could not use that icon: ${err.message}`;
+      }
+    });
+    tiles.appendChild(tile);
+  }
+  wrap.appendChild(tiles);
+  return wrap;
+}
+
 function renderEditMedia() {
   const root = document.getElementById("edit-media");
   const status = document.getElementById("edit-media-status");
@@ -2917,6 +2963,7 @@ function renderEditMedia() {
       row.appendChild(remove);
     }
     root.appendChild(row);
+    if (kind === "icon") root.appendChild(localIconsRow(status));
   }
 }
 
@@ -2929,6 +2976,7 @@ function applyMediaChange(updated) {
 
 document.getElementById("edit-metadata-btn").addEventListener("click", () => {
   renderEditMedia();
+  loadLocalIcons();
   document.getElementById("edit-media-status").textContent = "";
   document.getElementById("edit-name").value = activeGame.name;
   document.getElementById("edit-summary").value = activeGame.summary || activeGame.igdb_metadata?.summary || "";

@@ -130,6 +130,15 @@ that kind, replaces the earlier one, and a scrape does not replace it; `PUT /api
 removes it. A refused file answers `400` with the reason. Uploaded files are served without credentials from
 `/resources/media/`, like the avatars.
 
+`GET /api/games/{id}/media/candidates` (administrators) lists what is on offer for each kind. For `icon` it also lists the
+icons found in the game's own folder (`.ico` files and the icon inside each `.exe`, not the uninstaller or a bundled
+prerequisite), after the providers' ones: each has `source` `local`, a `label` (the file it comes from, relative to the game's
+folder) and a `url` under `/resources/media/<game>/found/`. A scrape never picks one by itself (`defaults` leaves them out).
+`PUT /api/games/{id}/media` with such a `url` for `icon` copies it as the game's own upload, so the choice then reads
+`{url, source: "upload"}` and no longer depends on the folder; a `url` found for another game answers `400`.
+`GET /api/games/{id}/media/local-icons` (administrators) answers `{"candidates": [...]}` with only those icons, without asking
+the providers: what the edit form offers beside an upload.
+
 Other useful reads: `GET /api/games/{id}/size` and `GET /api/games/{id}/sizes` (what the game, its install
 caches and its saves take on the server), and `GET /api/games/{id}/files` (the game's own files in the library,
 not the install).

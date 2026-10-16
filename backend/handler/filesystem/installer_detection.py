@@ -73,6 +73,11 @@ _PREREQUISITE_NAME = re.compile(
     re.IGNORECASE,
 )
 
+def is_prerequisite_name(name: str) -> bool:
+    """Whether a file's own name is a bundled prerequisite installer (DirectX, the VC++ and .NET runtimes, PhysX...)."""
+    return _PREREQUISITE_NAME.match(name) is not None
+
+
 # Category folder names (singular; plural "s"/"es" forms also match), as in RomM.
 GAME_CATEGORY = "game"
 ADDON_CATEGORIES: tuple[str, ...] = (

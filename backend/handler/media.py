@@ -17,6 +17,7 @@ from models.game import Game
 
 KINDS = ("cover", "banner", "hero", "logo", "icon")
 SGDB, IGDB = "steamgriddb", "igdb"
+LOCAL = "local"  # an icon found in the game's own folder (see local_icons)
 _HOST_SOURCES = {"steamgriddb.com": SGDB, "images.igdb.com": IGDB}
 
 
@@ -34,6 +35,7 @@ def source_of(url: str) -> str | None:
 
 def _candidate(url: str, source: str, thumb: str | None = None, width: int | None = None, height: int | None = None) -> dict:
     return {"url": url, "thumb": thumb or url, "source": source, "width": width, "height": height}
+
 
 
 def igdb_candidates(metadata: dict[str, Any] | None) -> dict[str, list[dict]]:
@@ -57,6 +59,9 @@ def candidates(game: Game, sgdb_id: int | None = None) -> dict[str, list[dict]]:
         found[kind] += [_candidate(i["url"], SGDB, i.get("thumb"), i.get("width"), i.get("height")) for i in items]
     for kind, items in igdb_candidates(game.igdb_metadata).items():
         found[kind] += items
+    from handler import local_icons  # here: it needs media_uploads, which needs this module
+
+    found["icon"] += local_icons.candidates(game)  # the icons of the game's own files, after the providers' ones
     for kind, chosen in (game.media or {}).items():  # the person's own upload is on offer too, first
         if kind in found and isinstance(chosen, dict) and chosen.get("source") == "upload" and chosen.get("url"):
             found[kind].insert(0, _candidate(chosen["url"], "upload"))
@@ -67,8 +72,10 @@ def candidates(game: Game, sgdb_id: int | None = None) -> dict[str, list[dict]]:
 
 
 def defaults(found: dict[str, list[dict]]) -> dict[str, dict]:
-    """The provider's own pick for each kind: the first candidate."""
-    return {kind: {"url": items[0]["url"], "source": items[0]["source"]} for kind, items in found.items() if items}
+    """The provider's own pick for each kind: the first candidate. An icon found in the game's folder is only on offer, never
+    picked by itself."""
+    picks = {kind: next((i for i in items if i["source"] != LOCAL), None) for kind, items in found.items()}
+    return {kind: {"url": item["url"], "source": item["source"]} for kind, item in picks.items() if item}
 
 
 def selection(url: str | None) -> dict | None:

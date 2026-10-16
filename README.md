@@ -17,7 +17,8 @@ damage: the software is provided as is, without warranty of any kind.
 
 - Scans one or more library folders; each top-level entry becomes a Game.
 - Matches metadata via IGDB and SteamGridDB, and chooses the artwork for each game (cover, banner,
-  hero, title logo, icon: SteamGridDB first, IGDB as the fallback). The server downloads and serves
+  hero, title logo, icon: SteamGridDB first, IGDB as the fallback; the icons of the game's own `.exe` and `.ico`
+  files are on offer too). The server downloads and serves
   the chosen images, so clients build their Steam shortcuts from it. "Scrape" per game opens a dialog
   that applies the providers' defaults and lets you pick any other artwork; automatic scrapes keep to
   the defaults and never undo a pick.

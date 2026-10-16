@@ -395,6 +395,8 @@
             <button class="tab-btn" data-settings-tab="providers">Metadata providers</button>
             <button class="tab-btn" data-settings-tab="backups">Backups</button>
             <button class="tab-btn" data-settings-tab="users">Users</button>
+            <button class="tab-btn" data-settings-tab="about">About</button>
+            <button class="tab-btn" data-settings-tab="changelog">Changelog</button>
           </nav>
 
           <div id="settings-tab-libraries" class="tab-panel">
@@ -619,12 +621,46 @@
               </table>
             </div>
           </div>
+
+          <div id="settings-tab-about" class="tab-panel" hidden>
+            <div class="card about-card">
+              <img class="about-logo" src="assets/mascotte.png" alt="MOG" />
+              <p>MOG Server <strong id="about-version">...</strong></p>
+              <p class="muted">By Xargon. Licence: GNU Affero General Public License v3.0.</p>
+              <p><a href="https://github.com/MOG-My-Own-Games/MOG-Server" target="_blank" rel="noopener">Open the GitHub page</a></p>
+              <p class="muted small">MOG is in beta and may contain bugs. Back up your saves yourself too, apart from MOG: the development team takes no responsibility for any loss or damage, and the software is provided as is, without warranty of any kind.</p>
+              <p class="muted">MOG is free. If you like it and want to chip in, you can buy me a coffee.</p>
+              <p><a href="https://ko-fi.com/xargon" target="_blank" rel="noopener"><img src="https://storage.ko-fi.com/cdn/kofi3.png?v=3" alt="Buy me a coffee on Ko-fi" height="46" /></a></p>
+            </div>
+          </div>
+
+          <div id="settings-tab-changelog" class="tab-panel" hidden>
+            <div class="card">
+              <h3>What's new in <span id="changelog-version">...</span></h3>
+              <p class="muted">MOG is free. If you like it and want to chip in, you can buy me a coffee.</p>
+              <p><a href="https://ko-fi.com/xargon" target="_blank" rel="noopener"><img src="https://storage.ko-fi.com/cdn/kofi3.png?v=3" alt="Buy me a coffee on Ko-fi" height="46" /></a></p>
+              <div id="changelog-body" class="changelog"></div>
+            </div>
+          </div>
         </section>
       </main>
     </div>
   </div>
 
   <div id="toast-area" class="toast-area"></div>
+
+  <div id="changelog-modal" class="modal" hidden>
+    <div class="modal-panel changelog-panel" role="dialog" aria-modal="true" aria-labelledby="changelog-modal-title">
+      <h3 id="changelog-modal-title">MOG Server was updated</h3>
+      <p class="muted small">What changed in <strong id="changelog-modal-version"></strong>:</p>
+      <div id="changelog-modal-body" class="changelog"></div>
+      <p class="muted">MOG is free. If you like it and want to chip in, you can buy me a coffee.</p>
+              <p><a href="https://ko-fi.com/xargon" target="_blank" rel="noopener"><img src="https://storage.ko-fi.com/cdn/kofi3.png?v=3" alt="Buy me a coffee on Ko-fi" height="46" /></a></p>
+      <div class="modal-footer">
+        <button id="changelog-modal-close" type="button">Close</button>
+      </div>
+    </div>
+  </div>
 
   <div id="extract-modal" class="modal" hidden>
     <div class="modal-panel client-panel" role="dialog" aria-modal="true" aria-labelledby="extract-modal-title">

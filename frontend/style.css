@@ -1073,3 +1073,14 @@ a.chip { color: inherit; text-decoration: none; }
 }
 .not-found-text { margin: 0; font-size: 1.6rem; font-weight: 600; color: var(--text); }
 .not-found-image { width: 260px; max-width: 60vw; height: auto; }
+
+/* About and Changelog */
+.about-card { text-align: center; }
+.about-logo { height: 160px; max-width: 100%; }
+.changelog h4 { margin: 1em 0 0.3em; }
+.changelog ul { margin: 0; padding-left: 1.2em; }
+.changelog li { margin: 0.25em 0; }
+.changelog a { color: #9db6ff; }
+.changelog a:hover { color: #fff; }
+.changelog-panel { width: min(720px, 94vw); }
+.changelog-panel .modal-footer { position: static; padding-top: var(--space-md); }

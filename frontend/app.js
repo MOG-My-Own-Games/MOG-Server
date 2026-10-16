@@ -331,6 +331,7 @@ async function tryLogin(user, pass) {
   startNotificationPolling();
   await refreshLibraries();
   router();
+  offerChangelog().catch(() => {});
 }
 
 document.getElementById("login-form").addEventListener("submit", async (e) => {
@@ -487,6 +488,83 @@ async function getInstallDefaults() {
   }
 }
 
+// --- About and Changelog: what the running version brings ---
+
+const CHANGELOG_SEEN_KEY = "mog_changelog_seen";
+const SERVER_RELEASES_URL = "https://github.com/MOG-My-Own-Games/MOG-Server/releases";
+let aboutInfo = null; // { version, changelog } from /api/about, once asked
+
+async function loadAbout() {
+  if (!aboutInfo) aboutInfo = await api("/api/about");
+  return aboutInfo;
+}
+
+// One line of the notes: "text [[abc1234](commit link)]", the hash shown as a link to its commit.
+function changelogLine(text) {
+  const m = text.match(/^(.*) \[\[([0-9a-f]{7,40})\]\((https:\/\/github\.com\/[^)\s]+)\)\]$/);
+  if (!m) return escapeHtml(text);
+  return `${escapeHtml(m[1])} [<a href="${escapeHtml(m[3])}" target="_blank" rel="noopener">${escapeHtml(m[2])}</a>]`;
+}
+
+// The notes are Markdown written by the release build, only "## Heading" and "- line"; that is all that is drawn.
+// null: this build carries no notes. "": the version has nothing to list.
+function renderChangelog(markdown) {
+  if (markdown === null) {
+    return `<p class="muted">This build carries no changelog. The notes of every release are on the <a href="${SERVER_RELEASES_URL}" target="_blank" rel="noopener">releases page</a>.</p>`;
+  }
+  if (markdown === "") return `<p class="muted">Nothing worth noting in this version.</p>`;
+  const out = [];
+  let list = false;
+  for (const raw of markdown.split("\n")) {
+    const line = raw.trim();
+    if (line.startsWith("## ")) {
+      if (list) out.push("</ul>");
+      list = false;
+      out.push(`<h4>${escapeHtml(line.slice(3))}</h4>`);
+    } else if (line.startsWith("- ")) {
+      if (!list) out.push("<ul>");
+      list = true;
+      out.push(`<li>${changelogLine(line.slice(2))}</li>`);
+    }
+  }
+  if (list) out.push("</ul>");
+  return out.join("");
+}
+
+async function fillAbout() {
+  const about = await loadAbout();
+  document.getElementById("about-version").textContent = about.version;
+  document.getElementById("changelog-version").textContent = about.version;
+  document.getElementById("changelog-body").innerHTML = renderChangelog(about.changelog);
+}
+
+// After an update, once per browser and version, an admin is shown what changed. A browser that has not seen any version
+// yet only records this one: a first visit is not an update.
+async function offerChangelog() {
+  if (!isAdmin()) return;
+  const about = await loadAbout();
+  if (!about.changelog || about.version === "dev") return;
+  let seen = null;
+  try {
+    seen = localStorage.getItem(CHANGELOG_SEEN_KEY);
+    localStorage.setItem(CHANGELOG_SEEN_KEY, about.version);
+  } catch (_) {
+    return; // without a place to remember it, it would show at every sign-in
+  }
+  if (seen === null || seen === about.version) return;
+  document.getElementById("changelog-modal-version").textContent = about.version;
+  document.getElementById("changelog-modal-body").innerHTML = renderChangelog(about.changelog);
+  document.getElementById("changelog-modal").hidden = false;
+}
+
+function closeChangelogModal() {
+  document.getElementById("changelog-modal").hidden = true;
+}
+document.getElementById("changelog-modal-close").addEventListener("click", closeChangelogModal);
+document.getElementById("changelog-modal").addEventListener("click", (e) => {
+  if (e.target.id === "changelog-modal") closeChangelogModal();
+});
+
 // --- Settings page ---
 
 async function openSettingsPage(subTab) {
@@ -495,6 +573,7 @@ async function openSettingsPage(subTab) {
   api("/api/health")
     .then((h) => { document.getElementById("server-version").textContent = h.version; })
     .catch(() => {});
+  fillAbout().catch(() => {});
 
   const s = await getInstallDefaults();
   document.getElementById("setting-auto-mode").checked = s.autoMode;
@@ -3367,6 +3446,9 @@ document.getElementById("client-modal-retry").addEventListener("click", async ()
 });
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !document.getElementById("client-modal").hidden) closeClientModal();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !document.getElementById("changelog-modal").hidden) closeChangelogModal();
 });
 
 // --- Install flow ---

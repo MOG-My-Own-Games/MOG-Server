@@ -68,7 +68,7 @@ backend/
                               vnc.py (incl. the vnc_token capability-URL scheme), manifest.py
                               (hashing/live-manifest), proton_builds.py, archive_prescan.py,
                               windows_output.py, auto_mode/ (OCR-driven auto-advance)
-  endpoints/                 FastAPI routers: libraries.py, games.py, install.py, settings.py
+  endpoints/                 FastAPI routers: libraries.py, games.py, install.py, settings.py, about.py (version and changelog)
   alembic/                   Migrations (single SQLite-only chain, starts at 0001)
   tests/                     pytest, mirrors backend/ layout - pure-logic modules
                               (installer_detection, auto_mode/engine, scrape_handler) first
@@ -77,6 +77,8 @@ frontend/                    Plain HTML/CSS/JS, no build step - index.html, app.
                               served by FastAPI's StaticFiles mount in main.py. See
                               docs/TODO.md for the planned Steam-like redesign.
 docker/                      Dockerfile (single image: API + sandbox), icewm-preferences
+scripts/                     version.py (the version from the commits), release_notes.py (the release body, and backend/changelog.md
+                              that the image build bakes in for handler/changelog.py and the web UI's Changelog tab)
 ```
 
 **Endpoint -> handler -> (database | filesystem | metadata | install) -> models.**

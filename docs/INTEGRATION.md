@@ -75,6 +75,10 @@ creating libraries, scanning and scraping are admin only.
 `GET /api/health` needs no login and answers `{"status": "ok", "version": "..."}`. Use it to tell "no server here"
 from "wrong password", and to read the server's version.
 
+`GET /api/about` (any signed-in user) answers `{"version": "...", "changelog": "..."}`: the notes of the running version as
+Markdown, a `## Changes` and a `## Fixes` list of lines like `- scope: what changed [[abc1234](commit link)]`. `changelog` is
+`""` when the version has nothing to list and `null` when the build carries no notes (a dev run).
+
 **Errors.** Failures are JSON with a `detail`: usually a string, an object for the few cases that need to say more
 (the `409` of device registration, see [8](#8-saves-optional)). The statuses you will meet are `401` (login),
 `404` (no such game, session, file, or an endpoint an older server does not have), `409` (a conflict you can

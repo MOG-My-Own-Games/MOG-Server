@@ -9,6 +9,10 @@ org profile for the project's scope and philosophy.
 **Not for piracy.** This is for DRM-free games and games you own a legitimate
 copy of.
 
+**Beta, provided as is.** MOG Server is in beta and may contain bugs. Back up your saves
+yourself too, apart from MOG. The development team takes no responsibility for any loss or
+damage: the software is provided as is, without warranty of any kind.
+
 ## What it does
 
 - Scans one or more library folders; each top-level entry becomes a Game.
@@ -94,6 +98,14 @@ alembic upgrade head
 python3 main.py      # http://localhost:5000
 pytest tests/
 ```
+
+## Releases
+
+Every push builds the Docker image and publishes a release `v<version>` (a pre-release on a branch other than `main`; the version comes from
+`scripts/version.py`, out of the conventional commits). Its body lists what changed since the previous release, written by
+`scripts/release_notes.py` under *Changes* (`feat`, breaking changes) and *Fixes* (`fix`, `perf`); `chore`, `doc` and the like
+are left out. The same notes are baked into the
+image and shown in Settings, in the *Changelog* tab, and once after an update.
 
 ## License
 

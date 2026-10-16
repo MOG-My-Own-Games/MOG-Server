@@ -24,7 +24,7 @@ update never stops the update.
 
 Each is one file, `mog-<kind>-<date>-<time>[-saves].tar.gz`, holding `mog.db` (a whole copy made with SQLite's own backup, so
 it is correct while the server writes), `manifest.json` (the kind, the date, the version, the database revision),
-`resources/avatars`, `resources/media` and, with saves, `saves/`.
+`resources/avatars`, `resources/media` (without `found/` in each game's folder: the icons read from the game's files, which are read again when needed) and, with saves, `saves/`.
 
 ## Restoring
 

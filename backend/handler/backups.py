@@ -42,6 +42,12 @@ CHECK_EVERY = 60.0  # seconds between the scheduler's looks
 # Folders of the resources that hold what a person put there; the image cache is regenerated and is left out.
 RESOURCE_FOLDERS = ("avatars", "media")
 
+
+def _without_found_icons(info: tarfile.TarInfo) -> tarfile.TarInfo | None:
+    """`resources/media/<game>/found/` holds the icons read from the game's files, read again when they are needed."""
+    parts = info.name.split("/")
+    return None if len(parts) > 3 and parts[1] == "media" and parts[3] == "found" else info
+
 _lock = threading.Lock()
 last_error: str | None = None
 
@@ -191,7 +197,7 @@ def create(kind: str, include_saves: bool = False, note: str | None = None, now:
                     for folder in RESOURCE_FOLDERS:
                         source = Path(RESOURCES_BASE_PATH) / folder
                         if source.is_dir():
-                            tar.add(source, arcname=f"resources/{folder}")
+                            tar.add(source, arcname=f"resources/{folder}", filter=_without_found_icons)
                     # Mods, patches, DLC and extras kept from installs: made once, not again, so they are never left out.
                     if Path(ADDONS_PATH).is_dir():
                         tar.add(ADDONS_PATH, arcname="addons")

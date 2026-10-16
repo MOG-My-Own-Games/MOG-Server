@@ -87,3 +87,19 @@ def test_only_an_administrator_can_use_any_of_it(api):
     assert api.get("/api/backups/mog-manual-20261012-120000.tar.gz/download").status_code == 403
     assert api.delete("/api/backups/mog-manual-20261012-120000.tar.gz").status_code == 403
     assert list(api.volume.iterdir()) == []
+
+
+def test_the_uploaded_artwork_is_in_a_backup_but_not_the_icons_read_from_the_games_files(api, tmp_path):
+    import tarfile
+
+    media = tmp_path / "mog" / "resources" / "media" / "5"
+    (media / "found").mkdir(parents=True)
+    (media / "icon-0123456789ab.png").write_bytes(b"mine")
+    (media / "found" / "0123456789ab.png").write_bytes(b"found")
+
+    made = api.post("/api/backups").json()
+
+    with tarfile.open(api.volume / made["name"]) as tar:
+        names = tar.getnames()
+    assert "resources/media/5/icon-0123456789ab.png" in names
+    assert not [n for n in names if "/found" in n]

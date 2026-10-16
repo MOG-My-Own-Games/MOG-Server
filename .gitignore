@@ -17,3 +17,7 @@ venv/
 
 TODO.md
 TODO-commits.md
+
+# Written by scripts/release_notes.py in the image build
+backend/changelog.md
+TODO-release-*.md

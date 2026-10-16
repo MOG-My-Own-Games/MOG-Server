@@ -265,6 +265,19 @@ def _is_proton(proton_or_wine: str) -> bool:
     return Path(proton_or_wine).name == "proton"
 
 
+def _build_root(proton_or_wine: str) -> str | None:
+    """The folder of the build a session runs under, for the sandbox to bind: a Proton build's own folder (its `proton`
+    script sits at the top), or a Wine build's (`<build>/bin/wine`, with its `lib/` beside `bin/`). None for the system's
+    Wine, run by name, and for a path that is not there."""
+    path = Path(proton_or_wine)
+    if not path.is_absolute() or not path.exists():
+        return None
+    folder = path.resolve().parent
+    if not _is_proton(proton_or_wine) and folder.name == "bin":
+        folder = folder.parent
+    return str(folder)
+
+
 def _windows_installer_path(installer_abs: Path, installer_search_root: Path, disc_source: Path | None) -> str:
     """The installer's own path, translated to a drive Wine actually has
     (see _configure_drive_letters), instead of the bare Unix path Wine
@@ -1417,13 +1430,10 @@ def _wrap_for_sandbox(
     # Bind in ONLY the build this session actually resolved to - not every
     # possible build directory. bwrap's --ro-bind fails outright if the source
     # path doesn't exist, guarded with .exists() so a missing/stale path
-    # never takes down the run. Plain Wine ("wine") lives under /usr already
-    # covered by the ro-bind, so no extra bind is needed for it.
-    ro_binds: tuple[str, ...] = ()
-    if _is_proton(proton_or_wine):
-        proton_path = Path(proton_or_wine)
-        if proton_path.exists():
-            ro_binds = (str(proton_path.resolve().parent),)
+    # never takes down the run. The system's Wine ("wine") lives under /usr
+    # already covered by the ro-bind, so no extra bind is needed for it.
+    build_root = _build_root(proton_or_wine)
+    ro_binds: tuple[str, ...] = (build_root,) if build_root else ()
     # Multi-part installers need their sibling data files visible too, not
     # just the one .exe SandboxSpec always binds on its own - see
     # run_install's own comment on installer_search_root for why.

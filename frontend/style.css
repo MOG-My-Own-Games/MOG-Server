@@ -826,6 +826,7 @@ a.chip { color: inherit; text-decoration: none; }
 .files-content .data-table td:not(:first-child) { white-space: nowrap; }
 
 .bell-btn, .icon-btn { position: relative; display: flex; align-items: center; padding: 0.45em 0.6em; }
+.bell-btn { z-index: 1; } /* the badge hangs over the divider of the next button of the pill, which comes later and would paint over it */
 .bell-btn svg, .icon-btn svg { width: 20px; height: 20px; fill: #fff; }
 .bell-badge {
   position: absolute;

@@ -12,7 +12,10 @@ set -e
 
 if [ "$(id -u)" = "0" ]; then
     mkdir -p /mog /opt/proton
-    chown -R mog:mog /mog /opt/proton
+    # -xdev: a volume mounted inside /mog (the cache, often huge) keeps its own owner, only its folder is touched, and a
+    # volume that refuses chown (mergerfs, NFS, rootless Docker) must not stop the boot with set -e.
+    find /mog /opt/proton -xdev \( ! -user mog -o ! -group mog \) -exec chown mog:mog {} + ||
+        echo "entrypoint: could not change the owner of everything in /mog and /opt/proton, going on" >&2
     # The backup volume, when one is mounted (Docker creates the host directory root-owned): only the folder itself, as it may
     # hold many files. Nothing is created here without a volume: backups would land in the container and be lost with it.
     if grep -q " /backups " /proc/mounts; then

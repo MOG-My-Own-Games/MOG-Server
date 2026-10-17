@@ -2124,10 +2124,13 @@ const WINETRICKS_NAME = /^[a-z0-9][a-z0-9_.-]{0,39}$/;
 const WINETRICKS_VALUE = /^[A-Za-z0-9_.,:+-]{1,40}$/;
 // Winetricks settings the usual games ask for, to suggest as the person types (any other name or value is fine too).
 const WINETRICKS_SUGGESTIONS = {
-  vd: ["off", "800x600", "1024x768", "1280x720", "1280x1024", "1600x900", "1920x1080"],
-  renderer: ["gdi", "gl", "vulkan"],
+  vd: ["off", "800x600", "1024x768", "1280x720", "1280x1024", "1440x900", "1600x900", "1920x1080"],
+  renderer: ["gdi", "gl", "vulkan", "no3d"],
   csmt: ["on", "off"],
   mwo: ["enable", "disable", "force"],
+  grabfullscreen: ["y", "n"],
+  hidewineexports: ["enable", "disable"],
+  videomemorysize: ["512", "1024", "2048", "default"],
   sound: ["alsa", "pulse", "disabled"],
 };
 

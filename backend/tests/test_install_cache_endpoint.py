@@ -53,6 +53,7 @@ def _session(monkeypatch, found):
     monkeypatch.setattr(install, "_resolve_session", lambda game_id, user_id, session_id: found)
     monkeypatch.setattr(install, "clear_session_cache", cleared.append)
     monkeypatch.setattr(install.db_install_session_handler, "delete_session", deleted.append)
+    monkeypatch.setattr(install, "dispatch_queue", lambda: 0)
     return cleared, deleted
 
 

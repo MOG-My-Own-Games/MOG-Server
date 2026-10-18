@@ -171,6 +171,9 @@ class InstallSession(BaseModel):
     bytes_total: Mapped[int] = mapped_column(BigInteger(), default=0, nullable=False)
 
     error: Mapped[str | None] = mapped_column(Text, default=None)
+    # A heads-up that is not a failure: the installer cache is tight, older caches were removed to make room, or the
+    # session waits in the queue for cache space (see handler/install/cache_quota.py). NULL when there is none.
+    warning: Mapped[str | None] = mapped_column(String(1000), default=None)
 
     # Plain lazy loading for Phase 1 simplicity (see models/game.py's own note).
     game: Mapped["Game"] = relationship(lazy="joined", back_populates="install_sessions")

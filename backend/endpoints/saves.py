@@ -6,7 +6,6 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, HTTPException, Path, Query, UploadFile, status
 from fastapi.responses import FileResponse
 
-from config import SAVES_KEEP_VERSIONS
 from endpoints.responses.save import (
     DeviceSavesSchema,
     DeviceSchema,
@@ -16,9 +15,9 @@ from endpoints.responses.save import (
     SaveVersionSchema,
 )
 from handler.auth import CurrentUser
-from handler.database import db_device_handler, db_game_handler, db_saves_handler
+from handler.database import db_device_handler, db_game_handler, db_saves_handler, db_settings_handler
 from handler.notifications import notify_save_restored, notify_save_synced
-from handler.saves import UploadTooLarge, receive_upload, remove_version, resolve_path, run_on_saves_channel, store_version
+from handler.saves import UploadTooLarge, keep_versions, receive_upload, remove_version, resolve_path, run_on_saves_channel, store_version
 from models.device import Device
 from models.game import Game
 from models.save_version import SaveVersion
@@ -68,7 +67,7 @@ async def list_game_saves(user: CurrentUser, id: Annotated[int, Path(ge=1)]) -> 
             )
             for device_id, rows in grouped.items()
         ],
-        keep_versions=SAVES_KEEP_VERSIONS,
+        keep_versions=keep_versions(db_settings_handler.get_settings()),
     )
 
 

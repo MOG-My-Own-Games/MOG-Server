@@ -34,3 +34,14 @@ def test_sending_back_the_mask_keeps_the_saved_key_and_a_new_value_replaces_it(m
     )
 
     assert saved == [{"steamgriddb_api_key": "a-new-key-value"}]
+
+
+def test_the_saves_kept_per_device_default_to_the_environments_and_stay_within_their_range():
+    assert settings._schema(Settings()).saves_keep_versions == 3
+    assert settings._schema(Settings(saves_keep_versions=8)).saves_keep_versions == 8
+    for bad in (0, 21):
+        try:
+            SettingsUpdateForm(saves_keep_versions=bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"{bad} was accepted")

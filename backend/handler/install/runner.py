@@ -62,6 +62,7 @@ from handler.install.manifest import (
     write_manifest,
 )
 from handler import addons as addons_handler
+from handler.install import cache_quota
 from handler.install.progress import ThrottledProgress
 from handler.install.proton_builds import (
     _download_proton_build,
@@ -126,38 +127,64 @@ def enqueue_install(install_session_id: int) -> None:
 _QUEUE_LOCK = threading.Lock()
 
 
+def _admit(session: InstallSession) -> tuple[bool, str | None]:
+    """Whether the installer cache has room for the session's install now, and the warning to show on it. Makes room
+    (deleting old caches) when it can. Raises CacheTooSmall when the installer can never fit."""
+    try:
+        warning, may_start = cache_quota.admit(session), True
+    except cache_quota.Wait as wait:
+        warning, may_start = str(wait), False
+    if warning and warning != session.warning:
+        cache_quota.run_warning(session, warning)
+    return may_start, warning
+
+
 def start_or_queue(install_session_id: int) -> bool:
-    """Start the session now when there is room for another install, else put it in the queue (state `queued`) to be
-    started, in order, as places free up. True when it started. A session that runs no installer (extract only) takes
-    no place, so it never waits."""
+    """Start the session now when there is room for another install and for its cache, else put it in the queue (state
+    `queued`) to be started, in order, as places and cache space free up. True when it started. A session that runs no
+    installer (extract only) takes no place, so it only ever waits for cache space. Raises CacheTooSmall when the
+    installer can never fit in the installer cache."""
     with _QUEUE_LOCK:
         queued = db_install_session_handler.get_session(install_session_id)
+        may_start, warning = _admit(queued) if queued is not None else (True, None)
         needs_place = not (queued and queued.extract_only)
-        if needs_place and db_install_session_handler.count_running_sessions() >= INSTALL_MAX_CONCURRENCY:
+        if not may_start or (needs_place and db_install_session_handler.count_running_sessions() >= INSTALL_MAX_CONCURRENCY):
             db_install_session_handler.update_session(
                 install_session_id,
-                {"state": InstallSessionState.QUEUED, "queue_rank": db_install_session_handler.next_queue_rank()},
+                {"state": InstallSessionState.QUEUED, "queue_rank": db_install_session_handler.next_queue_rank(), "warning": warning},
             )
-            log.debug(f"Install session {install_session_id}: queued, all {INSTALL_MAX_CONCURRENCY} places taken")
+            log.debug(f"Install session {install_session_id}: queued, {'no room in the installer cache' if not may_start else f'all {INSTALL_MAX_CONCURRENCY} places taken'}")
             return False
         db_install_session_handler.update_session(
-            install_session_id, {"state": InstallSessionState.INSTALLING, "queue_rank": None}
+            install_session_id, {"state": InstallSessionState.INSTALLING, "queue_rank": None, "warning": warning}
         )
         enqueue_install(install_session_id)
         return True
 
 
 def dispatch_queue() -> int:
-    """Start the queued sessions, longest waiting first, while there are places. Run whenever one frees up (an install
-    ended, was cancelled, or the server started). Returns how many were started."""
+    """Start the queued sessions, longest waiting first, while there are places and room in the installer cache. Run
+    whenever one frees up (an install ended, was cancelled, a cache was deleted, or the server started). Returns how many
+    were started."""
     started = 0
     with _QUEUE_LOCK:
         while db_install_session_handler.count_running_sessions() < INSTALL_MAX_CONCURRENCY:
             waiting = db_install_session_handler.get_next_queued()
             if waiting is None:
                 break
+            try:
+                may_start, warning = _admit(waiting)
+            except cache_quota.CacheTooSmall as e:  # the limit was lowered, or the disk filled up, while it waited
+                db_install_session_handler.update_session(
+                    waiting.id, {"state": InstallSessionState.FAILED, "error": str(e), "warning": None, "queue_rank": None}
+                )
+                log.warning(f"Install session {hl(str(waiting.id))} left the queue, failed: {e}")
+                continue
+            if not may_start:
+                db_install_session_handler.update_session(waiting.id, {"warning": warning})
+                break  # the ones behind it wait for it: it was first
             db_install_session_handler.update_session(
-                waiting.id, {"state": InstallSessionState.INSTALLING, "queue_rank": None}
+                waiting.id, {"state": InstallSessionState.INSTALLING, "queue_rank": None, "warning": warning}
             )
             enqueue_install(waiting.id)
             log.info(f"Install session {hl(str(waiting.id))} left the queue")

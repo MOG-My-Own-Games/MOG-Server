@@ -216,3 +216,37 @@ def test_the_queue_can_be_reordered_through_the_endpoint(endpoint):
     )
 
     assert [(s.id, s.queue_position) for s in listed if s.state == S.QUEUED] == [(third.id, 1), (second.id, 2)]
+
+
+# --- the installer cache: an installer that can never fit is refused, one that must wait for room is queued ---
+
+
+def test_an_installer_that_can_never_fit_is_refused_with_507_and_no_session_is_left(endpoint, monkeypatch):
+    from fastapi import HTTPException
+
+    from handler.install import cache_quota
+
+    def too_big(session):
+        raise cache_quota.CacheTooSmall("The installer (9.0 GiB) does not fit")
+
+    monkeypatch.setattr(cache_quota, "admit", too_big)
+
+    with pytest.raises(HTTPException) as refused:
+        endpoint.start(1)
+
+    assert refused.value.status_code == 507 and "does not fit" in refused.value.detail
+    assert sessions.get_latest_session_for_game(1, 1) is None and endpoint.started == []
+
+
+def test_an_install_waiting_for_cache_room_comes_back_queued_with_the_reason(endpoint, monkeypatch):
+    from handler.install import cache_quota
+
+    def wait(session):
+        raise cache_quota.Wait("Waiting for cache space: it starts when the installs in progress are over.")
+
+    monkeypatch.setattr(cache_quota, "admit", wait)
+    monkeypatch.setattr(cache_quota, "run_warning", lambda session, warning: None)
+
+    answer = endpoint.start(1)
+
+    assert answer.state == S.QUEUED and answer.warning.startswith("Waiting for cache space") and endpoint.started == []

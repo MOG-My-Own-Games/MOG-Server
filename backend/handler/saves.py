@@ -13,10 +13,11 @@ from anyio import CapacityLimiter, to_thread
 from fastapi import UploadFile
 
 from config import MAX_SAVE_UPLOAD_BYTES, SAVES_BASE_PATH, SAVES_KEEP_VERSIONS
-from handler.database import db_device_handler, db_saves_handler
+from handler.database import db_device_handler, db_saves_handler, db_settings_handler
 from logger.logger import log
 from models.base import utc_now
 from models.save_version import MANIFEST_MAX_ENTRIES, SaveVersion
+from models.settings import SAVES_KEEP_MAX, SAVES_KEEP_MIN
 from utils.archive_safety import inspect_archive
 
 _CHUNK = 1024 * 1024
@@ -78,13 +79,19 @@ def _remove_file(relative: str) -> None:
         log.warning(f"Could not remove save file {relative}: {e}")
 
 
+def keep_versions(settings) -> int:
+    """How many versions of a game are kept for each device: the setting, else SAVES_KEEP_VERSIONS (the environment's, 3)."""
+    value = settings.saves_keep_versions
+    return SAVES_KEEP_VERSIONS if value is None else min(max(value, SAVES_KEEP_MIN), SAVES_KEEP_MAX)
+
+
 def store_version(
     user_id: int, game_id: int, device_id: int, trigger: str, incoming: Path
 ) -> tuple[SaveVersion, bool]:
     """Validate and file an uploaded archive; returns (version, created).
 
     An archive with the same content as the device's newest version is not stored again: the
-    existing row comes back with created=False. Afterwards only the newest SAVES_KEEP_VERSIONS
+    existing row comes back with created=False. Afterwards only the newest `keep_versions()`
     stay. Raises ArchiveError (and discards the upload) when the archive is not acceptable."""
     try:
         info = inspect_archive(incoming)
@@ -116,7 +123,9 @@ def store_version(
             manifest=[{"path": p, "size": s} for p, s in info.files[:MANIFEST_MAX_ENTRIES]],
         )
     )
-    for stale in db_saves_handler.delete_beyond_newest(user_id, game_id, device_id, SAVES_KEEP_VERSIONS):
+    for stale in db_saves_handler.delete_beyond_newest(
+        user_id, game_id, device_id, keep_versions(db_settings_handler.get_settings())
+    ):
         _remove_file(stale.file_path)
     return version, True
 

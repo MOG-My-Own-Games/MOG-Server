@@ -10,6 +10,7 @@ from models.notification import (
     KIND_AUTO_MODE_FAILED,
     KIND_AUTO_MODE_STUCK,
     KIND_GAMES_ADDED,
+    KIND_INSTALL_CACHE,
     KIND_INSTALL_SMALL,
     KIND_MOD_DOWNLOADED,
     KIND_MOD_FAILED,
@@ -78,6 +79,21 @@ def notify_install_small(install_session_id: int, installed: int, installer: int
         )
     except Exception as e:  # noqa: BLE001 - a failed notification must not fail a finished install
         log.warning(f"Could not create the small install notification: {e}")
+
+
+def notify_install_cache(install_session_id: int, warning: str) -> None:
+    """The installer cache is tight, was cleaned for this install, or the install waits for space in it."""
+    session = db_install_session_handler.get_session(install_session_id)
+    if session is None:
+        return
+    notify(
+        session.user_id,
+        KIND_INSTALL_CACHE,
+        f"Installer cache: {_game_name(session.game_id)}",
+        warning,
+        game_id=session.game_id,
+        session_id=session.id,
+    )
 
 
 def notify_auto_mode_failed(install_session_id: int, error: str) -> None:

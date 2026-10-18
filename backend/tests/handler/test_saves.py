@@ -106,3 +106,17 @@ def test_an_upload_over_the_limit_is_stopped_and_cleaned_up(monkeypatch, tmp_pat
 
     received = asyncio.run(saves.receive_upload(UploadFile(io.BytesIO(b"x" * 10))))
     assert received.read_bytes() == b"x" * 10
+
+
+def test_the_number_of_versions_kept_is_the_setting_else_the_environments(db, tmp_path):
+    from types import SimpleNamespace
+
+    assert saves.keep_versions(SimpleNamespace(saves_keep_versions=None)) == 3
+    assert saves.keep_versions(SimpleNamespace(saves_keep_versions=7)) == 7
+    assert saves.keep_versions(SimpleNamespace(saves_keep_versions=500)) == 20  # a value outside the range is brought into it
+
+    from handler.database import db_settings_handler
+
+    db_settings_handler.update_settings({"saves_keep_versions": 2})
+    stored = [_store(tmp_path, str(n).encode())[0] for n in range(4)]
+    assert [saves.resolve_path(s.file_path).exists() for s in stored] == [False, False, True, True]

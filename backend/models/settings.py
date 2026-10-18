@@ -11,7 +11,7 @@ sets it through Settings.
 
 from __future__ import annotations
 
-from sqlalchemy import Boolean, Integer, String
+from sqlalchemy import BigInteger, Boolean, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from models.base import BaseModel
@@ -20,6 +20,9 @@ SETTINGS_ROW_ID = 1
 
 # Files a client downloads at once (see handler/install/defaults.py).
 DOWNLOAD_WORKERS_MIN, DOWNLOAD_WORKERS_MAX = 1, 16
+
+# Save versions kept per device and game (see handler/saves.py).
+SAVES_KEEP_MIN, SAVES_KEEP_MAX = 1, 20
 
 
 class Settings(BaseModel):
@@ -43,10 +46,17 @@ class Settings(BaseModel):
     # The daily backup, and whether it holds the saves too (they can be large). NULL means on and off (see handler/backups.py).
     backup_daily: Mapped[bool | None] = mapped_column(Boolean, default=None)
     backup_saves: Mapped[bool | None] = mapped_column(Boolean, default=None)
+    # How many save versions of a game are kept for each device. NULL falls back to config.SAVES_KEEP_VERSIONS (3).
+    saves_keep_versions: Mapped[int | None] = mapped_column(Integer, default=None)
     # Days an install cache survives before auto-eviction. NULL falls back to
     # config.INSTALL_CACHE_DEFAULT_TTL_DAYS; 0 means unlimited (see
     # utils/install_cache.py's resolve_expires_at).
     install_cache_ttl_days: Mapped[int | None] = mapped_column(Integer, default=None)
+    # Most the installer caches may take together, in bytes. NULL or 0 means no limit (the disk's free space still
+    # counts, see handler/install/cache_quota.py).
+    install_cache_max_bytes: Mapped[int | None] = mapped_column(BigInteger, default=None)
+    # Whether the oldest caches not in use are deleted to make room for an installer that does not fit. NULL means on.
+    install_cache_auto_clean: Mapped[bool | None] = mapped_column(Boolean, default=None)
     # Proton/Wine build id used when a session doesn't request one explicitly.
     # NULL falls back to config.INSTALL_DEFAULT_PROTON_BUILD (see
     # handler/install/proton_builds.py's default_build_id).

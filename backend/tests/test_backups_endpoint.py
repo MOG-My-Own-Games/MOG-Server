@@ -39,7 +39,7 @@ def test_the_overview_says_what_the_volume_and_the_switches_are_and_lists_the_ba
     body = api.get("/api/backups").json()
 
     assert (body["available"], body["reason"], body["daily"], body["daily_saves"], body["hour"]) == (True, None, True, False, 3)
-    assert body["keep"] == {"daily": 7, "pre-update": 5, "manual": 10} and body["last_error"] is None
+    assert body["keep"] == {"daily": 3, "pre-update": 3, "manual": 10} and body["last_error"] is None
     assert [(b["kind"], b["includes_saves"]) for b in body["backups"]] == [("manual", False)]
 
 

@@ -74,6 +74,8 @@ class InstallSessionSchema(BaseModel):
     bytes_written: int
     bytes_total: int
     error: str | None
+    # Not a failure: the installer cache is tight, older caches were removed for this install, or it waits for space.
+    warning: str | None = None
     # For a `queued` session: where it stands, 1 being the next to start. None otherwise.
     queue_position: int | None = None
     # Which installer of a chain is running (0-based) and how many the session runs; 0 and 1 for a single installer.
@@ -171,6 +173,13 @@ class InstallCacheSchema(BaseModel):
     entries: list[InstallCacheEntrySchema]
     # The zipped mods kept for download, apart from the installers' caches above.
     mods: list[ModCacheEntrySchema] = []
+    # What the installers' caches take against the limit: `limit_bytes` 0 is no limit, `free_bytes` is the smaller of
+    # what is left of the limit and the free space of the disk holding the caches.
+    used_bytes: int = 0
+    limit_bytes: int = 0
+    free_bytes: int = 0
+    disk_free_bytes: int = 0
+    auto_clean: bool = True
 
 
 class InstallCacheExpirySchema(BaseModel):

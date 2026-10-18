@@ -74,6 +74,8 @@ from handler.install.proton_builds import (
     remove_build,
 )
 from handler.install.proton_builds import enqueue_download as enqueue_proton_download
+from handler.install import cache_quota
+from handler.install.cache_quota import CacheTooSmall
 from handler.install.runner import CANCELLED_ERROR
 from handler.install.runner import cancel_install as runner_cancel_install
 from handler.install.runner import dispatch_queue, start_or_queue
@@ -397,7 +399,11 @@ async def start_install_session(
         return _session_schema(session)
 
     # With every place taken the session waits in the queue (state `queued`) and starts by itself, in order.
-    start_or_queue(session.id)
+    try:
+        await asyncio.to_thread(start_or_queue, session.id)  # it measures the caches, which can take a while
+    except CacheTooSmall as e:
+        _abandon()
+        raise HTTPException(status_code=status.HTTP_507_INSUFFICIENT_STORAGE, detail=str(e)) from e
     session = db_install_session_handler.get_session(session.id)
     assert session is not None
 
@@ -463,6 +469,7 @@ async def clear_install(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Install is still running")
     clear_session_cache(session.id)
     db_install_session_handler.delete_session(session.id)
+    await asyncio.to_thread(dispatch_queue)  # an install may have been waiting for the room
     return InstallCacheClearSchema(cleared=1)
 
 
@@ -713,7 +720,9 @@ async def list_install_cache(user: AdminUser) -> InstallCacheSchema:
             )
         )
     mod_zips = await asyncio.to_thread(mods_handler.cached_zips)
+    quota = await asyncio.to_thread(cache_quota.snapshot, sum(e.size_bytes for e in entries))
     return InstallCacheSchema(
+        **quota,
         entries=entries,
         mods=[
             ModCacheEntrySchema(
@@ -741,6 +750,7 @@ async def clear_all_install_cache(user: AdminUser) -> InstallCacheClearSchema:
         if session is not None:
             db_install_session_handler.delete_session(session_id)
         cleared += 1
+    await asyncio.to_thread(dispatch_queue)  # an install may have been waiting for the room
     return InstallCacheClearSchema(cleared=cleared)
 
 
@@ -779,6 +789,7 @@ async def clear_one_install_cache(user: AdminUser, session_id: Annotated[int, Pa
     clear_session_cache(session_id)
     if session is not None:
         db_install_session_handler.delete_session(session_id)
+    await asyncio.to_thread(dispatch_queue)  # an install may have been waiting for the room
 
 
 # --- VNC proxy ---

@@ -58,8 +58,8 @@ MAX_SAVE_UPLOAD_BYTES: Final[int] = max(1, safe_int(_get_env("MAX_SAVE_UPLOAD_BY
 # A volume of its own, so a backup survives the data volume it protects. Without a directory there, backups are off.
 BACKUP_PATH: Final[str] = _get_env("BACKUP_PATH") or "/backups"
 # How many of each kind are kept; the oldest go when a new one is made.
-BACKUP_KEEP_DAILY: Final[int] = min(100, max(1, safe_int(_get_env("BACKUP_KEEP_DAILY"), 7)))
-BACKUP_KEEP_PRE_UPDATE: Final[int] = min(100, max(1, safe_int(_get_env("BACKUP_KEEP_PRE_UPDATE"), 5)))
+BACKUP_KEEP_DAILY: Final[int] = min(100, max(1, safe_int(_get_env("BACKUP_KEEP_DAILY"), 3)))
+BACKUP_KEEP_PRE_UPDATE: Final[int] = min(100, max(1, safe_int(_get_env("BACKUP_KEEP_PRE_UPDATE"), 3)))
 BACKUP_KEEP_MANUAL: Final[int] = min(100, max(1, safe_int(_get_env("BACKUP_KEEP_MANUAL"), 10)))
 # The daily backup is made from this hour (server time) on, once a day.
 BACKUP_HOUR: Final[int] = min(23, max(0, safe_int(_get_env("BACKUP_HOUR"), 3)))

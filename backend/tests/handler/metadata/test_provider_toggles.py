@@ -25,6 +25,8 @@ def row(**over):
         debug_logging=None,
         backup_daily=None,
         backup_saves=None,
+        install_cache_max_bytes=None,
+        install_cache_auto_clean=None,
     )
     return SimpleNamespace(**{**base, **over})
 

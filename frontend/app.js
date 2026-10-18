@@ -42,7 +42,26 @@ let games = []; // what the grid shows: the games of the selected library
 let gamesAll = null; // every game this user can see, once loaded
 let gamesFetchedAt = 0;
 const gameCache = new Map(); // games looked up one by one (an active install of a game not loaded yet)
-let selectedLibraryId = null;
+// The library filter is remembered per browser (as the sort is): the address says which one it is while the list is open, and
+// an empty address ("Back to library", the brand) goes back to the last one chosen instead of to every game.
+const LIBRARY_KEY = "mog_library";
+function rememberedLibrary() {
+  try {
+    const id = parseInt(localStorage.getItem(LIBRARY_KEY), 10);
+    return Number.isInteger(id) ? id : null;
+  } catch (_) {
+    return null;
+  }
+}
+function rememberLibrary(id) {
+  try {
+    if (id === null) localStorage.removeItem(LIBRARY_KEY);
+    else localStorage.setItem(LIBRARY_KEY, String(id));
+  } catch (_) {
+    // Not remembered; the choice still applies until the page is reloaded.
+  }
+}
+let selectedLibraryId = rememberedLibrary();
 let activeGame = null;
 let installQueue = []; // candidates checked to run one after another
 // True only once this page view has actually started an install itself
@@ -400,8 +419,14 @@ function router() {
     openSettingsPage(subTab);
   } else {
     document.getElementById("view-games").hidden = false;
-    const wanted = hash.startsWith("library/") ? parseInt(hash.slice("library/".length), 10) : null;
-    selectedLibraryId = Number.isInteger(wanted) ? wanted : null;
+    if (hash.startsWith("library/")) {
+      const wanted = parseInt(hash.slice("library/".length), 10); // "library/all" is every game, chosen on purpose
+      selectedLibraryId = Number.isInteger(wanted) ? wanted : null;
+      rememberLibrary(selectedLibraryId);
+    } else {
+      selectedLibraryId = rememberedLibrary();
+      if (selectedLibraryId !== null) setAddress(`library/${selectedLibraryId}`);
+    }
     renderLibraryList("library-list", { clickable: true });
     if (gamesAll) showGames();
     if (!gamesAll || Date.now() - gamesFetchedAt > 15000) refreshGames().catch(showGamesError);
@@ -1581,6 +1606,12 @@ document.querySelector("#active-installs-widget h2").addEventListener("click", (
 
 async function refreshLibraries() {
   libraries = await api("/api/libraries");
+  if (selectedLibraryId !== null && !libraries.some((l) => l.id === selectedLibraryId)) {
+    selectedLibraryId = null; // the remembered library is gone
+    rememberLibrary(null);
+    if (location.hash.startsWith("#library/")) setAddress("library/all");
+    if (gamesAll) showGames();
+  }
   renderLibraryList("library-list", { clickable: true });
 }
 
@@ -1596,7 +1627,7 @@ function renderLibraryList(containerId, { clickable, showScrape = false, allowDe
     const allName = document.createElement("div");
     allName.innerHTML = '<span class="lib-name">All games</span>';
     allName.addEventListener("click", () => {
-      location.hash = "";
+      location.hash = "library/all";
     });
     allItem.appendChild(allName);
     if (isAdmin() && libraries.length > 1) {
@@ -1685,7 +1716,10 @@ function renderLibraryList(containerId, { clickable, showScrape = false, allowDe
         if (!confirm(`Delete library "${lib.name}"? This does not delete files on disk.`)) return;
         try {
           await api(`/api/libraries/${lib.id}`, { method: "DELETE" });
-          if (selectedLibraryId === lib.id) selectedLibraryId = null;
+          if (selectedLibraryId === lib.id) {
+            selectedLibraryId = null;
+            rememberLibrary(null);
+          }
           await refreshLibraries();
           renderLibraryList("settings-library-list", { clickable: false, showScrape: true, allowDelete: true });
         } catch (err) {

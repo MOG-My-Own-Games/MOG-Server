@@ -83,7 +83,7 @@ Markdown, a `## Changes` and a `## Fixes` list of lines like `- scope: what chan
 (the `409` of device registration, see [8](#8-saves-optional)). The statuses you will meet are `401` (login),
 `404` (no such game, session, file, or an endpoint an older server does not have), `409` (a conflict you can
 resolve), `416` (a range is not available yet, see [6](#6-downloading-the-result)), `422` and `413` (a rejected
-upload) and `429` (too many wrong passwords from one address for one user: wait for the seconds `Retry-After` says;
+upload), `507` (the installer cannot fit in the installer cache, see [5.2](#52-starting-a-session)) and `429` (too many wrong passwords from one address for one user: wait for the seconds `Retry-After` says;
 an older server also answered `429` when too many installs ran at once, which are queued now).
 
 **Newer and older servers.** Optional features appear over time. A client should treat a `404` or `405` on an
@@ -194,7 +194,13 @@ installer display's address and keys, which are for the person who started it.
 The server runs as many installs at once as it was told to (`INSTALL_MAX_CONCURRENCY`, one by default). A start made
 while every place is taken is **not refused**: the session is created in the `queued` state, with `queue_position`
 (1 is the next to start), and it starts by itself, in the order the starts came, as installs end or are cancelled.
-Keep polling it like any other. A start that runs no installer (`extract_only`: the files are taken as they are) takes
+Keep polling it like any other. The same happens when the installer cache has no room yet: an admin can limit what the
+installers' caches take together (Settings > Install cache), and what is free is the smaller of what is left of that limit and
+the free space of the disk. A start whose installer does not fit makes room by deleting the oldest caches that are not in
+use while the admin's "delete the oldest caches" switch is on (those sessions turn `expired`); if only the cache of an install
+in progress is in the way it is queued until that one ends; and one that could never fit gets `507` with the reason in
+`detail`, and no session is made. The session's `warning` (not a failure: show it) says what happened: the cache is tight (the
+installer plus 20% does not fit), older caches were deleted for it, or it waits for cache space. A start that runs no installer (`extract_only`: the files are taken as they are) takes
 no place and never waits. `PUT /api/games/install/queue` with `{"session_ids": [..]}` puts the caller's waiting
 installs in that order (they keep the places they hold in the line; the answer is `GET /api/games/install/active`),
 and `POST /api/games/{id}/install/cancel?session_id=` takes one out of the queue. Saving games (`/api/games/{id}/saves`)
@@ -211,7 +217,7 @@ The response is the **session**:
   "auto_mode": true, "manual_mode": false, "extract_only": false,
   "auto_status": "running", "auto_detail": "clicking Next",
   "vnc_url": "/api/games/install/vnc/6901/vnc.html?...", "cache_path": "/cache/17",
-  "bytes_written": 0, "bytes_total": 0, "error": null
+  "bytes_written": 0, "bytes_total": 0, "error": null, "warning": null
 }
 ```
 
@@ -470,7 +476,9 @@ starts it the same way. They belong to the game, not to a user.
 
 The server can keep a user's save games so they follow the person from one machine to another. It stores
 **opaque zip archives** per user, game and device, and keeps the newest few of each (the response says how many,
-`keep_versions`, three by default).
+`keep_versions`: three by default, and an administrator can set 1 to 20 in Settings > Backups > Save sync, `saves_keep_versions`
+in `/api/settings`; the environment variable `SAVES_KEEP_VERSIONS` is only the default). A lower number takes effect for a game and
+device at its next upload.
 
 ### 8.1 Devices
 

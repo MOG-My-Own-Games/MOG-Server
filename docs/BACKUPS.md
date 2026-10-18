@@ -18,13 +18,20 @@ backups are off and Settings > Backups says so; the server starts all the same.
 | Before an update | At a start that has migrations to run, before it migrates | the database alone, so it is quick |
 | Manual | The "Back up now" button in Settings > Backups (`POST /api/backups`) | the same as a daily one; the saves when ticked |
 
-The newest few of each kind are kept: `BACKUP_KEEP_DAILY` (7), `BACKUP_KEEP_PRE_UPDATE` (5), `BACKUP_KEEP_MANUAL` (10). A backup
+The newest few of each kind are kept: `BACKUP_KEEP_DAILY` (3), `BACKUP_KEEP_PRE_UPDATE` (3), `BACKUP_KEEP_MANUAL` (10). A backup
 that fails leaves nothing half-written, and the reason shows in Settings > Backups and the log. A failing backup before an
 update never stops the update.
 
 Each is one file, `mog-<kind>-<date>-<time>[-saves].tar.gz`, holding `mog.db` (a whole copy made with SQLite's own backup, so
 it is correct while the server writes), `manifest.json` (the kind, the date, the version, the database revision),
 `resources/avatars`, `resources/media` (without `found/` in each game's folder: the icons read from the game's files, which are read again when needed) and, with saves, `saves/`.
+
+## Saves kept per device
+
+The saves in a backup are the ones the server holds: the newest few versions of each game for each device. How many is
+**Saves per device** in Settings > Backups > Save sync (1 to 20, three by default; `SAVES_KEEP_VERSIONS` is only the default
+before it is set). When a save comes in, the oldest beyond that number are deleted, so a lower number frees room at the next
+save of each game and not at once.
 
 ## Restoring
 

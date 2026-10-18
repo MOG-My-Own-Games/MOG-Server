@@ -104,7 +104,7 @@ in `endpoints/responses/`.
 - **Settings are DB-backed, env vars are only the bootstrap fallback.** The
   `settings` table (one row, `models/settings.py`) holds what genuinely
   needs changing from the web UI without shell access: the IGDB/SteamGridDB
-  keys, the default install cache TTL, the default Proton build. Each has a
+  keys, the default install cache TTL and size limit, the default Proton build. Each has a
   small `default_*`/`_credentials` resolver (e.g.
   `handler/install/proton_builds.py`'s `default_build_id`) that checks the
   DB row first and falls back to the matching env var - follow that pattern
@@ -127,6 +127,15 @@ daily (a scheduler thread, while the Settings switch is on), before an update (`
 `backups.before_update()` ahead of `alembic upgrade head`) and manual (`POST /api/backups`). See `docs/BACKUPS.md`. A new
 table or folder with data only this server has belongs in them: add it to `backups.create` (and its test).
 
+## Installer cache limit
+
+`handler/install/cache_quota.py`: Settings > Install cache can limit what the installer caches take together
+(`install_cache_max_bytes`, 0 is none) and switches on deleting the oldest caches when an installer does not fit
+(`install_cache_auto_clean`, on by default). The room for a new cache is the smaller of the rest of the limit and the free
+space of the disk. `runner.start_or_queue` and `dispatch_queue` call `cache_quota.admit` before an install starts: it makes
+room (never from an install in progress), raises `Wait` (the session is queued with a `warning`) or `CacheTooSmall` (the start
+endpoint answers `507`). Anything that frees cache space calls `dispatch_queue` so a waiting install can go.
+
 ## Logging
 
 `LOGLEVEL` sets the level at start (`INFO` by default; the dev compose file sets `DEBUG`). The "Debug logging"
@@ -147,6 +156,13 @@ headers or bodies.
 - **Keep `docs/INTEGRATION.md` current.** It is what other clients are built from. When a change to the server
   alters what a client can see or call (an endpoint, a field of a response, a status code, a setting that changes
   behaviour a client relies on, a state or its meaning), update that document in the same change.
+- **Settings fields save by themselves (web UI).** A setting that is a field (a number, a text, a select) has no Save button:
+  it is wired with `autosaveField(input, { parse, save, delay })` in `frontend/app.js`. It saves on Enter, on leaving the field, and
+  when typing stops for `AUTOSAVE_DELAY_MS`, with a mark beside it (Saving..., Saved, or the error; markup and style are built
+  by the helper and `.autosave-mark`, nothing to add in the HTML). `parse` turns the text into the value or throws the message
+  to show (the value is then not sent); `save` does the request and throws on failure. A select or switch saves at once.
+  `delay: null` is for a field that must not be saved half typed (the provider keys: they save on Enter or leaving). New
+  settings fields use it; do not add a Save or Refresh button next to one.
 - **Tests travel with code.** New logic gets a test in `backend/tests/`,
   mirroring the module it covers (`handler/foo.py` ->
   `tests/handler/test_foo.py`). Prioritize pure-logic modules (no DB/network/

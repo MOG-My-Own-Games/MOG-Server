@@ -26,7 +26,7 @@ damage: the software is provided as is, without warranty of any kind.
   (genres, screenshots, age ratings, DLC/expansions/remakes all come along with a match).
 - Keeps each machine's save files per game (the client uploads them) and lets them follow the
   player: a newer save from another machine is offered, or brought over, when a game starts. The
-  last three versions of every device are kept, listed under the game's Files > Saves tab (so you
+  last three versions of every device are kept by default (1 to 20, set in Settings > Backups), listed under the game's Files > Saves tab (so you
   can tell where a save came from), and a version can be downloaded or a zip uploaded by hand. Machines are named after their hostname, asking when a name is already
   taken (a reinstall, or a second system on the same computer). A game that is gone from disk but
   still has saves is not "missing": it stays, marked "Saves only" (amber corner with a floppy disk),

@@ -120,6 +120,100 @@ function fmtBytes(n) {
   return `${n.toFixed(1)} ${units[i]}`;
 }
 
+// --- Auto-saved fields ---
+// How every setting field is saved in this UI: there is no Save button. The value is saved when Enter is pressed, when the
+// field is left, or when typing stops for a moment, and a small mark beside the field says what happened (Saving..., Saved,
+// or why not). A value `parse` rejects is not sent. Selects and switches save as soon as they change. Pass `delay: null`
+// for a field that must not be saved half typed (a key that is checked against its provider): it saves on Enter or leaving.
+// `save(value)` does the request and throws on failure. See "Settings fields" in CLAUDE.md.
+const AUTOSAVE_DELAY_MS = 900;
+const AUTOSAVE_MARK_MS = 2500;
+
+function autosaveField(input, { save, parse = (raw) => raw, delay = AUTOSAVE_DELAY_MS }) {
+  const instant = input.type === "checkbox" || input.tagName === "SELECT";
+  const mark = document.createElement("span");
+  mark.className = "autosave-mark";
+  mark.setAttribute("role", "status");
+  if (input.type === "checkbox") {
+    input.closest(".switch").before(mark);
+  } else {
+    const row = document.createElement("div");
+    row.className = "autosave-row";
+    input.before(row);
+    row.append(input, mark);
+  }
+  let dirty = false;
+  let lastSent; // the field's text as last sent: leaving it after the pause already saved it is not a second save
+  let timer = null;
+  let fade = null;
+  let queue = Promise.resolve();
+  let latest = 0;
+
+  function show(state, text) {
+    clearTimeout(fade);
+    mark.dataset.state = state;
+    mark.textContent = text;
+    if (state === "saved") fade = setTimeout(() => (mark.dataset.state = ""), AUTOSAVE_MARK_MS);
+  }
+
+  function flush() {
+    clearTimeout(timer);
+    if (!dirty) return queue;
+    let value;
+    const raw = input.type === "checkbox" ? input.checked : input.value;
+    try {
+      value = parse(raw);
+    } catch (err) {
+      show("error", err.message);
+      return queue;
+    }
+    dirty = false;
+    lastSent = raw;
+    const mine = ++latest;
+    show("saving", "Saving...");
+    queue = queue.then(async () => {
+      try {
+        await save(value);
+        if (mine === latest) show("saved", "\u2713 Saved");
+      } catch (err) {
+        dirty = true; // still to be saved: leaving the field or Enter tries again
+        lastSent = undefined;
+        if (mine === latest) show("error", `Could not save: ${err.message}`);
+      }
+    });
+    return queue;
+  }
+
+  input.addEventListener("input", () => {
+    dirty = true;
+    show("", "");
+    clearTimeout(timer);
+    if (!instant && delay !== null) timer = setTimeout(flush, delay);
+  });
+  input.addEventListener("change", () => {
+    if (instant || input.value !== lastSent) dirty = true;
+    flush();
+  });
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !instant) flush();
+  });
+  return { flush, mark };
+}
+
+// A whole number between `min` and `max` (an empty field is `empty`, when that is allowed), else an error to show.
+function wholeNumber(raw, { min, max = Infinity, empty, what }) {
+  if (raw.trim() === "" && empty !== undefined) return empty;
+  const n = Number(raw);
+  if (raw.trim() === "" || !Number.isInteger(n) || n < min || n > max) {
+    throw new Error(max === Infinity ? `Enter ${what}: ${min} or more.` : `Enter ${what}: ${min} to ${max}.`);
+  }
+  return n;
+}
+
+async function putSettings(changes) {
+  return api("/api/settings", { method: "PUT", body: JSON.stringify(changes) });
+}
+
 // --- Tabs (shared between the game page and the settings page) ---
 
 function activateTab(navSelector, dataAttr, panelPrefix, name) {
@@ -603,7 +697,6 @@ async function openSettingsPage(subTab) {
   const s = await getInstallDefaults();
   document.getElementById("setting-auto-mode").checked = s.autoMode;
   document.getElementById("setting-download-workers").value = s.downloadWorkers;
-  document.getElementById("download-workers-saved").textContent = "";
   document.getElementById("setting-auto-mode").onchange = saveInstallDefaults;
   const groupToggle = document.getElementById("setting-group-games");
   groupToggle.checked = groupGamesEnabled();
@@ -615,8 +708,6 @@ async function openSettingsPage(subTab) {
     }
     refreshGames();
   };
-  document.getElementById("api-keys-saved").textContent = "";
-  document.getElementById("cache-ttl-saved").textContent = "";
 
   renderLibraryList("settings-library-list", { clickable: false, showScrape: true, allowDelete: true });
 
@@ -626,10 +717,11 @@ async function openSettingsPage(subTab) {
     document.getElementById("setting-igdb-secret").value = apiSettings.igdb_client_secret || "";
     document.getElementById("setting-sgdb-key").value = apiSettings.steamgriddb_api_key || "";
     document.getElementById("setting-cache-ttl").value = apiSettings.install_cache_ttl_days ?? "";
+    document.getElementById("setting-cache-max-gb").value = apiSettings.install_cache_max_bytes ? +(apiSettings.install_cache_max_bytes / GIB).toFixed(2) : 0;
+    document.getElementById("setting-cache-auto-clean").checked = apiSettings.install_cache_auto_clean !== false;
     applyProviderToggles(apiSettings);
     document.getElementById("setting-watch-libraries").checked = apiSettings.watch_libraries !== false;
     document.getElementById("setting-debug-logging").checked = apiSettings.debug_logging === true;
-    document.getElementById("proton-default-saved").textContent = "";
     await refreshProtonBuildsTable(apiSettings.install_default_proton_build || "");
   } catch (_) {
     // Not fatal - fields just stay blank until a successful load.
@@ -667,6 +759,9 @@ async function refreshBackups() {
   document.getElementById("setting-backup-daily").checked = data.daily;
   document.getElementById("setting-backup-saves").checked = data.daily_saves;
   document.getElementById("backup-now-btn").disabled = !data.available;
+  api("/api/settings")
+    .then((s) => { document.getElementById("setting-saves-keep").value = s.saves_keep_versions; })
+    .catch(() => {});
   body.replaceChildren();
   if (data.backups.length === 0) {
     body.innerHTML = "<tr><td colspan='5' class='muted'>No backups yet.</td></tr>";
@@ -1021,8 +1116,10 @@ document.getElementById("add-user-form").addEventListener("submit", async (e) =>
 
 // --- Proton / Wine build management (Settings > Install defaults) ---
 
+// Rebuilds the list; the build chosen as the default stays chosen unless `currentDefault` says another.
 async function refreshProtonBuildsTable(currentDefault) {
   const select = document.getElementById("setting-proton-default");
+  const wanted = currentDefault !== undefined ? currentDefault : select.value;
   const body = document.getElementById("proton-builds-table-body");
   select.innerHTML = '<option value="">(server default - CachyOS Proton)</option>';
   body.innerHTML = "<tr><td colspan='4' class='muted'>Loading...</td></tr>";
@@ -1033,7 +1130,7 @@ async function refreshProtonBuildsTable(currentDefault) {
       const opt = document.createElement("option");
       opt.value = b.id;
       opt.textContent = b.label;
-      opt.selected = b.id === currentDefault;
+      opt.selected = b.id === wanted;
       select.appendChild(opt);
 
       const tr = document.createElement("tr");
@@ -1046,7 +1143,7 @@ async function refreshProtonBuildsTable(currentDefault) {
         btn.addEventListener("click", async () => {
           if (!confirm(`Remove ${b.label}?`)) return;
           await api(`/api/games/install/proton/${b.id}`, { method: "DELETE" });
-          await refreshProtonBuildsTable(currentDefault);
+          await refreshProtonBuildsTable();
         });
       } else {
         btn.textContent = "Download";
@@ -1054,7 +1151,7 @@ async function refreshProtonBuildsTable(currentDefault) {
           await api(`/api/games/install/proton/${b.id}/download`, { method: "POST" });
           btn.textContent = "Downloading...";
           btn.disabled = true;
-          pollProtonDownload(b.id, () => refreshProtonBuildsTable(currentDefault));
+          pollProtonDownload(b.id, () => refreshProtonBuildsTable());
         });
       }
       actionTd.appendChild(btn);
@@ -1080,21 +1177,9 @@ function pollProtonDownload(buildId, onDone) {
   }, 2000);
 }
 
-document.getElementById("refresh-proton-builds-btn").addEventListener("click", () => {
-  refreshProtonBuildsTable(document.getElementById("setting-proton-default").value);
-});
-
-document.getElementById("save-proton-default-btn").addEventListener("click", async () => {
-  const savedEl = document.getElementById("proton-default-saved");
-  try {
-    await api("/api/settings", {
-      method: "PUT",
-      body: JSON.stringify({ install_default_proton_build: document.getElementById("setting-proton-default").value || null }),
-    });
-    savedEl.textContent = "Saved.";
-  } catch (err) {
-    savedEl.textContent = `Could not save: ${err.message}`;
-  }
+autosaveField(document.getElementById("setting-proton-default"), {
+  parse: (raw) => raw || null,
+  save: (value) => putSettings({ install_default_proton_build: value }),
 });
 
 async function saveInstallDefaults() {
@@ -1110,60 +1195,53 @@ async function saveInstallDefaults() {
   }
 }
 
-// The keys are saved when a field is left or Enter is pressed in it (the browser's `change`), not by a button.
-let apiKeysSavedTimer = null;
+// A key is saved when its field is left or Enter is pressed in it (never half typed), then checked against its provider.
 async function saveApiKeys(provider) {
-  const savedEl = document.getElementById("api-keys-saved");
-  try {
-    await api("/api/settings", {
-      method: "PUT",
-      body: JSON.stringify({
-        igdb_client_id: document.getElementById("setting-igdb-id").value,
-        igdb_client_secret: document.getElementById("setting-igdb-secret").value,
-        steamgriddb_api_key: document.getElementById("setting-sgdb-key").value,
-      }),
-    });
-    savedEl.textContent = "Saved.";
-    clearTimeout(apiKeysSavedTimer);
-    apiKeysSavedTimer = setTimeout(() => (savedEl.textContent = ""), 2500);
-    await refreshProviderValidityBadges(provider); // only the provider whose field this is, and only if it has all its keys
-  } catch (err) {
-    savedEl.textContent = `Could not save: ${err.message}`;
-  }
+  await putSettings({
+    igdb_client_id: document.getElementById("setting-igdb-id").value,
+    igdb_client_secret: document.getElementById("setting-igdb-secret").value,
+    steamgriddb_api_key: document.getElementById("setting-sgdb-key").value,
+  });
+  await refreshProviderValidityBadges(provider); // only the provider whose field this is, and only if it has all its keys
 }
 
 for (const [provider, ids] of Object.entries(PROVIDER_FIELDS)) {
-  for (const id of ids) document.getElementById(id).addEventListener("change", () => saveApiKeys(provider));
+  for (const id of ids) autosaveField(document.getElementById(id), { delay: null, save: () => saveApiKeys(provider) });
 }
 
-document.getElementById("save-download-workers-btn").addEventListener("click", async () => {
-  const savedEl = document.getElementById("download-workers-saved");
-  const input = document.getElementById("setting-download-workers");
-  const value = parseInt(input.value, 10);
-  if (!(value >= 1 && value <= 16)) {
-    savedEl.textContent = "Enter a number from 1 to 16.";
-    return;
-  }
-  try {
-    await api("/api/settings", { method: "PUT", body: JSON.stringify({ download_workers: value }) });
-    savedEl.textContent = "Saved.";
-  } catch (err) {
-    savedEl.textContent = `Could not save: ${err.message}`;
-  }
+autosaveField(document.getElementById("setting-download-workers"), {
+  parse: (raw) => wholeNumber(raw, { min: 1, max: 16, what: "a number of files" }),
+  save: (value) => putSettings({ download_workers: value }),
 });
 
-document.getElementById("save-cache-ttl-btn").addEventListener("click", async () => {
-  const savedEl = document.getElementById("cache-ttl-saved");
-  const raw = document.getElementById("setting-cache-ttl").value;
-  try {
-    await api("/api/settings", {
-      method: "PUT",
-      body: JSON.stringify({ install_cache_ttl_days: raw === "" ? null : parseInt(raw, 10) }),
-    });
-    savedEl.textContent = "Saved.";
-  } catch (err) {
-    savedEl.textContent = `Could not save: ${err.message}`;
-  }
+autosaveField(document.getElementById("setting-saves-keep"), {
+  parse: (raw) => wholeNumber(raw, { min: 1, max: 20, what: "a number of saves" }),
+  save: (value) => putSettings({ saves_keep_versions: value }),
+});
+
+autosaveField(document.getElementById("setting-cache-ttl"), {
+  parse: (raw) => wholeNumber(raw, { min: 0, empty: null, what: "a number of days" }),
+  save: async (value) => {
+    await putSettings({ install_cache_ttl_days: value });
+    await refreshCacheTable(true); // the expiry of the caches that never expired moves
+  },
+});
+
+const GIB = 1024 ** 3;
+autosaveField(document.getElementById("setting-cache-max-gb"), {
+  parse: (raw) => {
+    const gib = Number(raw);
+    if (raw.trim() === "" || !Number.isFinite(gib) || gib < 0) throw new Error("Enter a size in GiB: 0 or more.");
+    return Math.round(gib * GIB);
+  },
+  save: async (bytes) => {
+    await putSettings({ install_cache_max_bytes: bytes });
+    await refreshCacheTable(true);
+  },
+});
+
+autosaveField(document.getElementById("setting-cache-auto-clean"), {
+  save: (on) => putSettings({ install_cache_auto_clean: on }),
 });
 
 function fmtExpiry(iso) {
@@ -1476,6 +1554,7 @@ async function refreshActiveInstalls() {
         <div class="ai-text">
           <span class="ai-name">${escapeHtml(game ? game.name : `Game ${s.game_id}`)}</span>
           <span class="muted small">${escapeHtml(state)}</span>
+          ${s.warning ? `<span class="warning small">${escapeHtml(s.warning)}</span>` : ""}
           <div class="ai-progress">${fill}</div>
         </div>
         <button type="button" class="ai-cancel" title="Cancel this install" aria-label="Cancel this install">&times;</button>
@@ -1497,9 +1576,34 @@ async function refreshActiveInstalls() {
   }
 }
 
+// A bar filled to `pct`, its gradient (green to red) laid over the whole track so the end it reaches shows how full it is.
+function fillUsageBar(bar, pct) {
+  const shown = Math.min(100, Math.max(0, pct));
+  const fill = bar.querySelector(".usage-fill");
+  fill.style.width = `${shown}%`;
+  fill.style.backgroundSize = `${shown ? 10000 / shown : 100}% 100%`;
+  bar.setAttribute("aria-valuenow", String(Math.round(shown)));
+  bar.dataset.level = shown >= 90 ? "high" : shown >= 70 ? "mid" : "low";
+}
+
+// What the installer caches take of what they may take: the limit, or the disk's free space when that is the smaller.
 function renderCacheTotal(data) {
-  const total = data.entries.reduce((sum, e) => sum + e.size_bytes, 0);
-  document.getElementById("total-cache-size").textContent = fmtBytes(total);
+  const used = data.used_bytes ?? data.entries.reduce((sum, e) => sum + e.size_bytes, 0);
+  const room = used + (data.free_bytes ?? 0);
+  const pct = room ? (used / room) * 100 : 0;
+  const text = data.free_bytes === undefined ? fmtBytes(used) : `${fmtBytes(used)} / ${fmtBytes(room)}`;
+  document.getElementById("total-cache-size").textContent = text;
+  const sidebarBar = document.getElementById("total-cache-bar");
+  sidebarBar.hidden = data.free_bytes === undefined;
+  fillUsageBar(sidebarBar, pct);
+
+  document.getElementById("cache-usage-text").textContent = text;
+  const disk = data.disk_free_bytes ?? 0;
+  const diskIsShort = data.limit_bytes && disk < data.limit_bytes - used;
+  document.getElementById("cache-usage-detail").textContent = data.limit_bytes
+    ? `Limit ${fmtBytes(data.limit_bytes)}, ${fmtBytes(data.free_bytes)} free${diskIsShort ? " (the disk is the smaller)" : ""}`
+    : `No limit, ${fmtBytes(disk)} free on the disk`;
+  fillUsageBar(document.getElementById("cache-usage-bar"), pct);
 }
 
 async function refreshCacheTotal() {
@@ -1564,7 +1668,7 @@ async function renderQueueModal() {
       : `${x.state.charAt(0).toUpperCase() + x.state.slice(1).replace(/_/g, " ")}`;
     rows.push(`
       <li data-id="${x.id}">
-        <span class="queue-name">${escapeHtml(name)}<span class="muted small"> ${escapeHtml(status)}</span></span>
+        <span class="queue-name">${escapeHtml(name)}<span class="muted small"> ${escapeHtml(status)}</span>${x.warning ? `<span class="warning small">${escapeHtml(x.warning)}</span>` : ""}</span>
         ${queued ? `<button type="button" data-move="-1" title="Start sooner" aria-label="Start sooner" ${at === 0 ? "disabled" : ""}>&#9650;</button>
         <button type="button" data-move="1" title="Start later" aria-label="Start later" ${at === queuedIds.length - 1 ? "disabled" : ""}>&#9660;</button>` : ""}
         <button type="button" class="ai-cancel" data-cancel title="Cancel this install" aria-label="Cancel this install">&times;</button>
@@ -3718,7 +3822,7 @@ function renderInstallState(session) {
   const statusEl = document.getElementById("install-status");
   statusEl.hidden = false;
   document.getElementById("install-state").textContent =
-    session.state === "queued" ? `queued (${session.queue_position ? `number ${session.queue_position}` : "waiting"} for a place)` : session.state;
+    session.state === "queued" ? `queued (${session.queue_position ? `number ${session.queue_position}` : "waiting"})` : session.state;
   const extracting = session.extract_only && session.phase === "extracting";
   document.getElementById("install-detail").textContent = extracting
     ? `Extracting ${session.phase_detail || "the archive"} as it is`
@@ -3730,6 +3834,9 @@ function renderInstallState(session) {
         : "");
   renderAutoIndicator(session);
   document.getElementById("install-error").textContent = session.error || "";
+  const warningEl = document.getElementById("install-warning");
+  warningEl.textContent = session.warning && ACTIVE_INSTALL_STATES.includes(session.state) ? session.warning : "";
+  warningEl.hidden = !warningEl.textContent;
 
   const pct = session.bytes_total ? (session.bytes_written / session.bytes_total) * 100 : 0;
   document.getElementById("install-progress").style.width = `${pct}%`;

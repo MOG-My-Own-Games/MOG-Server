@@ -79,7 +79,10 @@
             </select>
           </div>
 
-          <a href="#settings/cache" class="cache-size-link admin-only">Install cache: <span id="total-cache-size">...</span></a>
+          <a href="#settings/cache" class="cache-size-link admin-only">
+            Install cache: <span id="total-cache-size">...</span>
+            <span class="usage-bar" id="total-cache-bar" role="progressbar" aria-label="Installer cache used" aria-valuemin="0" aria-valuemax="100" hidden><span class="usage-fill"></span></span>
+          </a>
         </div>
       </aside>
       <button id="sidebar-toggle" class="sidebar-toggle" title="Collapse sidebar">&laquo;</button>
@@ -234,6 +237,7 @@
                   </div>
                   <div class="progress-bar"><div id="install-progress" class="progress-fill"></div></div>
                   <p id="install-error" class="error"></p>
+                  <p id="install-warning" class="warning" role="status" hidden></p>
                 </div>
               </div>
 
@@ -444,8 +448,6 @@
               <h3>Downloads</h3>
               <p class="muted small">Server-wide: how many files a client downloads at once. More keeps a slow or distant link busy; fewer is gentler on a weak server.</p>
               <label class="field-label">Parallel files (1 to 16)<input type="number" id="setting-download-workers" min="1" max="16" /></label>
-              <button id="save-download-workers-btn" type="button">Save</button>
-              <p id="download-workers-saved" class="muted small"></p>
             </div>
 
             <div class="card">
@@ -453,10 +455,6 @@
               <label class="field-label">Default build
                 <select id="setting-proton-default"><option value="">(server default - CachyOS Proton)</option></select>
               </label>
-              <button id="save-proton-default-btn" type="button">Save default</button>
-              <p id="proton-default-saved" class="muted small"></p>
-
-              <button id="refresh-proton-builds-btn" type="button">Refresh</button>
               <table id="proton-builds-table" class="data-table">
                 <thead><tr><th>Build</th><th>Version</th><th>Status</th><th></th></tr></thead>
                 <tbody id="proton-builds-table-body"></tbody>
@@ -466,10 +464,21 @@
 
           <div id="settings-tab-cache" class="tab-panel" hidden>
             <div class="card">
+              <h3>Installer cache size</h3>
+              <div class="usage" id="cache-usage">
+                <div class="usage-numbers"><strong id="cache-usage-text">...</strong><span id="cache-usage-detail" class="muted small"></span></div>
+                <div class="usage-bar usage-bar-big" id="cache-usage-bar" role="progressbar" aria-label="Installer cache used" aria-valuemin="0" aria-valuemax="100"><div class="usage-fill"></div></div>
+              </div>
+              <label class="field-label">Size limit in GiB (0 = unlimited)<input type="number" id="setting-cache-max-gb" min="0" step="any" /></label>
+              <p class="muted small">The installer caches may take this much together. What is free is the smaller of what is left of the limit and the free space of the disk the caches are on, so the disk always counts, with or without a limit.</p>
+              <div class="toggle-row">
+                <div><strong>Delete the oldest caches when an installer does not fit</strong><p class="muted small">Before an install starts, the oldest caches that are not in use are deleted until there is room for its installer. A cache with an install in progress is never deleted: if that is what is in the way, the install waits in the queue until it ends. An installer that could never fit is refused, and one that fits with less than 20% to spare is flagged. Off: nothing is deleted for you.</p></div>
+                <label class="switch"><input type="checkbox" id="setting-cache-auto-clean" aria-label="Delete the oldest caches when an installer does not fit" /><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="card">
               <h3>Default cache TTL</h3>
               <label class="field-label">Days (0 = unlimited)<input type="number" id="setting-cache-ttl" min="0" /></label>
-              <button id="save-cache-ttl-btn" type="button">Save</button>
-              <p id="cache-ttl-saved" class="muted small"></p>
               <p class="muted small">Saving a number of days gives every cache that never expires that expiry, counted from now. Reset on a cache starts its expiry over from the default in force at that moment (never, when it is 0).</p>
             </div>
 
@@ -563,8 +572,7 @@
 
             <p class="muted small">A provider that is switched off is not asked anything. Its saved keys stay, so switching it on again needs nothing typed in.</p>
 
-            <p class="muted small">Keys are saved as you finish typing (when you leave a field or press Enter).</p>
-            <p id="api-keys-saved" class="muted small" role="status"></p>
+            <p class="muted small">Keys are saved when you leave a field or press Enter, and checked against their provider.</p>
           </div>
 
           <div id="settings-tab-backups" class="tab-panel" hidden>
@@ -580,6 +588,11 @@
                 <div><strong>Include the saves in the daily backup</strong><p class="muted small">The saves can be large; each daily backup would hold a copy. Off by default. A backup before an update holds the database alone.</p></div>
                 <label class="switch"><input type="checkbox" id="setting-backup-saves" aria-label="Include the saves in the daily backup" /><span class="slider"></span></label>
               </div>
+            </div>
+            <div class="card">
+              <h3>Save sync</h3>
+              <p class="muted small">How many saves of a game the server keeps for each device (1 to 20). When a new one comes in, the oldest beyond this number is deleted. A lower number frees room on the next save of each game, not at once.</p>
+              <label class="field-label">Saves per device (1 to 20)<input type="number" id="setting-saves-keep" min="1" max="20" /></label>
             </div>
             <div class="card">
               <h3>Back up now</h3>

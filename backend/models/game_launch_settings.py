@@ -1,5 +1,5 @@
 """How a game is launched, kept on the server so every device of a game starts it the same way: the Proton build, the
-Wine settings winecfg changed, the winetricks entries kept for its prefix and the arguments (as tags) the executable starts with. One row per game and device; a row with no
+Wine settings winecfg changed, the winetricks entries kept for its prefix, the arguments (as tags) the executable starts with and which executable that is. One row per game and device; a row with no
 device holds the settings for all of them."""
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ from models.base import BaseModel
 from utils.database import CustomJSON
 
 PROTON_MAX_LENGTH = 200
+EXECUTABLE_MAX_LENGTH = 500
 # Registry export of what winecfg changed; larger than any real one by a wide margin.
 WINECFG_REG_MAX_LENGTH = 64 * 1024
 # A winetricks entry is a verb (vcrun2019, dotnet48, d3dx9_43) or a setting with a value (renderer=gdi, vd=1280x1024). The clients
@@ -58,3 +59,6 @@ class GameLaunchSettings(BaseModel):
     winetricks: Mapped[list[Any] | None] = mapped_column(CustomJSON(), default=None)
     # Put after the game's executable when it starts, as tags (["-savetouserdir", "-res 1280 720"]); None: none were set.
     launch_args: Mapped[list[Any] | None] = mapped_column(CustomJSON(), default=None)
+    # The executable the game starts, as a path from the folder of the game's own files with "/" (a path from the install
+    # differs between devices): a new install of the game already knows which one to offer.
+    executable: Mapped[str | None] = mapped_column(String(length=EXECUTABLE_MAX_LENGTH), default=None)

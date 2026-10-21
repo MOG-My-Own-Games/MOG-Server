@@ -51,6 +51,7 @@ async def get_launch_settings(
                 winecfg_reg=by_device[d.id].winecfg_reg,
                 winetricks=by_device[d.id].winetricks,
                 launch_args=by_device[d.id].launch_args,
+                executable=by_device[d.id].executable,
                 updated_at=by_device[d.id].updated_at,
             )
             for d in db_device_handler.get_for_user(user.id)
@@ -63,14 +64,14 @@ async def get_launch_settings(
 async def put_launch_settings(
     user: CurrentUser, id: Annotated[int, Path(ge=1)], form: LaunchSettingsForm
 ) -> LaunchSettingsSchema:
-    """Set the Proton build, the winecfg changes, the winetricks entries and the launch arguments (tags) of a game, for one device or for all of them."""
+    """Set the Proton build, the winecfg changes, the winetricks entries, the launch arguments (tags) and the executable of a game, for one device or for all of them."""
     _visible_game(user, id)
     target = None
     if form.scope == "device":
         target = _own_device(user, form.device_id).id  # type: ignore[arg-type]
     else:
         _admin_for_shared(user)
-    changes = form.model_dump(exclude_unset=True, include={"proton", "winecfg_reg", "winetricks", "launch_args"})
+    changes = form.model_dump(exclude_unset=True, include={"proton", "winecfg_reg", "winetricks", "launch_args", "executable"})
     log.debug(f"Launch settings: game {id} {form.scope} {target}, changing {sorted(changes)} for user {user.id}")
     patching = form.launch_args_add is not None or form.launch_args_remove is not None
     patch = (form.launch_args_add, form.launch_args_remove) if patching else None

@@ -440,8 +440,8 @@ starts it the same way. They belong to the game, not to a user.
 
 | Call | What it does |
 | --- | --- |
-| `GET /api/games/{id}/launch-settings?device_id=N` | `{shared, device, devices}`: the settings for all devices, the ones for device `N` (`device_id` is optional), and the ones of each of the user's devices that has any (`[{device, proton, winecfg_reg, winetricks, launch_args, updated_at}]`, for a web page like the server's Settings tab). Each of the first two is `null` or `{proton, winecfg_reg, winetricks, launch_args, updated_at}`. |
-| `PUT /api/games/{id}/launch-settings` | Body `{scope: "device" \| "all", device_id, proton, winecfg_reg, winetricks, launch_args, launch_args_add, launch_args_remove}`. `device_id` is required for the `device` scope and must be one of the user's devices. Only the fields sent change; `null` clears one. The `all` scope is for an admin: another user gets `403`, and sets the same things for their own devices. |
+| `GET /api/games/{id}/launch-settings?device_id=N` | `{shared, device, devices}`: the settings for all devices, the ones for device `N` (`device_id` is optional), and the ones of each of the user's devices that has any (`[{device, proton, winecfg_reg, winetricks, launch_args, executable, updated_at}]`, for a web page like the server's Settings tab). Each of the first two is `null` or `{proton, winecfg_reg, winetricks, launch_args, executable, updated_at}`. |
+| `PUT /api/games/{id}/launch-settings` | Body `{scope: "device" \| "all", device_id, proton, winecfg_reg, winetricks, launch_args, launch_args_add, launch_args_remove, executable}`. `device_id` is required for the `device` scope and must be one of the user's devices. Only the fields sent change; `null` clears one. The `all` scope is for an admin: another user gets `403`, and sets the same things for their own devices. |
 | `DELETE /api/games/{id}/launch-settings?scope=device\|all&device_id=N` | Remove one scope's settings (`scope=all` is for an admin, `403` otherwise). |
 
 - `proton` is the **name** of a build (`GE-Proton9-1`), never a path, up to 200 characters: paths differ between devices.
@@ -466,6 +466,11 @@ starts it the same way. They belong to the game, not to a user.
   merged: `PUT` takes `launch_args` to replace the list, or `launch_args_add` and `launch_args_remove` (lists of tags, not with
   `launch_args`) to change the list the server holds by now, so a tag one editor put in is not lost when another edits.
   A client keeps the tags it last agreed on with the server and merges its list, the server's and that one by tag.
+- `executable` is the executable the game starts, as a path **from the folder of the game's own files**, with `/` (a path from
+  the install differs between devices, and a game that came with no folder of its own is put in one by the client): `bin/Game.exe`.
+  A path that starts with `/`, has a `\`, an empty part, `.` or `..` is refused with `422`. A client sets it when the person
+  chooses the executable and offers it, ready chosen, the next time the game is installed (here or on another device), when
+  that file is there. A device uses its own entry when it has one, else the shared one.
 - Any signed-in user who can see the game can change the shared entry.
 - Settings can be deleted (the server's Settings tab of a game has a Delete button for each entry). A client that took
   or sent settings for a game and then finds `shared` and `device` both `null` should treat that as deleted and go back to

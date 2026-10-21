@@ -243,3 +243,19 @@ def test_only_an_admin_sets_what_all_devices_share(api):
     assert api.put("/api/games/5/launch-settings", json={"scope": "all", "launch_args": ["-x"]}).status_code == 403
     assert api.delete("/api/games/5/launch-settings", params={"scope": "all"}).status_code == 403
     assert api.put("/api/games/5/launch-settings", json={"scope": "device", "device_id": device, "launch_args": ["-x"]}).status_code == 200
+
+
+def test_the_executable_is_kept_as_a_path_from_the_games_folder_and_may_not_leave_it(api):
+    device = _device(api)
+
+    kept = api.put("/api/games/5/launch-settings", json={"scope": "device", "device_id": device, "executable": "bin/Game.exe"})
+    assert kept.status_code == 200 and kept.json()["executable"] == "bin/Game.exe"
+    got = api.get("/api/games/5/launch-settings", params={"device_id": device}).json()
+    assert got["device"]["executable"] == "bin/Game.exe" and got["devices"][0]["executable"] == "bin/Game.exe"
+
+    for bad in ("/usr/bin/x", "../x.exe", "a/../../x.exe", "a\\b.exe", "a//b.exe", " ", "./x.exe"):
+        refused = api.put("/api/games/5/launch-settings", json={"scope": "all", "executable": bad})
+        assert refused.status_code == 422, bad
+
+    api.put("/api/games/5/launch-settings", json={"scope": "device", "device_id": device, "executable": None})
+    assert api.get("/api/games/5/launch-settings", params={"device_id": device}).json()["device"]["executable"] is None

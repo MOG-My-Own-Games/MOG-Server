@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from endpoints.responses.save import DeviceSchema, UtcDatetime
 from utils.launch_args import LAUNCH_MAX_TAGS, is_tag
 from models.game_launch_settings import (
+    EXECUTABLE_MAX_LENGTH,
     PROTON_MAX_LENGTH,
     WINECFG_REG_MAX_LENGTH,
     WINETRICKS_MAX_VERBS,
@@ -22,6 +23,7 @@ class LaunchSettingsSchema(BaseModel):
     winecfg_reg: str | None
     winetricks: list[str] | None
     launch_args: list[str] | None
+    executable: str | None
     updated_at: UtcDatetime
 
 
@@ -51,6 +53,18 @@ class LaunchSettingsForm(BaseModel):
     launch_args: list[str] | None = Field(default=None, max_length=LAUNCH_MAX_TAGS)
     launch_args_add: list[str] | None = Field(default=None, max_length=LAUNCH_MAX_TAGS)
     launch_args_remove: list[str] | None = Field(default=None, max_length=LAUNCH_MAX_TAGS)
+    # The executable, as a path from the folder of the game's files, with "/".
+    executable: str | None = Field(default=None, max_length=EXECUTABLE_MAX_LENGTH)
+
+    @field_validator("executable")
+    @classmethod
+    def _executable_stays_inside(cls, path: str | None) -> str | None:
+        if path is None:
+            return None
+        parts = path.split("/")
+        if not path.strip() or "\\" in path or "\0" in path or path.startswith("/") or any(p in ("", ".", "..") for p in parts):
+            raise ValueError("the executable is a path from the game's folder: with '/', no '..', and not starting with '/'")
+        return path
 
     @field_validator("launch_args", "launch_args_add", "launch_args_remove")
     @classmethod

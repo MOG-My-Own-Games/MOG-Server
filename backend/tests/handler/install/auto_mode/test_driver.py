@@ -1,6 +1,8 @@
 from handler.install.auto_mode.catalog import load_catalog
 from handler.install.auto_mode.driver import AutoModeDriver
+from handler.install.auto_mode.capture import region_changed
 from handler.install.auto_mode.matcher import Word
+from PIL import Image, ImageDraw
 
 
 def _word(text: str, line: int, left: int = 0) -> Word:
@@ -180,3 +182,63 @@ def test_the_word_close_in_a_sentence_does_not_stop_the_closer_passes():
     assert _needs_deep_pass(sentence, catalog) is True
     eula = [_caption("Save as .txt", 0), _caption("Close", 1)]
     assert _needs_deep_pass(eula, catalog) is False
+
+
+class TestTickedCheckbox:
+    """Regression test (Rage of Mages II, GOG): a ticked box reads the same as an empty one, so the screen looked unchanged
+    and the accept checkbox was clicked again, which undid it. Install then opened the EULA window, and the answers to that
+    went wrong for 300 actions, until the auto mode gave up."""
+
+    CAPTION = [_word("Yes, I have read and accept EULA", 0, left=100)]
+    INSTALL = [_word("Install", 0, left=500)]
+
+    def _run(self, pages, took):
+        shown = iter(pages)
+        acted: list[str] = []
+
+        def act(action):
+            acted.append(action.match.text)
+            return took
+
+        driver = AutoModeDriver(
+            catalog=load_catalog(),
+            observe=lambda: next(shown),
+            act=act,
+            enabled=lambda: True,
+            progress=lambda: 0,
+            report=lambda status, detail: None,
+        )
+        for _ in pages:
+            driver.tick()
+        return acted
+
+    def test_a_tick_that_took_is_not_clicked_again(self):
+        assert self._run([self.CAPTION, self.CAPTION], took=True) == ["Yes, I have read and accept EULA"]
+
+    def test_a_click_that_changed_nothing_is_tried_again(self):
+        assert len(self._run([self.CAPTION, self.CAPTION], took=False)) == 2
+
+    def test_a_tick_is_kept_when_the_page_is_read_differently_in_between(self):
+        other = [_word("Welcome to the setup", 0), _word("Options", 1), _word("Cancel", 2), _word("Help", 3)]
+        assert self._run([self.CAPTION, other, self.CAPTION], took=True) == ["Yes, I have read and accept EULA"]
+
+    def test_the_next_page_gets_its_own_tick(self):
+        acted = self._run([self.CAPTION, self.INSTALL, self.CAPTION], took=True)
+        assert acted == ["Yes, I have read and accept EULA", "Install", "Yes, I have read and accept EULA"]
+
+
+class TestRegionChanged:
+    def _box(self, ticked: bool) -> Image.Image:
+        image = Image.new("RGB", (40, 20), "white")
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((10, 4, 22, 16), outline="black")
+        if ticked:
+            draw.line((12, 10, 15, 14), fill="black", width=2)
+            draw.line((15, 14, 21, 6), fill="black", width=2)
+        return image
+
+    def test_a_tick_is_a_change(self):
+        assert region_changed(self._box(False), self._box(True))
+
+    def test_the_same_pixels_are_no_change(self):
+        assert not region_changed(self._box(True), self._box(True))

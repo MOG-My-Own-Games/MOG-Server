@@ -7,7 +7,7 @@ import os
 import subprocess
 import time
 
-from PIL import Image, ImageGrab
+from PIL import Image, ImageChops, ImageGrab
 
 from logger.logger import log
 
@@ -53,6 +53,23 @@ def grab_screen(display: str) -> Image.Image | None:
         return None
     _capture_failing = False
     return image
+
+
+# A click that changed fewer pixels than this, by this much, left the area as it was (hover shading, a blinking caret).
+CHANGE_PIXEL_DELTA = 40
+CHANGE_MIN_PIXELS = 6
+TOGGLE_SETTLE = 0.4
+
+
+def region_changed(before: Image.Image, after: Image.Image) -> bool:
+    """Whether two grabs of the same region differ by more than noise."""
+    diff = ImageChops.difference(before.convert("L"), after.convert("L")).point(lambda v: 255 if v > CHANGE_PIXEL_DELTA else 0)
+    return diff.histogram()[255] >= CHANGE_MIN_PIXELS
+
+
+def grab_region(display: str, box: tuple[int, int, int, int]) -> Image.Image | None:
+    screen = grab_screen(display)
+    return screen.crop(box) if screen is not None else None
 
 
 def active_window_rect(display: str) -> tuple[int, int, int, int] | None:

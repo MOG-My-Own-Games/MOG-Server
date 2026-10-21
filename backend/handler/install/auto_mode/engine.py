@@ -148,6 +148,10 @@ def plan_action(
             continue
         if m.entry.category == "agree" and not agree_allowed:
             continue
+        # The "Yes" of "Yes, I have read and accept the EULA" is the first word of a checkbox caption there, no button: its
+        # Return reaches the wizard behind, which opens the EULA again while it is open ("Cannot make a visible window modal").
+        if close_allowed and m.entry.category == "agree" and not m.entry.toggle:
+            continue
         if m.entry.late and not (installing or complete_page):
             continue
         # Nothing is left to install there: an "Install" read on that page is a garbled Uninstall, which rolls the install back.

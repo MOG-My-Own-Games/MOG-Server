@@ -18,7 +18,16 @@ from PIL import Image
 from config import INSTALL_AUTO_STUCK_SECONDS
 from logger.logger import log
 
-from .capture import active_window_box, active_window_rect, click, grab_screen, press_key
+from .capture import (
+    TOGGLE_SETTLE,
+    active_window_box,
+    active_window_rect,
+    click,
+    grab_region,
+    grab_screen,
+    press_key,
+    region_changed,
+)
 from .catalog import Catalog
 from .engine import (
     MAX_ATTEMPTS_PER_BUTTON,
@@ -57,7 +66,8 @@ STUCK_DETAIL_MAX = 900
 class AutoModeDriver:
     catalog: Catalog
     observe: Callable[[], list[Word] | None]
-    act: Callable[[Action], None]
+    # True when a checkbox click visibly changed the checkbox, None when that is not known.
+    act: Callable[[Action], bool | None]
     enabled: Callable[[], bool]
     progress: Callable[[], int]
     report: Callable[[str | None, str | None], None]
@@ -70,6 +80,7 @@ class AutoModeDriver:
     _last_action_at: float = 0.0
     _logged_lines: frozenset[str] = frozenset()
     _last_progress: int = -1
+    _ticked: set[str] = field(default_factory=set)
     _status: str | None = None
     _detail: str | None = None
 
@@ -94,7 +105,9 @@ class AutoModeDriver:
 
         lines = frozenset(screen_lines(words))
         if lines and not same_screen(lines, self.memory.lines):
-            self.memory = ScreenMemory(lines=lines)
+            # A tick shows in no text, and the same caption can be read again on a page that looks new to the OCR: clicking
+            # it again would undo it.
+            self.memory = ScreenMemory(lines=lines, attempts=dict.fromkeys(self._ticked, MAX_ATTEMPTS_PER_BUTTON))
             self._idle_since = now
         progress = self.progress()
         if progress != self._last_progress:
@@ -114,7 +127,13 @@ class AutoModeDriver:
             self.memory.attempts[action.memory_key] = self.memory.attempts.get(action.memory_key, 0) + 1
             self.actions_done += 1
             log.info(f"Install auto mode: {action.describe()}")
-            self.act(action)
+            took = self.act(action)
+            if action.kind == "click" and action.match.entry.toggle:
+                if took:
+                    self.memory.attempts[action.memory_key] = MAX_ATTEMPTS_PER_BUTTON
+                    self._ticked.add(action.memory_key)
+            else:
+                self._ticked.clear()  # past that page
             self._last_action_at = now
             self._idle_since = now
             self._set(STATUS_RUNNING, action.describe())
@@ -273,11 +292,29 @@ def make_x11_observer(display: str, catalog: Catalog) -> Callable[[], list[Word]
     return observe
 
 
-def make_x11_actor(display: str) -> Callable[[Action], None]:
-    def act(action: Action) -> None:
+def _glyph_box(match: Match) -> tuple[int, int, int, int]:
+    """The checkbox or radio glyph, left of its caption, with the start of the caption."""
+    pad = max(match.height, 8)
+    return (
+        max(0, match.left - 2 * pad),
+        max(0, match.top - pad // 2),
+        match.left + pad,
+        match.top + match.height + pad // 2,
+    )
+
+
+def make_x11_actor(display: str) -> Callable[[Action], bool | None]:
+    def act(action: Action) -> bool | None:
         if action.kind == "key" and action.key:
             press_key(display, action.key, action.alt)
-        else:
-            click(display, action.x, action.y)
+            return None
+        box = _glyph_box(action.match) if action.match.entry.toggle else None
+        before = grab_region(display, box) if box else None
+        click(display, action.x, action.y)
+        if before is None:
+            return None
+        time.sleep(TOGGLE_SETTLE)
+        after = grab_region(display, box)
+        return None if after is None else region_changed(before, after)
 
     return act

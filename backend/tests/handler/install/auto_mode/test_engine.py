@@ -150,6 +150,15 @@ class TestOldGogEulaPage:
             memory.attempts[action.memory_key] = memory.attempts.get(action.memory_key, 0) + 1
         assert steps == ["agree", "close"]
 
+    def test_the_yes_of_the_accept_caption_is_no_button(self):
+        """Regression test (Rage of Mages II, GOG): the dialog's caption "Yes, I have read and accept the EULA" is read as a
+        bare "Yes" too, and Return on it reached the wizard behind, which opened the EULA again while it was open (Inno:
+        "Cannot make a visible window modal"). On this page the way forward is the checkbox, then Close."""
+        words = [_word("EULA for the game", line=0), _word("Yes", line=1), _word("Save as .txt", line=2), _word("Close", line=3)]
+        action, _ = plan_action(words, CATALOG, ScreenMemory())
+        assert action is not None
+        assert action.match.entry.category == "close"
+
     def test_close_is_ignored_without_save_as_txt(self):
         action, _ = plan_action([_word("Setup is complete", line=0), _word("Close", line=1)], CATALOG, ScreenMemory())
         assert action is None

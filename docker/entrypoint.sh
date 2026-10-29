@@ -16,6 +16,17 @@ if [ "$(id -u)" = "0" ]; then
     # volume that refuses chown (mergerfs, NFS, rootless Docker) must not stop the boot with set -e.
     find /mog /opt/proton -xdev \( ! -user mog -o ! -group mog \) -exec chown mog:mog {} + ||
         echo "entrypoint: could not change the owner of everything in /mog and /opt/proton, going on" >&2
+    # The install caches made while the server still ran as root (the cache is a volume, which -xdev above leaves alone): the
+    # server could not delete them, so expired ones stayed and a deleted one stayed on disk. Only a session's own folder that is
+    # not the server's is walked, so the next starts pay nothing and a huge cache is never scanned.
+    if [ -d /mog/cache/installs ]; then
+        for dir in /mog/cache/installs/*/; do
+            [ -d "$dir" ] || continue
+            [ "$(stat -c %U "$dir")" = "mog" ] ||
+                chown -R mog:mog "$dir" ||
+                echo "entrypoint: could not change the owner of $dir, going on" >&2
+        done
+    fi
     # The backup volume, when one is mounted (Docker creates the host directory root-owned): only the folder itself, as it may
     # hold many files. Nothing is created here without a volume: backups would land in the container and be lost with it.
     if grep -q " /backups " /proc/mounts; then

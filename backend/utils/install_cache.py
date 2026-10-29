@@ -1,7 +1,10 @@
 # Adapted from RomM (https://github.com/rommapp/romm), AGPL-3.0-or-later.
 from __future__ import annotations
 
+import os
 import shutil
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -10,6 +13,10 @@ from logger.formatter import highlight as hl
 from logger.logger import log
 
 SECONDS_PER_DAY = 86400
+# How often the expired caches are looked for. The TTL is in days, so an hour late is nothing.
+CLEANUP_EVERY = 3600.0
+# A folder of the cache with no session is a leftover; one this young may still be being made.
+ORPHAN_GRACE = SECONDS_PER_DAY
 
 # TTL sentinels for the API surface. A positive value is seconds-from-now,
 # ``UNLIMITED_TTL`` maps to a NULL ``expires_at`` (never auto-evicted).
@@ -62,13 +69,33 @@ def ensure_session_cache_dir(session_id: int) -> Path:
     return path
 
 
+def cache_left(session_id: int) -> bool:
+    """Whether the session's cache is still on disk, which is what a clear that could not remove everything leaves."""
+    return session_cache_dir(session_id).exists()
+
+
+def _first_left(path: Path) -> str:
+    """What a failed removal left, for the log: the first file or folder still there and who owns it."""
+    for found in path.rglob("*"):
+        try:
+            return f"{found} is owned by uid {found.lstat().st_uid} and the server runs as uid {os.getuid()}"
+        except OSError:
+            continue
+    return f"{path} itself could not be removed"
+
+
 def clear_session_cache(session_id: int) -> bool:
-    """Remove a session's cached files. Returns True if anything was removed."""
+    """Remove a session's cached files. Returns True if there was a cache to remove. Files this process may not delete (an
+    install made while the server ran as root) stay; that is logged and `cache_left` tells, so a caller never forgets
+    a cache that is still on disk."""
     path = session_cache_dir(session_id)
     if not path.exists():
         return False
     shutil.rmtree(path, ignore_errors=True)
-    log.info(f"Cleared install cache for session {hl(str(session_id))}")
+    if path.exists():
+        log.warning(f"Could not remove all of the install cache of session {hl(str(session_id))}: {_first_left(path)}")
+    else:
+        log.info(f"Cleared install cache for session {hl(str(session_id))}")
     return True
 
 
@@ -124,6 +151,8 @@ def purge_superseded_sessions(
         if only_states is not None and old.state not in only_states:
             continue
         clear_session_cache(old.id)
+        if cache_left(old.id):
+            continue  # forgetting the session would leave its files behind with no name
         db_install_session_handler.delete_session(old.id)
         removed += 1
     return removed
@@ -138,11 +167,62 @@ def cleanup_expired_installs() -> int:
     from handler.database import db_install_session_handler
     from models.install_session import InstallSessionState
 
-    expired = db_install_session_handler.get_expired_sessions()
-    for session in expired:
+    cleaned = 0
+    for session in db_install_session_handler.get_expired_sessions():
         clear_session_cache(session.id)
+        if cache_left(session.id):
+            continue  # not expired as far as the disk goes: tried again at the next look
         db_install_session_handler.update_session(session.id, {"state": InstallSessionState.EXPIRED})
+        cleaned += 1
 
-    if expired:
-        log.info(f"Evicted {hl(str(len(expired)))} expired install caches")
-    return len(expired)
+    if cleaned:
+        log.info(f"Evicted {hl(str(cleaned))} expired install caches")
+    return cleaned
+
+
+def remove_orphan_caches(grace: float = ORPHAN_GRACE) -> int:
+    """Delete the cache folders no session owns (the "?" rows of the cache list): what is left when a session was forgotten
+    but its files could not be removed. Returns how many are gone."""
+    from handler.database import db_install_session_handler
+
+    removed = 0
+    for path in cache_root_dirs():
+        try:
+            session_id = int(path.name)
+            if time.time() - path.stat().st_mtime < grace:
+                continue
+        except (ValueError, OSError):
+            continue
+        if db_install_session_handler.get_session(session_id) is not None:
+            continue
+        clear_session_cache(session_id)
+        if not cache_left(session_id):
+            removed += 1
+    if removed:
+        log.info(f"Removed {hl(str(removed))} install cache folders no session owned")
+    return removed
+
+
+def sweep_install_cache() -> int:
+    """One look at the caches: the expired ones and the ones nobody owns go. Returns how many folders were freed."""
+    return cleanup_expired_installs() + remove_orphan_caches()
+
+
+def _run_cleanup(stop: threading.Event) -> None:
+    from handler.install.runner import dispatch_queue
+
+    while True:
+        try:
+            if sweep_install_cache():
+                dispatch_queue()  # an install may have been waiting for the room
+        except Exception as e:  # noqa: BLE001 - the thread must outlive a failed look
+            log.error(f"Cleaning the install cache failed: {e}")
+        if stop.wait(CLEANUP_EVERY):
+            return
+
+
+def start_cleanup() -> threading.Event:
+    """Look for expired caches at start and then every hour (nothing else evicts them)."""
+    stop = threading.Event()
+    threading.Thread(target=_run_cleanup, args=(stop,), daemon=True, name="install-cache-cleanup").start()
+    return stop

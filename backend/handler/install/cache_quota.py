@@ -19,7 +19,7 @@ from handler.install.archive_prescan import is_archive_candidate
 from handler.install.copy_step import is_copy_step
 from logger.logger import log
 from models.install_session import ACTIVE_INSTALL_STATES, InstallSession, InstallSessionState
-from utils.install_cache import cache_root_dirs, clear_session_cache, dir_size_bytes
+from utils.install_cache import cache_left, cache_root_dirs, clear_session_cache, dir_size_bytes
 
 # An installer needs its own size and then some: the install is usually a bit bigger, so a fit this tight is flagged.
 HEADROOM = 0.2
@@ -167,6 +167,8 @@ def _evict(victims: list[Cache]) -> int:
         if cache.session_id is None:
             continue
         clear_session_cache(cache.session_id)
+        if cache_left(cache.session_id):
+            continue  # nothing was freed, and it is not expired as far as the disk goes
         if db_install_session_handler.get_session(cache.session_id) is not None:
             db_install_session_handler.update_session(cache.session_id, {"state": InstallSessionState.EXPIRED})
         freed += cache.size

@@ -77,3 +77,35 @@ def test_a_cache_in_use_is_still_refused(monkeypatch):
     with pytest.raises(HTTPException) as err:
         asyncio.run(install.clear_install(SimpleNamespace(id=1), 5))
     assert err.value.status_code == 409
+
+
+# --- a cache the server cannot remove -----------------------------------------------------------------
+
+
+def test_deleting_a_cache_that_stays_on_disk_is_an_error_and_the_session_is_kept(monkeypatch):
+    """The Delete of the Settings list answered 204 for a cache of root's files it could not remove, and forgot the session:
+    the row came back as a "?" that could never be deleted."""
+    deleted = []
+    monkeypatch.setattr(install.db_install_session_handler, "get_session", lambda session_id: SimpleNamespace(state="done"))
+    monkeypatch.setattr(install.db_install_session_handler, "delete_session", deleted.append)
+    monkeypatch.setattr(install, "clear_session_cache", lambda session_id: True)
+    monkeypatch.setattr(install, "cache_left", lambda session_id: True)
+
+    with pytest.raises(HTTPException) as err:
+        asyncio.run(install.clear_one_install_cache(SimpleNamespace(), 68))
+
+    assert err.value.status_code == 500 and deleted == []
+
+
+def test_clearing_every_cache_leaves_the_ones_that_stay_and_does_not_count_them(monkeypatch, tmp_path):
+    deleted = []
+    folders = [tmp_path / "1", tmp_path / "2"]
+    monkeypatch.setattr(install, "cache_root_dirs", lambda: folders)
+    monkeypatch.setattr(install.db_install_session_handler, "get_session", lambda session_id: SimpleNamespace(state="done"))
+    monkeypatch.setattr(install.db_install_session_handler, "delete_session", deleted.append)
+    monkeypatch.setattr(install, "clear_session_cache", lambda session_id: True)
+    monkeypatch.setattr(install, "cache_left", lambda session_id: session_id == 1)
+    monkeypatch.setattr(install, "dispatch_queue", lambda: 0)
+
+    assert asyncio.run(install.clear_all_install_cache(SimpleNamespace())).cleared == 1
+    assert deleted == [2]

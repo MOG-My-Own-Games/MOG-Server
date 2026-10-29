@@ -14,6 +14,7 @@ from endpoints import about, addons, devices, games, install, launch_settings, l
 from handler import backups, library_watcher, scrape_handler
 from handler.metadata import ludusavi_handler
 from logger.logger import log
+from utils import install_cache
 from startup import run_startup_tasks
 
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
@@ -25,6 +26,7 @@ async def lifespan(app: FastAPI):
     stop_watching = library_watcher.start()
     stop_ludusavi = ludusavi_handler.start()
     stop_backups = backups.start()
+    stop_cache_cleanup = install_cache.start_cleanup()
     scrape_handler.warm_all_videos()
     log.info("MOG Server started")
     yield
@@ -33,6 +35,7 @@ async def lifespan(app: FastAPI):
     if stop_ludusavi is not None:
         stop_ludusavi.set()
     stop_backups.set()
+    stop_cache_cleanup.set()
 
 
 app = FastAPI(title="MOG Server", version=MOG_VERSION, lifespan=lifespan)

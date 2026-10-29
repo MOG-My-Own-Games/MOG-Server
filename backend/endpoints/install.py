@@ -83,6 +83,7 @@ from logger.logger import log
 from models.install_session import ACTIVE_INSTALL_STATES, RUNNING_INSTALL_STATES, InstallSession, InstallSessionState
 from utils.install_cache import (
     cache_root_dirs,
+    cache_left,
     clear_session_cache,
     dir_size_bytes,
     purge_superseded_sessions,
@@ -456,6 +457,16 @@ async def cancel_install(
     return _session_schema(updated)
 
 
+def _require_cache_gone(session_id: int) -> None:
+    """A delete that left files behind is no success: forgetting the session then would leave them on disk as a "?" row that
+    nothing can name. The server only fails to remove what another user owns (a cache made while it ran as root)."""
+    if cache_left(session_id):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not remove all of the cache's files: they belong to another user. Restart the server, which gives them to its own, and delete again.",
+        )
+
+
 @router.delete("/{id}/install")
 async def clear_install(
     user: CurrentUser, id: Annotated[int, PathVar(ge=1)], session_id: int | None = None
@@ -468,6 +479,7 @@ async def clear_install(
     if session.state in RUNNING_INSTALL_STATES:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Install is still running")
     clear_session_cache(session.id)
+    _require_cache_gone(session.id)
     db_install_session_handler.delete_session(session.id)
     await asyncio.to_thread(dispatch_queue)  # an install may have been waiting for the room
     return InstallCacheClearSchema(cleared=1)
@@ -747,6 +759,8 @@ async def clear_all_install_cache(user: AdminUser) -> InstallCacheClearSchema:
         if session is not None and session.state in RUNNING_INSTALL_STATES:
             continue
         clear_session_cache(session_id)
+        if cache_left(session_id):
+            continue  # kept, with its session, so it can be seen and tried again
         if session is not None:
             db_install_session_handler.delete_session(session_id)
         cleared += 1
@@ -787,6 +801,7 @@ async def clear_one_install_cache(user: AdminUser, session_id: Annotated[int, Pa
     if session is not None and session.state in RUNNING_INSTALL_STATES:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Install is still running")
     clear_session_cache(session_id)
+    _require_cache_gone(session_id)
     if session is not None:
         db_install_session_handler.delete_session(session_id)
     await asyncio.to_thread(dispatch_queue)  # an install may have been waiting for the room

@@ -136,6 +136,14 @@ space of the disk. `runner.start_or_queue` and `dispatch_queue` call `cache_quot
 room (never from an install in progress), raises `Wait` (the session is queued with a `warning`) or `CacheTooSmall` (the start
 endpoint answers `507`). Anything that frees cache space calls `dispatch_queue` so a waiting install can go.
 
+## Expired install caches
+
+`utils/install_cache.start_cleanup` (started in `main.py`'s lifespan) looks at start and every hour: `cleanup_expired_installs`
+removes the caches whose TTL has passed (state `expired`) and `remove_orphan_caches` the folders no session owns (a day old at
+least). `clear_session_cache` never hides a failed removal: it logs it, and callers check `cache_left` before forgetting the
+session (otherwise the files stay as a "?" row). The server runs as `mog`; `docker/entrypoint.sh` gives the cache folders that
+an older run as root made to `mog` at start.
+
 ## Logging
 
 `LOGLEVEL` sets the level at start (`INFO` by default; the dev compose file sets `DEBUG`). The "Debug logging"

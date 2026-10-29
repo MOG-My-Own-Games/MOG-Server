@@ -1928,18 +1928,20 @@ function groupGames(list) {
   const out = [];
   for (const game of list) {
     if (!game.igdb_id) {
-      out.push({ game, versions: 1, lastPlayed: game.last_played || null });
+      out.push({ game, versions: 1, lastPlayed: game.last_played || null, added: game.created_at || null });
       continue;
     }
     let entry = groups.get(game.igdb_id);
     if (!entry) {
-      entry = { game, versions: 0, lastPlayed: null };
+      entry = { game, versions: 0, lastPlayed: null, added: null };
       groups.set(game.igdb_id, entry);
       out.push(entry);
     } else if (entry.game.missing_from_fs && !game.missing_from_fs) {
       entry.game = game;
     }
     if (game.last_played && (!entry.lastPlayed || game.last_played > entry.lastPlayed)) entry.lastPlayed = game.last_played;
+    // A title was added when its first version was.
+    if (game.created_at && (!entry.added || Date.parse(game.created_at) < Date.parse(entry.added))) entry.added = game.created_at;
     entry.versions += 1;
   }
   return out;
@@ -1962,11 +1964,19 @@ const SORT_ORDERS = {
   za: (a, b) => b.game.name.localeCompare(a.game.name),
   largest: (a, b) => sizeOf(b, -Infinity) - sizeOf(a, -Infinity) || a.game.name.localeCompare(b.game.name),
   smallest: (a, b) => sizeOf(a, Infinity) - sizeOf(b, Infinity) || a.game.name.localeCompare(b.game.name),
+  added: (a, b) => addedOf(b, -Infinity) - addedOf(a, -Infinity) || a.game.name.localeCompare(b.game.name),
+  added_old: (a, b) => addedOf(a, Infinity) - addedOf(b, Infinity) || a.game.name.localeCompare(b.game.name),
 };
 const DEFAULT_SORT_ORDER = "newest";
 
 function releaseOf(entry, missing = -Infinity) {
   return ((entry.game.igdb_metadata || {}).first_release_date ?? missing);
+}
+
+// When the server first saw the title; one that has no date goes after the rest, whichever way the dates run.
+function addedOf(entry, missing) {
+  const time = entry.added ? Date.parse(entry.added) : NaN;
+  return Number.isNaN(time) ? missing : time;
 }
 
 // A game not measured yet goes after the rest, whichever way the sizes run.
@@ -2007,7 +2017,7 @@ function sortEntries(entries) {
 function gridEntries() {
   const entries = groupGamesEnabled()
     ? groupGames(games)
-    : games.map((game) => ({ game, versions: 1, lastPlayed: game.last_played || null }));
+    : games.map((game) => ({ game, versions: 1, lastPlayed: game.last_played || null, added: game.created_at || null }));
   return sortEntries(entries);
 }
 

@@ -41,6 +41,8 @@ class GameSchema(BaseModel):
     last_played: datetime | None = None
     # The name of the machine that made that version, so where the game was last played.
     last_played_on: str | None = None
+    # How long this user has played the game, in seconds, from the sessions their clients reported (0 when none).
+    playtime_seconds: int = 0
 
     @computed_field  # type: ignore[prop-decorator]
     @property

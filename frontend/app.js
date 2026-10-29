@@ -2460,13 +2460,24 @@ function suggestWinetricksValues() {
   });
 })();
 
-// "Last played: 8 Oct 2026, 01:40 on karasu": the newest saved version, and the machine that made it. Nothing for a game never played.
+// "Played 3h 20m · Last played: 8 Oct 2026, 01:40 on karasu": the time this user played the game (what their clients reported),
+// and the newest saved version with the machine that made it. Nothing for a game never played.
+function formatPlayed(seconds) {
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 1) return "less than a minute";
+  return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
 function renderLastPlayed(game) {
   const line = document.getElementById("game-last-played");
-  line.hidden = !game.last_played;
-  if (!game.last_played) return;
-  const when = new Date(game.last_played).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
-  line.textContent = `Last played: ${when}` + (game.last_played_on ? ` on ${game.last_played_on}` : "");
+  const parts = [];
+  if (game.playtime_seconds > 0) parts.push(`Played ${formatPlayed(game.playtime_seconds)}`);
+  if (game.last_played) {
+    const when = new Date(game.last_played).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+    parts.push(`Last played: ${when}` + (game.last_played_on ? ` on ${game.last_played_on}` : ""));
+  }
+  line.hidden = parts.length === 0;
+  line.textContent = parts.join(" \u00B7 ");
 }
 
 async function openGamePage(id) {

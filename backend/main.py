@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from config import DEV_MODE, MOG_VERSION, RESOURCES_BASE_PATH
 from endpoints import backups as backups_endpoints
-from endpoints import about, addons, devices, games, install, launch_settings, libraries, notifications, saves, settings, users
+from endpoints import about, addons, devices, games, install, launch_settings, libraries, notifications, playtime, saves, settings, users
 from handler import backups, library_watcher, scrape_handler
 from handler.metadata import ludusavi_handler
 from logger.logger import log
@@ -49,6 +49,7 @@ app.include_router(games.router, prefix="/api")
 app.include_router(install.router, prefix="/api")
 app.include_router(launch_settings.router, prefix="/api")
 app.include_router(notifications.router, prefix="/api")
+app.include_router(playtime.router, prefix="/api")
 app.include_router(saves.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")
 app.include_router(users.router, prefix="/api")

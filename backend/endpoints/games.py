@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Path, Query, UploadFile, status
 from fastapi.responses import FileResponse
 from handler.visibility import check_visible
 from handler.auth import AdminUser, CurrentUser
-from handler.database import db_game_handler, db_install_session_handler, db_saves_handler
+from handler.database import db_game_handler, db_install_session_handler, db_playtime_handler, db_saves_handler
 from handler.filesystem import fs_game_handler
 from handler.filesystem.installer_detection import category_for_path
 from handler import media as media_handler
@@ -64,6 +64,7 @@ async def list_games(user: CurrentUser, library_id: int | None = None) -> list[G
     with_saves = db_saves_handler.game_ids_with_saves()
     last_played = db_saves_handler.last_saved_by_game(user.id)
     last_played_on = db_saves_handler.last_saved_on_by_game(user.id)
+    playtime = db_playtime_handler.seconds_by_game(user.id)
     return [
         GameSchema.model_validate(g).model_copy(
             update={
@@ -71,6 +72,7 @@ async def list_games(user: CurrentUser, library_id: int | None = None) -> list[G
                 "saves_only": g.missing_from_fs and g.id in with_saves,
                 "last_played": last_played.get(g.id),
                 "last_played_on": last_played_on.get(g.id),
+                "playtime_seconds": playtime.get(g.id, 0),
             }
         )
         for g in games
@@ -137,6 +139,7 @@ async def get_game(user: CurrentUser, id: Annotated[int, Path(ge=1)]) -> GameSch
             "saves_only": saves_only,
             "last_played": last_played,
             "last_played_on": last_played_on,
+            "playtime_seconds": db_playtime_handler.summary_for_game(user.id, game.id)[0],
         }
     )
 

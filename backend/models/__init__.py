@@ -6,6 +6,7 @@ def load_all_models() -> None:
         game,
         game_addon,
         game_launch_settings,
+        game_play_session,
         install_session,
         install_step,
         library,

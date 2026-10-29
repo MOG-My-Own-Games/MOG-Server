@@ -118,7 +118,7 @@ A game object carries, among others:
 - `size_bytes`: what the game's own folder (or file) takes on the server's disk, `null` until the server has measured it
   (a scan does, and `GET /api/games/{id}/size` refreshes it). Sort by it with `null` last;
 - `installed` (this user has a finished install whose cache is still on the server), `last_played` and
-  `last_played_on` (from the user's save uploads), `missing_from_fs`, `saves_only`, `addons_only`, `has_mods` (something sits in the game's mods folder),
+  `last_played_on` (from the user's save uploads), `playtime_seconds` (how long this user has played it, section 8b), `missing_from_fs`, `saves_only`, `addons_only`, `has_mods` (something sits in the game's mods folder),
   `created_at` (when a scan first saw the game), `fs_tags`.
 
 Artwork is served by the server so a client does not depend on the metadata providers' CDNs:
@@ -555,6 +555,22 @@ manifest knows (`placeholders` such as `<xdgConfig>`, `<home>` and `<base>` are 
 - When a game closes, it uploads what changed (`trigger=quit`).
 - It remembers which version it has already applied or declined, so it never asks twice.
 - A restore never replaces a file without a backup first.
+
+## 8b. Play time (optional)
+
+The server keeps how long each user has played each game, from the runs their clients report. A client that starts a game
+measures from the moment the game is running to the moment it has closed (the time its saves take to back up is left out) and
+sends it once the game has closed:
+
+`POST /api/games/{id}/playtime` with `{"started_at": "2026-10-29T18:30:00Z", "seconds": 3720, "device_id": 7}` (`device_id`
+optional, one of the user's own). `seconds` is 1 to 86400 (a session is never longer than a day; send two for a longer one)
+and `started_at` may not be more than a day ahead. The answer has `playtime_seconds` (the user's total for the game), `sessions`
+and `recorded`.
+
+A session is told by its `started_at` (to the second): sending the same one again answers `recorded: false` and adds
+nothing, so a client that did not get the answer can keep the session and send it again later. `GET /api/games/{id}/playtime`
+answers the same totals. `playtime_seconds` is on every game of the library and of `GET /api/games/{id}`, `0` for a game the
+user has not played; the time is each user's own.
 
 ## 9. Mods (optional)
 

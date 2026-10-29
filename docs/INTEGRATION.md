@@ -257,7 +257,7 @@ installers (a native installer after a copy fails the session at step 2).
 
 **`extract_suggested`** is what makes "this is not an installer" visible. It is true when nothing in the folder (or
 in the archive you asked about) looks like an installer: the server looks for known installer names
-(`gog-*`, `setup*`, `install.exe`, and any name containing "setup" or "install", never an "uninstall"), archives and
+(`gog-*`, `setup*`, `install.exe`, and any name containing "setup" or "install", never an "uninstall" or an updater), archives and
 disc images to unpack further, and Linux installer scripts. If there is none, the files are probably the game
 itself. What MOG Client does with that: A release packed once per system (a `-pc`, a `-mac` and a `-linux` archive inside the one you asked about, one of them for Windows) counts as a game to unpack too: extracting it keeps and unpacks the Windows build and drops the others.
 

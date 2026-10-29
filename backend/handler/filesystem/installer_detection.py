@@ -238,16 +238,21 @@ def detect_installer_candidates(files: list[DetectedFile]) -> list[InstallerCand
 
 
 _INSTALLER_NAME_HINTS = ("setup", "install")
+# A name with one of these is no installer of the game, whatever else it says: the way out of it, or the tool that keeps
+# an installed game up to date (a game shipped ready to play carries an `INSTALL_OR_UPDATE.bat` for its updater).
+_NOT_INSTALLER_NAME_HINTS = ("uninst", "updat")
 
 
 def is_probable_installer(candidate: InstallerCandidate) -> bool:
     """Whether a candidate is likely an installer for real: a known installer name, anything named like one
-    (setup, install; an uninstaller is not), an archive or disc image to unpack, or a Linux installer script.
-    A bare executable with some other name is more likely the game itself."""
+    (setup, install; an uninstaller or an updater is not), an archive or disc image to unpack, or a Linux installer
+    script. A bare executable with some other name is more likely the game itself."""
     if candidate.rank in (RANK_KNOWN_INSTALLER, RANK_DISC_IMAGE, RANK_ARCHIVE, RANK_LINUX_INSTALLER):
         return True
     name = candidate.file_name.lower()
-    return any(hint in name for hint in _INSTALLER_NAME_HINTS) and "uninst" not in name
+    if any(hint in name for hint in _NOT_INSTALLER_NAME_HINTS):
+        return False
+    return any(hint in name for hint in _INSTALLER_NAME_HINTS)
 
 
 _WINDOWS_TAGS = frozenset(("win", "win32", "win64", "windows", "pc", "x64", "x86", "w32", "w64"))

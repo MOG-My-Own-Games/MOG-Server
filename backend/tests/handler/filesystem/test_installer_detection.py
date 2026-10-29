@@ -134,6 +134,21 @@ class TestLooksPortable:
         assert not looks_portable(_found("installgame.exe"))
         assert looks_portable(_found("uninstall.exe", "game.exe"))
 
+    def test_an_updater_script_in_a_ready_game_is_not_an_installer(self):
+        """Pokemon Infinite Fusion ships ready to play with `INSTALL_OR_UPDATE.bat` for its updater: the "install" in
+        its name made the zip look like it held an installer, so it was never offered for extraction."""
+        from handler.filesystem.installer_detection import looks_portable
+
+        assert looks_portable(
+            _found(
+                "InfiniteFusionPreloaded/InfiniteFusion2/InfiniteFusion2.exe",
+                "InfiniteFusionPreloaded/InfiniteFusion2/INSTALL_OR_UPDATE.bat",
+                "InfiniteFusionPreloaded/InfiniteFusion2/REQUIRED_BY_INSTALLER_UPDATER/mingw64/bin/git.exe",
+            )
+        )
+        assert looks_portable(_found("game.exe", "GameUpdater.exe", "install_update.exe"))
+        assert not looks_portable(_found("Game_Installer.exe", "GameUpdater.exe"))
+
     def test_linux_installers_archives_and_disc_images_are_not(self):
         from handler.filesystem.installer_detection import looks_portable
 

@@ -271,6 +271,12 @@ itself. What MOG Client does with that: A release packed once per system (a `-pc
    **"Just extract"** entry (start with `extract_only: true` and no file named) so the user can choose.
 3. **Anything else:** start without asking.
 
+**An archive that holds the installed game, said once.** The listing can be wrong about a game that ships ready to play
+(a script or tool with "install" in its name). The web UI's Install section offers, for every archive or disc image of the
+game, "<archive> contains the installed game: extract it as it is"; ticking it saves `[{"path": "mog:copy", "source_path":
+"<archive>"}]` as the game's order. Every later start that names no installer extracts that archive with no question, and
+a client should not ask either when `order` begins with a `mog:copy` step. Unticking it saves an empty list.
+
 A client that does not ask can simply leave `extract_only` out: an archive without an installer is then extracted
 as it is and nothing is run. Send `extract_only: false` only after a person said so.
 

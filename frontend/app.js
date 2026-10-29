@@ -3274,8 +3274,19 @@ document.getElementById("sgdb-search-btn").addEventListener("click", async () =>
 const CHAINABLE_KINDS = new Set(["known installer", "executable (top level)", "executable (nested)"]);
 
 // "Use the files as they are": picked from the list when the folder holds no installer (it is probably the game
-// itself). Starting it sends extract_only with no file named.
-const EXTRACT_AS_IS = { path: "", kind: "extract as it is", category: "game", extractAsIs: true };
+// itself). Starting it sends extract_only with no file named. Saved as the order's first step, like a "just copy" of
+// the clients, so the next Install (from here or a client) does it with no question.
+const COPY_STEP = "mog:copy";
+const EXTRACT_AS_IS = { path: COPY_STEP, kind: "extract as it is", category: "game", extractAsIs: true, source_path: null };
+
+// One archive or disc image that holds the game already installed (a game shipped ready to play, only zipped): the same
+// copy, naming the archive to unpack. Offered for every archive, since a listing cannot always tell it from an installer.
+function extractArchiveEntry(archive) {
+  return { ...EXTRACT_AS_IS, source_path: archive.path, file_name: archive.file_name };
+}
+
+// Whether the order saved for the game starts with a copy: unticking it leaves nothing to save, and that has to clear it.
+let savedOrderHasCopy = false;
 
 // The installers of a game can be inside a disc image or an archive, not beside it: the server lists what is in each
 // (a few at most, so a folder of parts does not keep the page waiting). Such an entry remembers its disc in source_path.
@@ -3328,7 +3339,13 @@ async function loadCandidates(gameId) {
     }
     // The "just extract" entry comes first and excludes the executables below it: it is one way to install,
     // they are another (and can be chained).
-    const entries = portable ? [EXTRACT_AS_IS, ...chainable] : chainable;
+    const archives = portable
+      ? []
+      : data.candidates.filter(
+          (c) => (c.category || "game") === "game" && ARCHIVE_SOURCE_KINDS.has(c.kind) && !c.path.toLowerCase().endsWith(".mds"),
+        );
+    const entries = portable ? [EXTRACT_AS_IS, ...chainable] : [...chainable, ...archives.map(extractArchiveEntry)];
+    savedOrderHasCopy = (data.order || []).some((step) => step.path === COPY_STEP);
     // The saved order is checked and comes first; what it does not name follows, unchecked. With none saved, the first
     // installer of the game itself is the one checked. Ticked rows always sit on top, in the order they will run.
     const known = (data.order || [])
@@ -3340,7 +3357,7 @@ async function loadCandidates(gameId) {
             ...known.map((c) => ({ c, origin: entries.indexOf(c), checked: true })),
             ...entries.filter((c) => !known.includes(c)).map((c) => ({ c, origin: entries.indexOf(c), checked: false })),
           ]
-        : entries.map((c, i) => ({ c, origin: i, checked: i === 0 && c.category === "game" }));
+        : entries.map((c, i) => ({ c, origin: i, checked: i === 0 && c.category === "game" && (portable || !c.extractAsIs) }));
     const settle = () => {
       const on = items.filter((item) => item.checked);
       const off = items.filter((item) => !item.checked).sort((a, b) => a.origin - b.origin);
@@ -3394,7 +3411,9 @@ async function loadCandidates(gameId) {
         const text = document.createElement("span");
         text.className = "candidate-text";
         text.textContent = c.extractAsIs
-          ? "Just extract: use the files as they are, run nothing"
+          ? c.source_path
+            ? `${c.file_name || c.source_path} contains the installed game: extract it as it is, run nothing`
+            : "Just extract: use the files as they are, run nothing"
           : `${candidateLabel(c)} (${fmtBytes(c.file_size_bytes)})`;
         label.appendChild(text);
         if (item.checked && !c.extractAsIs) {
@@ -3719,6 +3738,7 @@ async function startInstall(candidate, chain = null) {
 
   if (candidate?.extractAsIs) {
     body.extract_only = true;
+    if (candidate.source_path) body.source_path = candidate.source_path;
   } else if (candidate) {
     if (ARCHIVE_SOURCE_KINDS.has(candidate.kind)) {
       body.source_path = candidate.path;
@@ -3759,14 +3779,16 @@ document.getElementById("start-install-btn").addEventListener("click", async () 
   }
 });
 
-// Every order the person sets (ticks, moves) is the game's default from then on: the next Install runs it. "Just extract" is
-// a one-off and leaves the default as it was; an empty selection keeps the last default too, so nothing is lost by accident.
+// Every order the person sets (ticks, moves) is the game's default from then on: the next Install runs it. That includes
+// "extract as it is", the game's archive taken as the install. An empty selection keeps the last default, so nothing is lost
+// by accident, except when that default is an extraction: unticking it is how the person takes it back.
 async function rememberInstallOrder() {
   const gameId = activeGame?.id;
-  const steps = installQueue.filter((c) => !c.extractAsIs).map((c) => ({ path: c.path, source_path: c.source_path || null }));
-  if (!gameId || steps.length === 0) return;
+  const steps = installQueue.map((c) => ({ path: c.path, source_path: c.source_path || null }));
+  if (!gameId || (steps.length === 0 && !savedOrderHasCopy)) return;
   try {
     await api(`/api/games/${gameId}/install/order`, { method: "PUT", body: JSON.stringify({ steps }) });
+    savedOrderHasCopy = steps.some((step) => step.path === COPY_STEP);
   } catch (err) {
     // Error handling removed as status element is no longer present
   }

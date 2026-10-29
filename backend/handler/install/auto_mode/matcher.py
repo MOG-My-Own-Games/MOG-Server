@@ -16,6 +16,10 @@ LONG_LABEL_LEN = 8
 # Labels this long tolerate one OCR typo. Every button label must be the
 # whole line or stand alone, or "Si"/"OK" would match ordinary body text.
 FUZZY_LABEL_LEN = 5
+# A "finish" label is read exactly (see _match_line), unless it is a phrase this long: a grey button with white text is read
+# with two typos ("Exit Installer" as "Exitlnstallet"), and no stray fragment of page text looks like a phrase of this length.
+LONG_FINISH_LABEL_LEN = 12
+LONG_FINISH_TYPOS = 2
 # A short label counts as standing alone when the gap to its neighbours on
 # the same OCR line exceeds this many times the text height.
 ISOLATION_GAP_FACTOR = 2.0
@@ -94,6 +98,20 @@ def _edit_distance_at_most_one(a: str, b: str) -> bool:
     return edits + (len(b) - j) + (len(a) - i) <= 1
 
 
+def _edit_distance_at_most(a: str, b: str, limit: int) -> bool:
+    if abs(len(a) - len(b)) > limit:
+        return False
+    previous = list(range(len(b) + 1))
+    for i, ca in enumerate(a, start=1):
+        row = [i]
+        for j, cb in enumerate(b, start=1):
+            row.append(min(previous[j] + 1, row[j - 1] + 1, previous[j - 1] + (ca != cb)))
+        if min(row) > limit:
+            return False
+        previous = row
+    return previous[-1] <= limit
+
+
 def _group_lines(words: list[Word]) -> list[list[Word]]:
     lines: dict[tuple[int, int, int], list[Word]] = {}
     for w in words:
@@ -135,11 +153,13 @@ def _is_isolated(line: list[Word], start: int, end: int) -> bool:
 
 
 def _label_matches(
-    candidate: str, label: str, whole_line: bool, isolated: bool, fuzzy: bool = True
+    candidate: str, label: str, whole_line: bool, isolated: bool, fuzzy: bool = True, typos: int = 1
 ) -> bool:
     if candidate == label:
         return whole_line or isolated
     if fuzzy and len(label) >= FUZZY_LABEL_LEN and (whole_line or isolated):
+        if typos > 1:
+            return _edit_distance_at_most(candidate, label, typos)
         return _edit_distance_at_most_one(candidate, label)
     return False
 
@@ -190,6 +210,8 @@ def _match_line(line: list[Word], line_text: str, entry: ButtonEntry) -> Match |
     # category, where a false positive just fails to advance the page.
     fuzzy = entry.category != "finish"
     for label in entry.normalized_labels:
+        long_finish = entry.category == "finish" and len(label) >= LONG_FINISH_LABEL_LEN
+        typos = LONG_FINISH_TYPOS if long_finish else 1
         if (entry.toggle or entry.category == "key") and len(label) >= LONG_LABEL_LEN and label in line_text:
             span = _span_for_substring(line, label)
             if span is not None:
@@ -198,10 +220,10 @@ def _match_line(line: list[Word], line_text: str, entry: ButtonEntry) -> Match |
             joined = ""
             for end in range(start + 1, min(len(line), start + MAX_SPAN_WORDS) + 1):
                 joined += normalize(line[end - 1].text)
-                if len(joined) > len(label) + 1:
+                if len(joined) > len(label) + typos:
                     break
                 whole = start == 0 and end == len(line)
-                if _label_matches(joined, label, whole, _is_isolated(line, start, end), fuzzy):
+                if _label_matches(joined, label, whole, _is_isolated(line, start, end), fuzzy or long_finish, typos):
                     return _build(entry, label, line, start, end)
     return None
 

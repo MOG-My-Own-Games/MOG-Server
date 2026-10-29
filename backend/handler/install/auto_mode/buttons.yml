@@ -69,6 +69,8 @@ context_keywords:
     [
       "elapsed time",
       "remaining time",
+      # The older GOG installer has no clock, only this caption over its bar; OCR reads the start of it as "instal".
+      "installation progress",
       "tempo trascorso",
       "tempo rimanente",
       "verstrichene zeit",
@@ -191,6 +193,9 @@ buttons:
     toggle: true
     labels:
       - "Yes, I have read and accept EULA"
+      # The older GOG installer's welcome page, with its checkbox in the bottom row next to "Start installation".
+      - "Yes, I have read and accept the End User License Agreement"
+      - "I have read and accept the End User License Agreement"
       - "I accept the agreement"
       - "I accept the terms of the license agreement"
       - "I accept the license terms"
@@ -230,6 +235,10 @@ buttons:
         "安装",
         "安裝",
       ]
+  # The older GOG installer's "Start installation" is a green button in the bottom row, beside the EULA checkbox. It has no
+  # Alt shortcut, so no mnemonic is tried when the click changes nothing.
+  - category: install
+    labels: ["Start installation", "Start the installation"]
   # "Fine" (Italian for Finish) is also an ordinary English word, so it can
   # match stray OCR text on an early screen (license text, a readme, ...)
   # long before the installer is actually done - late guards against
@@ -245,6 +254,11 @@ buttons:
     late: true
     mnemonic: x
     labels: ["Exit", "Esci", "Beenden", "Quitter", "Salir", "終了", "退出"]
+  # The older GOG installer ends on "Your installation is complete!" with Exit Installer (grey) and Launch (green) in the
+  # bottom row. Launch is no button of the catalog: it would start the game inside the sandbox.
+  - category: finish
+    late: true
+    labels: ["Exit Installer"]
   # Text asking for a keyboard key instead of a click.
   - category: key
     key: "Up"

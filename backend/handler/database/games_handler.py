@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from decorators.database import begin_session
@@ -44,7 +44,8 @@ class DBGamesHandler(DBBaseHandler):
         many games there are and when the last one was touched. Cheap, so a client can ask often."""
         query = select(func.count(Game.id), func.max(Game.updated_at))
         if hidden_library_ids:
-            query = query.where(Game.library_id.not_in(hidden_library_ids))
+            # NULL NOT IN (...) is NULL, so an imported game (no library) needs saying.
+            query = query.where(or_(Game.library_id.is_(None), Game.library_id.not_in(hidden_library_ids)))
         count, newest = session.execute(query).one()
         return f"{count}-{newest.isoformat() if newest else 0}"
 
@@ -64,6 +65,10 @@ class DBGamesHandler(DBBaseHandler):
         if library_id is not None:
             query = query.where(Game.library_id == library_id)
         return session.execute(query).rowcount
+
+    @begin_session
+    def get_imported_games(self, session: Session = None) -> list[Game]:  # type: ignore
+        return list(session.scalars(select(Game).where(Game.imported.is_(True)).order_by(Game.id)).all())
 
     @begin_session
     def get_all_games(self, session: Session = None) -> list[Game]:  # type: ignore

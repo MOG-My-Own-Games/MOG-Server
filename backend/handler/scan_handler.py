@@ -9,6 +9,7 @@ separately, not as part of scanning (see docs/TODO.md for auto-matching).
 from __future__ import annotations
 
 import os
+import re
 import threading
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -79,6 +80,11 @@ def only_addons(path: Path) -> bool:
 _scan_lock = threading.Lock()
 
 
+def import_key(name: str) -> str:
+    """What makes two names the same game for an import: case and punctuation do not count."""
+    return re.sub(r"[^a-z0-9]", "", name.lower())
+
+
 def scan_library(library: Library) -> ScanResult:
     with _scan_lock:
         return _scan_library(library)
@@ -91,7 +97,33 @@ def _scan_library(library: Library) -> ScanResult:
     existing = {g.fs_name: g for g in db_game_handler.get_games_for_library(library.id)}
 
     new_games = []
+    imports: dict[str, Game] = {}
+    adopted: set[int] = set()
+    for imported in db_game_handler.get_imported_games():
+        imports.setdefault(import_key(imported.fs_name), imported)
+        imports.setdefault(import_key(imported.name), imported)
     for fs_name in sorted(on_disk - existing.keys()):
+        taken = imports.get(import_key(fs_name))
+        if taken is not None and taken.id not in adopted:
+            existing.pop(taken.fs_name, None)  # filed under this library already: its old name is not a vanished folder
+            # A game a client imported for its saves: the folder is its files now. Taken over in place, so the saves
+            # (filed under the game's id) stay where they are.
+            db_game_handler.update_game(
+                taken.id,
+                {
+                    "library_id": library.id,
+                    "fs_name": fs_name,
+                    "imported": False,
+                    "missing_from_fs": False,
+                    "addons_only": only_addons(root / fs_name),
+                    "has_mods": has_mods(root / fs_name),
+                    "size_bytes": size_of(root / fs_name),
+                },
+            )
+            adopted.add(taken.id)
+            existing[fs_name] = db_game_handler.get_game(taken.id)
+            new_games.append((taken.id, fs_name))
+            continue
         game = db_game_handler.add_game(
             Game(
                 library_id=library.id,
@@ -109,6 +141,21 @@ def _scan_library(library: Library) -> ScanResult:
     missing = 0
     for fs_name, game in existing.items():
         is_missing = fs_name not in on_disk
+        if game.imported:
+            # Filed under this library by a client, with no folder: that is how it is meant to be, not a vanished game. A
+            # folder of its own name is its files now.
+            if not is_missing:
+                db_game_handler.update_game(
+                    game.id,
+                    {
+                        "imported": False,
+                        "missing_from_fs": False,
+                        "addons_only": only_addons(root / fs_name),
+                        "has_mods": has_mods(root / fs_name),
+                        "size_bytes": size_of(root / fs_name),
+                    },
+                )
+            continue
         changes = {}
         if is_missing != game.missing_from_fs:
             changes["missing_from_fs"] = is_missing

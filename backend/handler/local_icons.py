@@ -202,7 +202,7 @@ def found_dir(game_id: int) -> Path:
 def candidates(game: Game) -> list[dict]:
     """The icons of the game's folder as candidates (`source` "local", `label` the file they come from), each once. A game that is
     a single file, or whose folder is gone, has none."""
-    if game.library is None:
+    if game.library is None or game.imported:
         return []
     folder = Path(game.library.root_path) / game.fs_name
     if not folder.is_dir():

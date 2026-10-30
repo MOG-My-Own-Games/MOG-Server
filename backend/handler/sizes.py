@@ -93,6 +93,9 @@ def forget(game_id: int | None = None) -> None:
 
 
 def game_sizes(game: Game) -> GameSizes:
+    if game.library is None or game.imported:  # imported: no files, only what its saves and add-ons take
+        _versions, saves = db_saves_handler.summary(game_id=game.id)
+        return GameSizes(0, 0, saves, 0, db_game_addons_handler.total_size(game.id))
     root = fs_game_handler.get_game_root_abs_path(game)
     sessions = _sessions(game.id)
     cache_dirs = _cache_dirs(sessions)

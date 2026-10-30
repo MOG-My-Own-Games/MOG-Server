@@ -104,7 +104,7 @@ def test_a_zip_that_fails_is_reported(game_root, monkeypatch):
 
 @pytest.fixture
 def api(game_root, monkeypatch):
-    game = SimpleNamespace(id=5, name="Some Game", library_id=1, fs_name="Game", library=SimpleNamespace(root_path=str(game_root.parent)))
+    game = SimpleNamespace(id=5, name="Some Game", library_id=1, imported=False, fs_name="Game", library=SimpleNamespace(root_path=str(game_root.parent)))
     monkeypatch.setattr(games_endpoints.db_game_handler, "get_game", lambda i: game if i == 5 else None)
     notices = []
     monkeypatch.setattr(games_endpoints, "notify_mod_zipped", lambda *args: notices.append(args))

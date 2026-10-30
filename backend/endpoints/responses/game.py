@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, computed_field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from handler.filesystem.fs_tags import parse_fs_tags
 
@@ -12,7 +12,7 @@ class GameSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    library_id: int
+    library_id: int | None
     fs_name: str
     name: str
     summary: str | None
@@ -26,6 +26,8 @@ class GameSchema(BaseModel):
     # What the game's folder takes on the server's disk; None until measured.
     size_bytes: int | None = None
     missing_from_fs: bool = False
+    # Added by a client to sync its saves, with no folder in any library: it has never had files here.
+    imported: bool = False
     # Gone from disk, but some user still has saves of it, so it is kept (not "missing").
     saves_only: bool = False
     # The folder holds add-ons (mods, DLC, ...) and nothing that installs the base game.
@@ -137,6 +139,13 @@ class LibrarySchema(BaseModel):
     id: int
     name: str
     root_path: str
+
+
+class GameImportForm(BaseModel):
+    # What the game is called; the same name (ignoring case and punctuation) is the same imported game.
+    name: str = Field(min_length=1, max_length=400)
+    # The library the game is listed under. Nothing is written into the library's folder: the game is only filed there.
+    library_id: int | None = None
 
 
 class LibraryCreateForm(BaseModel):

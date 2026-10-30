@@ -275,7 +275,7 @@ class ScrapeResult:
 
 
 def needs_scrape(game: Game) -> bool:
-    if game.missing_from_fs:
+    if game.missing_from_fs and not game.imported:  # an imported game has no folder, but still wants its cover
         return False
     # hltb_id 0 is a lookup that found nothing, so only a game never looked up is still to do.
     hltb_pending = bool(game.igdb_id) and game.hltb_id is None and hltb_handler.is_enabled()
@@ -333,6 +333,20 @@ def scrape_library_in_background(library_id: int) -> None:
     finally:
         with _scraping_lock:
             _scraping.discard(library_id)
+
+
+def scrape_imported_in_background(game_id: int) -> None:
+    """Match a game a client just imported, so its entry has a cover and metadata like any other."""
+
+    def run() -> None:
+        try:
+            game = db_game_handler.get_game(game_id)
+            if game is not None and needs_scrape(game):
+                scrape_game(game)
+        except Exception as e:  # noqa: BLE001 - the entry is usable without it
+            log.warning(f"Scrape of the imported game {game_id} failed: {e}")
+
+    threading.Thread(target=run, daemon=True, name=f"scrape-import-{game_id}").start()
 
 
 def scrape_and_announce(library: Library, new_games: tuple[tuple[int, str], ...]) -> None:

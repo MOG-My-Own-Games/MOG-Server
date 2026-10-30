@@ -25,7 +25,8 @@ class Game(BaseModel):
     __tablename__ = "games"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    library_id: Mapped[int] = mapped_column(ForeignKey("libraries.id", ondelete="CASCADE"))
+    # None for a game a client imported: it has no folder in any library (yet).
+    library_id: Mapped[int | None] = mapped_column(ForeignKey("libraries.id", ondelete="CASCADE"), default=None)
 
     # Name of the file or directory directly under the library's root_path.
     fs_name: Mapped[str] = mapped_column(String(length=FS_NAME_MAX_LENGTH))
@@ -53,6 +54,10 @@ class Game(BaseModel):
 
     # Set by a scan when the game's mods folder holds something (see handler/mods.py has_mods).
     has_mods: Mapped[bool] = mapped_column(Boolean(), default=False, server_default="0")
+
+    # A client added the game to sync its saves and no scan has found its folder yet: it has no files here. A scan that
+    # finds a folder named like it takes the entry over and clears this (see scan_handler).
+    imported: Mapped[bool] = mapped_column(Boolean(), default=False, server_default="0")
 
     # What the game's own folder (or file) takes on disk, set by a scan and refreshed whenever the size is
     # measured again (handler/sizes.py). NULL until measured.

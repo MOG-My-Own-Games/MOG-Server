@@ -17,7 +17,7 @@ def world(monkeypatch, tmp_path: Path):
     cache = tmp_path / "cache" / "9"
     cache.mkdir(parents=True)
     (cache / "files.bin").write_bytes(b"z" * 400)
-    game = SimpleNamespace(id=1, library_id=1, fs_name="Game", size_bytes=None, library=SimpleNamespace(root_path=str(tmp_path)))
+    game = SimpleNamespace(id=1, library_id=1, imported=False, fs_name="Game", size_bytes=None, library=SimpleNamespace(root_path=str(tmp_path)))
     state = SimpleNamespace(saves=70, addons=0, stored=[])
     monkeypatch.setattr(
         sizes, "db_game_handler", SimpleNamespace(update_game=lambda gid, data: state.stored.append((gid, data)))

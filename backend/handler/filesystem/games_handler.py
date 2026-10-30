@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from fastapi import HTTPException, status
 from models.game import Game
 from utils.filesystem import iter_files
 
@@ -18,9 +19,18 @@ from .installer_detection import (
 )
 
 
+class GameHasNoFiles(HTTPException):
+    """A game a client imported has no folder, even when it is filed under a library: whatever needs its files answers 409 `no_files`."""
+
+    def __init__(self) -> None:
+        super().__init__(status_code=status.HTTP_409_CONFLICT, detail={"code": "no_files"})
+
+
 class FSGamesHandler:
     def get_game_root_abs_path(self, game: Game) -> Path:
         """Absolute path of the game's own directory (or file) in its library."""
+        if game.library is None or game.imported:
+            raise GameHasNoFiles()
         return Path(game.library.root_path, game.fs_name)
 
     def list_game_files_flat(self, game: Game) -> list[DetectedFile]:

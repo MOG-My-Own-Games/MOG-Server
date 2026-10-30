@@ -25,7 +25,16 @@ async def list_libraries(user: CurrentUser) -> list[LibrarySchema]:
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_library(user: AdminUser, data: LibraryCreateForm) -> LibrarySchema:
-    library = db_library_handler.add_library(Library(name=data.name, root_path=data.root_path))
+    name, root_path = data.name.strip(), data.root_path.strip()
+    if not name:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="The library needs a name")
+    if not root_path.startswith("/"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="The path is a folder as the server sees it, starting with /"
+        )
+    if any(lib.root_path.rstrip("/") == root_path.rstrip("/") for lib in db_library_handler.get_all_libraries()):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A library already uses that folder")
+    library = db_library_handler.add_library(Library(name=name, root_path=root_path))
     return LibrarySchema.model_validate(library)
 
 

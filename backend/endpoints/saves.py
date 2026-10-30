@@ -26,7 +26,7 @@ from utils.archive_safety import ArchiveError
 
 router = APIRouter(tags=["saves"])
 
-Trigger = Literal["launch", "quit", "manual", "uninstall", "sync"]
+Trigger = Literal["launch", "quit", "manual", "uninstall", "sync", "import"]
 
 
 def _visible_game(user: User, game_id: int) -> Game:

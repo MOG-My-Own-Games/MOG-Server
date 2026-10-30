@@ -8,7 +8,13 @@ from fastapi import APIRouter, HTTPException, Path, Query, UploadFile, status
 from fastapi.responses import FileResponse
 from handler.visibility import check_visible
 from handler.auth import AdminUser, CurrentUser
-from handler.database import db_game_handler, db_install_session_handler, db_playtime_handler, db_saves_handler
+from handler.database import (
+    db_game_handler,
+    db_install_session_handler,
+    db_library_handler,
+    db_playtime_handler,
+    db_saves_handler,
+)
 from handler.filesystem import fs_game_handler
 from handler.filesystem.installer_detection import category_for_path
 from handler import media as media_handler
@@ -19,7 +25,9 @@ from handler import mods as mods_handler
 from handler.notifications import notify_mod_downloaded, notify_mod_zipped
 from handler.saves import purge_game
 from handler.sizes import game_sizes
-from handler.scrape_handler import refresh_game, search_name
+from handler.scan_handler import import_key
+from handler.scrape_handler import refresh_game, scrape_imported_in_background, search_name
+from models.game import FS_NAME_MAX_LENGTH, Game
 from models.install_session import InstallSessionState
 from starlette.concurrency import run_in_threadpool
 from utils.image_cache import COVER_MAX_HEIGHT, cached_image, cached_local, media_type
@@ -28,6 +36,7 @@ from utils.install_cache import session_cache_dir
 from endpoints.responses.game import (
     GameFileSchema,
     GameFilesSchema,
+    GameImportForm,
     GameSchema,
     GameSizeSchema,
     GameSizesSchema,
@@ -85,6 +94,45 @@ async def games_revision(user: CurrentUser) -> dict:
     the games. Games in libraries hidden from the user do not count."""
     hidden = [] if user.is_admin else user.hidden_library_ids
     return {"revision": db_game_handler.revision(hidden)}
+
+
+@router.post("/import")
+async def import_game(user: CurrentUser, form: GameImportForm) -> GameSchema:
+    """Add a game a client has on disk outside MOG, so its saves can be synced. It has no files here: it shows as saves only
+    (`imported`) until a scan finds a folder named like it. With a `library_id` it is listed under that library, which is only a
+    label: nothing is written into the library's folder. Importing a name that is already imported gives back that entry,
+    so a second machine joins the first one's saves instead of making a copy."""
+    name = " ".join(form.name.split())
+    key = import_key(name)
+    if not key:
+        raise HTTPException(status_code=422, detail="The name has no letters or digits")
+    if form.library_id is not None:
+        library = db_library_handler.get_library(form.library_id)
+        if library is None or (not user.is_admin and library.id in user.hidden_library_ids):
+            raise HTTPException(status_code=404, detail="Library not found")
+    game = next(
+        (
+            g
+            for g in db_game_handler.get_imported_games()
+            if key in (import_key(g.fs_name), import_key(g.name))
+            and (user.is_admin or g.library_id not in user.hidden_library_ids)
+        ),
+        None,
+    )
+    if game is None:
+        game = db_game_handler.add_game(
+            Game(
+                library_id=form.library_id,
+                fs_name=name[:FS_NAME_MAX_LENGTH],
+                name=name,
+                imported=True,
+                missing_from_fs=True,
+            )
+        )
+        scrape_imported_in_background(game.id)
+    elif game.library_id is None and form.library_id is not None:
+        db_game_handler.update_game(game.id, {"library_id": form.library_id})  # filed now; it was not before
+    return await get_game(user, game.id)
 
 
 @router.get("/missing")

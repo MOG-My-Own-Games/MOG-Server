@@ -99,13 +99,15 @@ URL: the streaming calls do not follow a redirect to another origin.
 | Call | What it gives |
 | --- | --- |
 | `GET /api/libraries` | The libraries the user can see. |
+| `POST /api/libraries` | Administrators only. Body `{"name": "...", "root_path": "/library/games"}`, a folder as the server sees it (it need not exist yet); `409` when another library uses it, `422` for a path that does not start with `/` or an empty name. Deleting a library keeps the imported games filed under it (they go on with no library, saves included). |
 | `GET /api/games` | Every game the user can see, with metadata. `?library_id=` limits it to one library. |
 | `GET /api/games/{id}` | One game. |
+| `POST /api/games/import` | Add a game the client has outside MOG, so its saves can be synced. Body `{"name": "...", "library_id": 1}` (`library_id` is optional: the library the game is listed under, only a label, nothing is written into the library's folder; 404 for one that does not exist or is hidden from the user); answers the game. A name that is already imported (ignoring case and punctuation) gives back that entry, so a second machine joins the first one's saves. The entry has `imported: true`, `library_id` (the one given, else `null`) and `missing_from_fs: true`, and the server matches it with IGDB and SteamGridDB in the background. |
 | `GET /api/games/revision` | One short string that changes when the library does. Poll it (MOG Client does, every 20 seconds) and reload the list only when it differs from the last one you saw. |
 
 A game object carries, among others:
 
-- `id`, `name` (the display name, matched or edited), `fs_name` (the folder or file name on disk), `library_id`;
+- `id`, `name` (the display name, matched or edited), `fs_name` (the folder or file name on disk), `library_id` (`null` for an imported game filed under no library);
 - `summary`, `igdb_id`, `igdb_metadata` (the whole IGDB record: genres, release date, developers, publishers,
   modes, screenshots, age ratings, DLC and so on), `sgdb_id`;
 - `hltb_id` and `hltb_metadata`: how long the game takes, in **seconds**: `main_story`, `main_plus_extra`,
@@ -118,7 +120,7 @@ A game object carries, among others:
 - `size_bytes`: what the game's own folder (or file) takes on the server's disk, `null` until the server has measured it
   (a scan does, and `GET /api/games/{id}/size` refreshes it). Sort by it with `null` last;
 - `installed` (this user has a finished install whose cache is still on the server), `last_played` and
-  `last_played_on` (from the user's save uploads), `playtime_seconds` (how long this user has played it, section 8b), `missing_from_fs`, `saves_only`, `addons_only`, `has_mods` (something sits in the game's mods folder),
+  `last_played_on` (from the user's save uploads), `playtime_seconds` (how long this user has played it, section 8b), `missing_from_fs`, `saves_only`, `imported` (a client added the game just to sync its saves and the server never had its files: show saves only in green instead of amber; a scan that finds a folder named like it takes the entry over and clears this), `addons_only`, `has_mods` (something sits in the game's mods folder),
   `created_at` (when a scan first saw the game), `fs_tags`.
 
 Artwork is served by the server so a client does not depend on the metadata providers' CDNs:
@@ -141,7 +143,8 @@ the providers: what the edit form offers beside an upload.
 
 Other useful reads: `GET /api/games/{id}/size` and `GET /api/games/{id}/sizes` (what the game, its install
 caches and its saves take on the server), and `GET /api/games/{id}/files` (the game's own files in the library,
-not the install).
+not the install). An imported game has no files: whatever needs them (`/files`, the mods, installing) answers `409` with
+`{"detail": {"code": "no_files"}}`, and `/sizes` counts only its saves.
 
 **Grouping.** MOG Client shows games that share an `igdb_id` as one entry with "N versions". When the user
 installs it, the installers of every version are listed, each under its version's name, and the user picks one.
@@ -521,7 +524,7 @@ answers `404`: treat that as "not supported" and carry on, the log is never a re
 
 | Call | What it does |
 | --- | --- |
-| `POST /api/games/{id}/saves?device_id=D&trigger=T` | Upload a zip (multipart form field `file`) as the newest version of device `D`. `T` is `launch`, `quit`, `manual`, `uninstall` or `sync`: a label shown next to the version. The answer has `created: false` when the archive is identical to the device's newest, and nothing was stored. |
+| `POST /api/games/{id}/saves?device_id=D&trigger=T` | Upload a zip (multipart form field `file`) as the newest version of device `D`. `T` is `launch`, `quit`, `manual`, `uninstall`, `sync` or `import` (the first backup of a game just imported): a label shown next to the version. The answer has `created: false` when the archive is identical to the device's newest, and nothing was stored. |
 | `GET /api/games/{id}/saves` | Every device's versions, newest first, with `keep_versions`. |
 | `GET /api/saves/{version_id}` | One version with a (capped) list of the files in it. |
 | `GET /api/saves/{version_id}/download` | The zip. |

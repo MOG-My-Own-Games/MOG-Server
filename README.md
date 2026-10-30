@@ -32,7 +32,8 @@ damage: the software is provided as is, without warranty of any kind.
   still has saves is not "missing": it stays, marked "Saves only" (amber corner with a floppy disk),
   and clearing the missing games leaves it alone; deleting it asks whether to keep the saves (the default, the game then stays listed) or delete
   both, and deleting a user asks first and says how many saved games would be lost. A folder with only mods or DLC and nothing that installs the game
-  is marked "Add-ons only" (violet corner with a puzzle piece).
+  is marked "Add-ons only" (violet corner with a puzzle piece). A game a client added from outside MOG only to sync its saves
+  (it never had files here) is marked the same way in green; a scan that finds a folder named like it takes the entry over.
 - Offers a game's mods for download (never installed): every top-level folder or archive inside the game's `mods` folder
   is one mod, so `mods/mod1/file.zip` and `mods/mod2.zip` are mod1 and mod2. An archive is served as it is; a folder is zipped
   on the fly in the background (`/api/games/{id}/mods`, `.../{name}/prepare`, `.../status`, `.../download`), with progress for

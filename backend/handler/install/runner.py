@@ -1489,7 +1489,7 @@ def _run_installer(argv: list[str], display: str, auto_mode_session: tuple[int, 
     dialog is currently showing actually focused (see
     ``_focus_maintenance_loop`` for why that's needed at all). With
     ``auto_mode_session`` (session id, work dir) a second thread runs the
-    experimental auto mode, which only acts while the session's ``auto_mode``
+    auto mode, which only acts while the session's ``auto_mode``
     flag is on (see handler.install.auto_mode).
 
     Started in its own process group (`start_new_session=True`) so

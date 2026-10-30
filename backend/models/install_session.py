@@ -130,7 +130,7 @@ class InstallSession(BaseModel):
     phase: Mapped[str | None] = mapped_column(String(32), default=None)
     phase_detail: Mapped[str | None] = mapped_column(String(1000), default=None)
 
-    # Experimental auto mode: OCR the installer and press its buttons. Read by
+    # Auto mode: OCR the installer and press its buttons. Read by
     # the runner every tick, so it can be flipped while the installer runs.
     auto_mode: Mapped[bool] = mapped_column(
         Boolean(), default=False, server_default=sa_false(), nullable=False

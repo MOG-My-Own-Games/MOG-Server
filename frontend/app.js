@@ -1447,7 +1447,7 @@ async function refreshMissingTable() {
       const tr = document.createElement("tr");
       const libName = (libraries.find((l) => l.id === game.library_id) || {}).name || "";
       tr.innerHTML = `
-        <td>${escapeHtml(game.name)}${game.saves_only ? ' <span class="chip chip-saves" title="Its saves are kept">Saves only</span>' : ""}</td>
+        <td>${escapeHtml(game.name)}${game.imported ? ' <span class="chip chip-imported" title="Added from a client to sync its saves">Saves only (imported)</span>' : game.saves_only ? ' <span class="chip chip-saves" title="Its saves are kept">Saves only</span>' : ""}</td>
         <td>${escapeHtml(libName)}</td>
         <td>${escapeHtml(game.fs_name)}</td>
       `;
@@ -1917,6 +1917,16 @@ const MISSING_BADGE =
 const SAVES_BADGE =
   '<span class="saves-badge" title="Saves only: the game is gone from disk, its saves are kept"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h11l3 3v15H5z" /><path d="M8 3v5h7V3" /><path d="M8 21v-6h8v6" /></svg></span>';
 
+// Corner badge (top left, green): a client added the game just to sync its saves; the server never had its files.
+const IMPORTED_BADGE =
+  '<span class="saves-badge imported" title="Saves only: added from a client to sync its saves, the server has no files for it"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h11l3 3v15H5z" /><path d="M8 3v5h7V3" /><path d="M8 21v-6h8v6" /></svg></span>';
+
+// The top-left corner of a cover: saves only (amber, or green when imported), or missing; none for an imported game with no saves yet.
+function stateBadge(game) {
+  if (game.imported) return game.saves_only ? IMPORTED_BADGE : "";
+  return game.saves_only ? SAVES_BADGE : game.missing_from_fs ? MISSING_BADGE : "";
+}
+
 // Corner badge (bottom left): the folder has mods or DLC but nothing that installs the game itself.
 const ADDONS_BADGE =
   '<span class="addons-badge" title="Add-ons only: no installer for the game itself"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5C13 2.12 11.88 1 10.5 1S8 2.12 8 3.5V5H4c-1.1 0-2 .9-2 2v3.8h1.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7s2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5c1.38 0 2.5-1.12 2.5-2.5S21.88 11 20.5 11z" /></svg></span>';
@@ -2031,7 +2041,7 @@ function renderGameGrid(filterText) {
     card.className = "game-card";
     card.title = game.name;
     card.innerHTML = `
-      <div class="cover${game.cover_path ? "" : " no-cover"}">${game.cover_path ? `<img src="${escapeHtml(game.cover_path)}" />` : "\u{1F3AE}"}${game.installed ? INSTALLED_BADGE : ""}${game.saves_only ? SAVES_BADGE : game.missing_from_fs ? MISSING_BADGE : ""}${game.addons_only && !game.missing_from_fs ? ADDONS_BADGE : ""}${versions > 1 ? `<span class="sibling-badge" title="${versions} versions">${versions}</span>` : ""}</div>
+      <div class="cover${game.cover_path ? "" : " no-cover"}">${game.cover_path ? `<img src="${escapeHtml(game.cover_path)}" />` : "\u{1F3AE}"}${game.installed ? INSTALLED_BADGE : ""}${stateBadge(game)}${game.addons_only && !game.missing_from_fs ? ADDONS_BADGE : ""}${versions > 1 ? `<span class="sibling-badge" title="${versions} versions">${versions}</span>` : ""}</div>
       <div class="name">${escapeHtml(game.name)}</div>
     `;
     card.addEventListener("click", () => {
@@ -2571,6 +2581,12 @@ async function openGamePage(id) {
   installQueue = [];
   queueActive = false;
 
+  // A game a client added for its saves has no installer here: the tab says so and shows nothing else.
+  const noFiles = Boolean(game.imported);
+  document.getElementById("install-content").hidden = noFiles;
+  document.getElementById("install-no-files").hidden = !noFiles;
+  if (noFiles) return;
+
   await loadCandidates(game.id);
   await loadProtonBuilds();
 
@@ -2649,7 +2665,9 @@ function renderOverview(game) {
 
   const genresEl = document.getElementById("game-genres");
   genresEl.innerHTML =
-    (game.saves_only
+    (game.imported
+      ? '<span class="chip chip-imported" title="Added from a client to sync its saves: the server has no files for it">Saves only (imported)</span>'
+      : game.saves_only
       ? '<span class="chip chip-saves" title="The game is gone from disk, its saves are kept">Saves only</span>'
       : game.missing_from_fs
         ? '<span class="chip chip-missing">Missing</span>'

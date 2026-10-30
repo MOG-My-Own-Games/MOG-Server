@@ -475,6 +475,7 @@ p.warning { margin: 0.4em 0; }
   height: 3.2rem;
 }
 .saves-badge { top: 0; left: 0; clip-path: polygon(0 0, 100% 0, 0 100%); background: var(--warn); }
+.saves-badge.imported { background: var(--success); }
 .addons-badge { bottom: 0; left: 0; clip-path: polygon(0 0, 100% 100%, 0 100%); background: var(--addons); }
 .saves-badge svg,
 .addons-badge svg {
@@ -630,6 +631,7 @@ a.chip { color: inherit; text-decoration: none; }
 }
 .chip-missing { background: var(--danger); border-color: var(--danger); color: #fff; }
 .chip-saves { background: var(--warn); border-color: var(--warn); color: #fff; }
+.chip-imported { background: var(--success); border-color: var(--success); color: #fff; }
 .chip-addons { background: var(--addons); border-color: var(--addons); color: #fff; }
 
 .screenshot-row { display: flex; gap: 0.5em; overflow-x: auto; margin: 1em 0; }

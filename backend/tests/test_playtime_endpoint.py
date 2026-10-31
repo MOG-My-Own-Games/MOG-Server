@@ -11,7 +11,7 @@ from endpoints import saves as saves_endpoints
 from handler.auth import get_current_user
 from handler.database import db_playtime_handler
 
-GAME = SimpleNamespace(id=5, name="Some Game", library_id=1)
+GAME = SimpleNamespace(id=5, name="Some Game", fs_name="Some Game", library_id=1, effective_title_key="mog:5")
 START = datetime(2026, 10, 20, 18, 30, 0, tzinfo=timezone.utc)
 
 

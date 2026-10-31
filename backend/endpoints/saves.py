@@ -15,6 +15,7 @@ from endpoints.responses.save import (
     SaveVersionSchema,
 )
 from handler.auth import CurrentUser
+from handler import titles
 from handler.database import db_device_handler, db_game_handler, db_saves_handler, db_settings_handler
 from handler.notifications import notify_save_restored, notify_save_synced
 from handler.saves import UploadTooLarge, keep_versions, receive_upload, remove_version, resolve_path, run_on_saves_channel, store_version
@@ -52,8 +53,9 @@ def _own_version(user: User, version_id: int) -> SaveVersion:
 
 @router.get("/games/{id}/saves")
 async def list_game_saves(user: CurrentUser, id: Annotated[int, Path(ge=1)]) -> GameSavesSchema:
-    _visible_game(user, id)
-    versions = db_saves_handler.get_for_game(user.id, id)
+    game = _visible_game(user, id)
+    named = {g.id: g for g in titles.versions(game, user)}  # the versions of the title, each with its own game_id
+    versions = db_saves_handler.get_for_games(user.id, list(named))
     devices = {d.id: d for d in db_device_handler.get_for_user(user.id)}
     grouped: dict[int, list[SaveVersion]] = {}
     for version in versions:  # newest first, so each device's list and the device order are by recency
@@ -63,7 +65,12 @@ async def list_game_saves(user: CurrentUser, id: Annotated[int, Path(ge=1)]) -> 
         devices=[
             DeviceSavesSchema(
                 device=DeviceSchema.model_validate(devices[device_id]),
-                versions=[SaveVersionSchema.model_validate(v) for v in rows],
+                versions=[
+                    SaveVersionSchema.model_validate(v).model_copy(
+                        update={"game_name": named[v.game_id].name, "fs_name": named[v.game_id].fs_name}
+                    )
+                    for v in rows
+                ],
             )
             for device_id, rows in grouped.items()
         ],
@@ -80,7 +87,7 @@ async def upload_game_saves(
     trigger: Trigger = "manual",
 ) -> SaveUploadSchema:
     """Store a zip of a game's save files as the newest version of one of the user's devices."""
-    _visible_game(user, id)
+    game = _visible_game(user, id)
     device = _own_device(user, device_id)
     try:
         incoming = await receive_upload(file)
@@ -89,7 +96,9 @@ async def upload_game_saves(
             status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail="Save archive too large"
         ) from e
     try:
-        version, created = await run_on_saves_channel(store_version, user.id, id, device_id, trigger, incoming)
+        version, created = await run_on_saves_channel(
+            store_version, user.id, id, device_id, trigger, incoming, titles.version_ids(game, user)
+        )
     except ArchiveError as e:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e)) from e
     if created:

@@ -111,6 +111,7 @@ class TestMediaEndpoints:
         monkeypatch.setattr(games.db_game_handler, "get_game", lambda _id: game)
         monkeypatch.setattr(games.db_game_handler, "update_game", lambda gid, data: saved.update(data) or SimpleNamespace(**{**game.__dict__, **data}))
         monkeypatch.setattr(games.GameSchema, "model_validate", staticmethod(lambda obj: obj))
+        monkeypatch.setattr(games.titles, "versions", lambda g, user: [g])  # no other version of the title
         result = asyncio.run(games.choose_media(SimpleNamespace(id=1, is_admin=True, hidden_library_ids=[]), 1, MediaSelectionForm(**body)))
         return result, saved
 

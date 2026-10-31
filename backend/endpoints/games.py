@@ -7,6 +7,8 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Path, Query, UploadFile, status
 from fastapi.responses import FileResponse
 from handler.visibility import check_visible
+from handler import titles
+from handler import merge as merge_handler
 from handler.auth import AdminUser, CurrentUser
 from handler.database import (
     db_game_handler,
@@ -37,6 +39,8 @@ from endpoints.responses.game import (
     GameFileSchema,
     GameFilesSchema,
     GameImportForm,
+    GameMergeForm,
+    GameMergePreviewSchema,
     GameSchema,
     GameSizeSchema,
     GameSizesSchema,
@@ -61,31 +65,39 @@ def _installed_game_ids(user_id: int) -> set[int]:
 
 @router.get("")
 async def list_games(user: CurrentUser, library_id: int | None = None) -> list[GameSchema]:
-    if library_id is not None:
-        if not user.is_admin and library_id in user.hidden_library_ids:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-        games = db_game_handler.get_games_for_library(library_id)
-    else:
-        games = db_game_handler.get_all_games()
-        if not user.is_admin and user.hidden_library_ids:
-            games = [g for g in games if g.library_id not in user.hidden_library_ids]
+    if library_id is not None and not user.is_admin and library_id in user.hidden_library_ids:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    # The title of a game takes in its versions of other libraries too, so the whole library is read even for one folder.
+    everything = db_game_handler.get_all_games()
+    if not user.is_admin and user.hidden_library_ids:
+        everything = [g for g in everything if g.library_id not in user.hidden_library_ids]
+    games = [g for g in everything if library_id is None or g.library_id == library_id]
+    members = titles.groups(everything)
     installed = _installed_game_ids(user.id)
     with_saves = db_saves_handler.game_ids_with_saves()
     last_played = db_saves_handler.last_saved_by_game(user.id)
     last_played_on = db_saves_handler.last_saved_on_by_game(user.id)
     playtime = db_playtime_handler.seconds_by_game(user.id)
-    return [
-        GameSchema.model_validate(g).model_copy(
-            update={
-                "installed": g.id in installed,
-                "saves_only": g.missing_from_fs and g.id in with_saves,
-                "last_played": last_played.get(g.id),
-                "last_played_on": last_played_on.get(g.id),
-                "playtime_seconds": playtime.get(g.id, 0),
-            }
+
+    def played_last(ids: list[int]) -> int | None:
+        return max((i for i in ids if last_played.get(i)), key=lambda i: last_played[i], default=None)
+
+    out = []
+    for g in games:
+        ids = members[g.id]
+        newest = played_last(ids)
+        out.append(
+            GameSchema.model_validate(g).model_copy(
+                update={
+                    "installed": g.id in installed,
+                    "saves_only": g.missing_from_fs and g.id in with_saves,
+                    "last_played": last_played.get(newest),
+                    "last_played_on": last_played_on.get(newest),
+                    "playtime_seconds": sum(playtime.get(i, 0) for i in ids),
+                }
+            )
         )
-        for g in games
-    ]
+    return out
 
 
 @router.get("/revision")
@@ -179,15 +191,17 @@ async def get_game(user: CurrentUser, id: Annotated[int, Path(ge=1)]) -> GameSch
     game = check_visible(user, db_game_handler.get_game(id))
     installed = game.id in _installed_game_ids(user.id)
     saves_only = game.missing_from_fs and game.id in db_saves_handler.game_ids_with_saves()
-    last_played = db_saves_handler.last_saved_by_game(user.id).get(game.id)
-    last_played_on = db_saves_handler.last_saved_on_by_game(user.id).get(game.id)
+    ids = titles.version_ids(game, user)
+    played = db_saves_handler.last_saved_by_game(user.id)
+    played_on = db_saves_handler.last_saved_on_by_game(user.id)
+    newest = max((i for i in ids if played.get(i)), key=lambda i: played[i], default=None)
     return GameSchema.model_validate(game).model_copy(
         update={
             "installed": installed,
             "saves_only": saves_only,
-            "last_played": last_played,
-            "last_played_on": last_played_on,
-            "playtime_seconds": db_playtime_handler.summary_for_game(user.id, game.id)[0],
+            "last_played": played.get(newest),
+            "last_played_on": played_on.get(newest),
+            "playtime_seconds": db_playtime_handler.summary_for_games(user.id, ids)[0],
         }
     )
 
@@ -273,6 +287,9 @@ async def choose_media(user: AdminUser, id: Annotated[int, Path(ge=1)], data: Me
         if kind == "cover":
             update["cover_path"] = url
     updated = db_game_handler.update_game(id, {**update, "media": media})
+    for sibling in titles.versions(game, user)[1:]:  # the artwork is the title's: every version has it
+        for kind in data.model_dump(exclude_unset=True):
+            await run_in_threadpool(titles.share_artwork, sibling, kind, media.get(kind))
     return GameSchema.model_validate(updated)
 
 
@@ -298,7 +315,10 @@ async def upload_game_media(
     update: dict = {"media": media}
     if kind == "cover":
         update["cover_path"] = url
-    return GameSchema.model_validate(db_game_handler.update_game(id, update))
+    updated = db_game_handler.update_game(id, update)
+    for sibling in titles.versions(game, user)[1:]:
+        await run_in_threadpool(titles.share_artwork, sibling, kind, media[kind])
+    return GameSchema.model_validate(updated)
 
 
 @router.get("/{id}/media/{kind}")
@@ -476,6 +496,8 @@ async def update_game(user: AdminUser, id: Annotated[int, Path(ge=1)], data: Gam
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="cover_path: not an image from a known provider")
     changed = {k for k, v in body.items() if getattr(current, k) != v}
     rematch = changed & {"name", "igdb_id", "sgdb_id"}
+    if "igdb_id" in changed:
+        body["title_key"] = None  # matched again by hand: the game follows its IGDB id into the title that has it
     if rematch:
         # An id left untouched while the name or the other id changed is stale.
         if "igdb_id" not in rematch:

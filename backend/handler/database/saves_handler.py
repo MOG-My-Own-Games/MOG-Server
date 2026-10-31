@@ -34,6 +34,37 @@ class DBSavesHandler(DBBaseHandler):
         )
 
     @begin_session
+    def get_for_games(self, user_id: int, game_ids: list[int], session: Session = None) -> list[SaveVersion]:  # type: ignore
+        """Every device's versions of several games (the versions of one title) for one user, newest first."""
+        return list(
+            session.scalars(
+                select(SaveVersion)
+                .where(SaveVersion.user_id == user_id, SaveVersion.game_id.in_(game_ids))
+                .order_by(SaveVersion.created_at.desc(), SaveVersion.id.desc())
+            ).all()
+        )
+
+    @begin_session
+    def get_for_game_of_all_users(self, game_id: int, session: Session = None) -> list[SaveVersion]:  # type: ignore
+        return list(session.scalars(select(SaveVersion).where(SaveVersion.game_id == game_id)).all())
+
+    @begin_session
+    def get_latest_of_games(
+        self, user_id: int, game_ids: list[int], device_id: int, session: Session = None  # type: ignore
+    ) -> SaveVersion | None:
+        """The newest version a device made of any of the games."""
+        return session.scalar(
+            select(SaveVersion)
+            .where(
+                SaveVersion.user_id == user_id,
+                SaveVersion.game_id.in_(game_ids),
+                SaveVersion.device_id == device_id,
+            )
+            .order_by(SaveVersion.created_at.desc(), SaveVersion.id.desc())
+            .limit(1)
+        )
+
+    @begin_session
     def get_latest(
         self, user_id: int, game_id: int, device_id: int, session: Session = None  # type: ignore
     ) -> SaveVersion | None:

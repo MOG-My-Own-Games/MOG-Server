@@ -54,6 +54,9 @@ class SaveVersionSchema(BaseModel):
 
     id: int
     game_id: int
+    # Which version of the title it was saved by: the game's name and the folder (only in a game's list of saves).
+    game_name: str | None = None
+    fs_name: str | None = None
     device_id: int
     trigger: str
     size_bytes: int

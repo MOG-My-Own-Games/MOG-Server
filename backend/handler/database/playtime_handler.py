@@ -57,3 +57,13 @@ class DBPlaytimeHandler(DBBaseHandler):
             )
         ).one()
         return int(total), int(count)
+
+    @begin_session
+    def summary_for_games(self, user_id: int, game_ids: list[int], session: Session = None) -> tuple[int, int]:  # type: ignore
+        """(seconds played, sessions) of several games (the versions of one title) by a user."""
+        total, count = session.execute(
+            select(func.coalesce(func.sum(GamePlaySession.seconds), 0), func.count(GamePlaySession.id)).where(
+                GamePlaySession.user_id == user_id, GamePlaySession.game_id.in_(game_ids)
+            )
+        ).one()
+        return int(total), int(count)

@@ -86,19 +86,20 @@ def keep_versions(settings) -> int:
 
 
 def store_version(
-    user_id: int, game_id: int, device_id: int, trigger: str, incoming: Path
+    user_id: int, game_id: int, device_id: int, trigger: str, incoming: Path, title_ids: list[int] | None = None
 ) -> tuple[SaveVersion, bool]:
     """Validate and file an uploaded archive; returns (version, created).
 
     An archive with the same content as the device's newest version is not stored again: the
-    existing row comes back with created=False. Afterwards only the newest `keep_versions()`
+    existing row comes back with created=False. That version is the newest of any version of the title (`title_ids`), so the
+    same files are not kept twice because two versions saved them. Afterwards only the newest `keep_versions()` of this game
     stay. Raises ArchiveError (and discards the upload) when the archive is not acceptable."""
     try:
         info = inspect_archive(incoming)
     except BaseException:
         incoming.unlink(missing_ok=True)
         raise
-    latest = db_saves_handler.get_latest(user_id, game_id, device_id)
+    latest = db_saves_handler.get_latest_of_games(user_id, title_ids or [game_id], device_id)
     if latest is not None and latest.content_hash == info.content_hash:
         log.debug(f"Saves: game {game_id} device {device_id} upload identical to version {latest.id}, not stored")
         incoming.unlink(missing_ok=True)

@@ -38,6 +38,8 @@ class Game(BaseModel):
     igdb_id: Mapped[int | None] = mapped_column(Integer(), default=None)
     igdb_metadata: Mapped[dict[str, Any] | None] = mapped_column(CustomJSON(), default=dict)
     sgdb_id: Mapped[int | None] = mapped_column(Integer(), default=None)
+    # Which title the game is a version of, when that was decided and not told by the IGDB id (`mog:<id>`, see handler/titles.py).
+    title_key: Mapped[str | None] = mapped_column(String(length=40), default=None)
     hltb_id: Mapped[int | None] = mapped_column(Integer(), default=None)
     # Completion times in seconds (main_story, main_plus_extra, completionist, all_styles) and their report counts.
     hltb_metadata: Mapped[dict[str, Any] | None] = mapped_column(CustomJSON(), default=dict)
@@ -69,6 +71,11 @@ class Game(BaseModel):
     install_sessions: Mapped[list["InstallSession"]] = relationship(
         lazy="select", back_populates="game", cascade="all, delete-orphan"
     )
+
+    @property
+    def effective_title_key(self) -> str:
+        """The title this game is a version of (see handler/titles.py): games with the same one are one game."""
+        return self.title_key or (f"igdb:{self.igdb_id}" if self.igdb_id else f"mog:{self.id}")
 
     def __repr__(self) -> str:
         return f"Game({self.id} {self.name!r})"

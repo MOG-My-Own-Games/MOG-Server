@@ -12,7 +12,7 @@ from endpoints import saves as saves_endpoints
 from handler import saves
 from handler.auth import get_current_user
 
-GAME = SimpleNamespace(id=5, name="Some Game", library_id=1)
+GAME = SimpleNamespace(id=5, name="Some Game", fs_name="Some Game", library_id=1, effective_title_key="mog:5")
 UID_A, UID_B = "uid-aaaaaaaa", "uid-bbbbbbbb"
 
 

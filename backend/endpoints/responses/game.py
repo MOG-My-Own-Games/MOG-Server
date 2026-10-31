@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
@@ -19,6 +19,9 @@ class GameSchema(BaseModel):
     igdb_id: int | None
     igdb_metadata: dict[str, Any] | None
     sgdb_id: int | None
+    # The title the game is a version of: games with the same key are one game (their time played, saves, name and artwork go
+    # together). `igdb:<id>` when the IGDB id says so, else `mog:<id>`, which MOG gives a game by itself or that was set by hand.
+    title_key: str = Field(validation_alias="effective_title_key")
     # Completion times in seconds; empty when the game is not scraped or HowLongToBeat had nothing.
     hltb_id: int | None = None
     hltb_metadata: dict[str, Any] | None = None
@@ -43,7 +46,8 @@ class GameSchema(BaseModel):
     last_played: datetime | None = None
     # The name of the machine that made that version, so where the game was last played.
     last_played_on: str | None = None
-    # How long this user has played the game, in seconds, from the sessions their clients reported (0 when none).
+    # How long this user has played the game, in seconds, from the sessions their clients reported (0 when none). The time of
+    # the whole title: every version says the same.
     playtime_seconds: int = 0
 
     @computed_field  # type: ignore[prop-decorator]

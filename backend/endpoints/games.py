@@ -506,10 +506,69 @@ async def update_game(user: AdminUser, id: Annotated[int, Path(ge=1)], data: Gam
             body["sgdb_id"] = None
 
     game = db_game_handler.update_game(id, body)
+    shared = {k: body[k] for k in ("name", "summary") if k in changed}
+    if shared:  # the name and the summary are the title's, not a version's
+        for sibling in titles.versions(game, user)[1:]:
+            db_game_handler.update_game(sibling.id, shared)
     if rematch:
         await run_in_threadpool(refresh_game, game, frozenset(changed | (body.keys() & {"cover_path"})))
         game = db_game_handler.get_game(id)
     return GameSchema.model_validate(game)
+
+
+def _merge_pair(user, id: int, other_id: int):
+    this = check_visible(user, db_game_handler.get_game(id))
+    other = check_visible(user, db_game_handler.get_game(other_id))
+    if this.id == other.id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A game cannot be merged with itself")
+    return this, other
+
+
+@router.get("/{id}/merge/{other_id}")
+async def merge_preview(
+    user: AdminUser, id: Annotated[int, Path(ge=1)], other_id: Annotated[int, Path(ge=1)]
+) -> GameMergePreviewSchema:
+    """What Merge... shows before anything is done: both games, how they would be put together and what hangs on each.
+    Changes nothing."""
+    this, other = _merge_pair(user, id, other_id)
+    return GameMergePreviewSchema(
+        mode=merge_handler.mode(this, other),
+        conflict=merge_handler.conflict(this, other),
+        this=GameSchema.model_validate(this),
+        other=GameSchema.model_validate(other),
+        counts=merge_handler.counts(this, other),
+    )
+
+
+@router.post("/{id}/merge")
+async def merge_game(user: AdminUser, id: Annotated[int, Path(ge=1)], form: GameMergeForm) -> GameSchema:
+    """Put another game together with this one, as the person chose in the preview. Two games without a folder of their own
+    each become one (the other is deleted, with its saves, time played and settings moved here); two with files are tied as
+    versions of one game and both stay. Cannot be undone."""
+    this, other = _merge_pair(user, id, form.other_id)
+    choices = form.model_dump(exclude={"other_id"}, exclude_unset=True)
+    before = {this.id: this.igdb_id, other.id: other.igdb_id}
+    try:
+        if merge_handler.mode(this, other) == "merge":
+            result = await run_in_threadpool(merge_handler.merge, this, other, choices)
+        else:
+            result = await run_in_threadpool(merge_handler.link, this, other, choices, user)
+            for game_id, old in before.items():  # a game whose IGDB id changed gets that game's metadata
+                if result.igdb_id and old != result.igdb_id:
+                    await run_in_threadpool(refresh_game, db_game_handler.get_game(game_id), frozenset({"igdb_id"}))
+    except merge_handler.MergeRefused as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"code": e.code, "message": str(e)}) from e
+    return await get_game(user, result.id)
+
+
+@router.post("/{id}/split")
+async def split_from_title(user: AdminUser, id: Annotated[int, Path(ge=1)]) -> GameSchema:
+    """Make this game a title of its own, whatever its IGDB id says (the match put it with games it is not a version of).
+    Nothing is moved: its time played and saves stay with it and the others keep theirs. Matching it again by hand to an
+    IGDB id undoes this."""
+    check_visible(user, db_game_handler.get_game(id))
+    db_game_handler.update_game(id, {"title_key": f"mog:{id}"})
+    return await get_game(user, id)
 
 
 @router.post("/{id}/scrape")

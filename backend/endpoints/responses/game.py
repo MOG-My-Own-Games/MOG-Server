@@ -137,6 +137,33 @@ class GameUpdateForm(BaseModel):
     sgdb_id: int | None = None
 
 
+class GameMergeForm(BaseModel):
+    """What the person chose in Merge...: `other_id` is the game that goes into this one. Only what is sent is changed."""
+
+    other_id: int = Field(ge=1)
+    # The values of the result (not "this" or "other": the person may have typed them).
+    name: str | None = Field(default=None, min_length=1, max_length=400)
+    summary: str | None = None
+    # Whose provider ids the result has (the metadata of the provider follows its id).
+    igdb_id: Literal["this", "other"] = "this"
+    sgdb_id: Literal["this", "other"] = "this"
+    # For each kind of artwork: this game's, the other's, or none.
+    media: dict[str, Literal["this", "other", "none"]] = Field(default_factory=dict)
+    # How the time played ends: both added up, this game's only, or the other's only.
+    playtime: Literal["sum", "this", "other"] = "sum"
+
+
+class GameMergePreviewSchema(BaseModel):
+    # "merge": the other game goes into this one. "link": both have files, so they stay as versions of one game.
+    mode: Literal["merge", "link"]
+    # Why it cannot be done now (`install_in_progress`), else None.
+    conflict: str | None = None
+    this: GameSchema
+    other: GameSchema
+    # What hangs on each game, all users together: playtime_seconds, play_sessions, save_versions, installs, addons, launch_settings.
+    counts: dict[str, dict[str, int]]
+
+
 class LibrarySchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

@@ -8,7 +8,9 @@ from models.game import Game
 from models.game_addon import GameAddon
 from models.game_launch_settings import GameLaunchSettings
 from models.game_play_session import GamePlaySession
-from models.install_session import InstallSession
+from models.install_session import InstallSession, InstallSessionState
+from models.install_step import InstallStep
+from models.notification import Notification
 from models.save_version import SaveVersion
 
 from .base_handler import DBBaseHandler
@@ -105,6 +107,96 @@ class DBGamesHandler(DBBaseHandler):
         session.execute(update(Game).where(Game.id == placeholder_id).values(**taken, imported=False, missing_from_fs=False))
         session.expire_all()
         return session.get(Game, placeholder_id)
+
+    @begin_session
+    def counts(self, game_id: int, session: Session = None) -> dict[str, int]:  # type: ignore
+        """What hangs on a game, all users together: the time played (seconds) and how many of each of the rest."""
+
+        def count(model) -> int:
+            return int(session.scalar(select(func.count()).select_from(model).where(model.game_id == game_id)) or 0)
+
+        seconds = session.scalar(
+            select(func.coalesce(func.sum(GamePlaySession.seconds), 0)).where(GamePlaySession.game_id == game_id)
+        )
+        return {
+            "playtime_seconds": int(seconds or 0),
+            "play_sessions": count(GamePlaySession),
+            "save_versions": count(SaveVersion),
+            "installs": count(InstallSession),
+            "addons": count(GameAddon),
+            "launch_settings": count(GameLaunchSettings),
+        }
+
+    @begin_session
+    def has_active_install(self, game_id: int, session: Session = None) -> bool:  # type: ignore
+        running = (
+            InstallSessionState.DETECTING,
+            InstallSessionState.AWAITING_INSTALLER,
+            InstallSessionState.QUEUED,
+            InstallSessionState.INSTALLING,
+            InstallSessionState.STREAMING,
+        )
+        return bool(
+            session.scalar(
+                select(func.count()).select_from(InstallSession).where(
+                    InstallSession.game_id == game_id, InstallSession.state.in_(running)
+                )
+            )
+        )
+
+    @begin_session
+    def merge_games(  # type: ignore
+        self, keep_id: int, drop_id: int, values: dict, playtime: str, save_paths: dict[int, str],
+        steps_from_drop: bool, session: Session = None,
+    ) -> Game:
+        """Everything of the game `drop_id` goes to `keep_id` and the row goes: saves (`save_paths` has their new file
+        paths), time played (`playtime`: sum, this or other), launch settings (the kept game's win where both have one),
+        installs, add-ons, install steps (those of the game whose folder is kept, `steps_from_drop`) and notifications.
+        `values` are the columns the kept game ends with. One transaction: it is all done or nothing."""
+        for version_id, path in save_paths.items():
+            session.execute(update(SaveVersion).where(SaveVersion.id == version_id).values(file_path=path))
+        session.execute(update(SaveVersion).where(SaveVersion.game_id == drop_id).values(game_id=keep_id))
+
+        if playtime == "this":
+            session.execute(delete(GamePlaySession).where(GamePlaySession.game_id == drop_id))
+        else:
+            if playtime == "other":
+                session.execute(delete(GamePlaySession).where(GamePlaySession.game_id == keep_id))
+            known = {
+                (r.user_id, r.started_at)
+                for r in session.scalars(select(GamePlaySession).where(GamePlaySession.game_id == keep_id))
+            }
+            for run in session.scalars(select(GamePlaySession).where(GamePlaySession.game_id == drop_id)).all():
+                if (run.user_id, run.started_at) in known:  # the same session told twice
+                    session.delete(run)
+                else:
+                    run.game_id = keep_id
+            session.flush()
+
+        have = {r.device_id for r in session.scalars(select(GameLaunchSettings).where(GameLaunchSettings.game_id == keep_id))}
+        for row in session.scalars(select(GameLaunchSettings).where(GameLaunchSettings.game_id == drop_id)).all():
+            if row.device_id in have:
+                session.delete(row)
+            else:
+                row.game_id = keep_id
+        session.flush()
+
+        session.execute(update(InstallSession).where(InstallSession.game_id == drop_id).values(game_id=keep_id))
+        session.execute(update(GameAddon).where(GameAddon.game_id == drop_id).values(game_id=keep_id))
+        session.execute(update(Notification).where(Notification.game_id == drop_id).values(game_id=keep_id))
+        if steps_from_drop:
+            session.execute(delete(InstallStep).where(InstallStep.game_id == keep_id))
+            session.flush()
+            session.execute(update(InstallStep).where(InstallStep.game_id == drop_id).values(game_id=keep_id))
+        else:
+            session.execute(delete(InstallStep).where(InstallStep.game_id == drop_id))
+
+        session.expire_all()
+        session.execute(delete(Game).where(Game.id == drop_id))
+        session.flush()  # the folder's name is free again before the other row has it
+        session.execute(update(Game).where(Game.id == keep_id).values(**values))
+        session.expire_all()
+        return session.get(Game, keep_id)
 
     @begin_session
     def delete_game(self, game_id: int, session: Session = None) -> None:  # type: ignore

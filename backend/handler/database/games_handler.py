@@ -5,6 +5,10 @@ from sqlalchemy.orm import Session
 
 from decorators.database import begin_session
 from models.game import Game
+from models.game_addon import GameAddon
+from models.game_launch_settings import GameLaunchSettings
+from models.game_play_session import GamePlaySession
+from models.install_session import InstallSession
 from models.save_version import SaveVersion
 
 from .base_handler import DBBaseHandler
@@ -78,6 +82,29 @@ class DBGamesHandler(DBBaseHandler):
     def update_game(self, game_id: int, data: dict, session: Session = None) -> Game | None:  # type: ignore
         session.execute(update(Game).where(Game.id == game_id).values(**data))
         return session.get(Game, game_id)
+
+    @begin_session
+    def has_dependents(self, game_id: int, session: Session = None) -> bool:  # type: ignore
+        """Whether anything but the game's own row hangs on it: installs, add-ons, launch settings, play time, saves."""
+        return any(
+            session.scalar(select(func.count()).select_from(model).where(model.game_id == game_id))
+            for model in (InstallSession, GameAddon, GameLaunchSettings, GamePlaySession, SaveVersion)
+        )
+
+    @begin_session
+    def absorb_game(self, placeholder_id: int, game_id: int, session: Session = None) -> Game:  # type: ignore
+        """The game a client imported takes the place of the game the scan found for it: it gets its folder, size and whatever
+        metadata it lacks, and the other row goes. The imported one is kept, so the saves and the clients' records stay on its id."""
+        placeholder, real = session.get(Game, placeholder_id), session.get(Game, game_id)
+        taken = {f: getattr(real, f) for f in ("library_id", "fs_name", "size_bytes", "addons_only", "has_mods")}
+        for field in ("summary", "igdb_id", "igdb_metadata", "sgdb_id", "hltb_id", "hltb_metadata", "cover_path", "media"):
+            if not getattr(placeholder, field):
+                taken[field] = getattr(real, field)
+        session.execute(delete(Game).where(Game.id == game_id))
+        session.flush()  # the folder's name is free again before the other row has it
+        session.execute(update(Game).where(Game.id == placeholder_id).values(**taken, imported=False, missing_from_fs=False))
+        session.expire_all()
+        return session.get(Game, placeholder_id)
 
     @begin_session
     def delete_game(self, game_id: int, session: Session = None) -> None:  # type: ignore

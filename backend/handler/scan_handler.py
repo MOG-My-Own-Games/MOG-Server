@@ -171,4 +171,7 @@ def _scan_library(library: Library) -> ScanResult:
             db_game_handler.update_game(game.id, changes)
         missing += is_missing
 
+    from handler.imports import adopt_placeholders  # imports.py needs this module's import_key
+
+    adopt_placeholders(db=db_game_handler)  # a file that only took the name of an imported game when its metadata came
     return ScanResult(added=len(new_games), missing=missing, total=len(on_disk), new_games=tuple(new_games))

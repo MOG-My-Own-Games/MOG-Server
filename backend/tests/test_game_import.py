@@ -246,3 +246,74 @@ def test_a_library_is_made_with_a_name_and_a_folder_the_server_sees(db):
     assert client.post("/api/libraries", json={"name": "Again", "root_path": "/games/old/"}).status_code == 409
     assert client.post("/api/libraries", json={"name": "Relative", "root_path": "games/new"}).status_code == 422
     assert client.post("/api/libraries", json={"name": " ", "root_path": "/games/new"}).status_code == 422
+
+
+def _library_with(db, tmp_path, *names):
+    root = tmp_path / "games"
+    root.mkdir()
+    for name in names:
+        (root / name).write_bytes(b"x")
+    return db_library_handler.add_library(Library(name="games", root_path=str(root)))
+
+
+def test_a_game_the_scrape_names_like_an_imported_one_becomes_that_game(db, tmp_path, monkeypatch):
+    """Pocket Campfire: a client imported it, then the scan found `PocketCampfire_v2_WindowsInstaller.exe`, which is named like it only
+    after the match. They stayed two entries (one with the saves, one with the installer) until the scrape merged them."""
+    monkeypatch.setattr("handler.scan_handler.has_mods", lambda path: False)
+    monkeypatch.setattr(scrape_handler, "warm_videos", lambda games: None)
+    library = _library_with(db, tmp_path, "PocketCampfire_v2_WindowsInstaller.exe")
+    imported = db_game_handler.add_game(
+        Game(library_id=library.id, fs_name="Pocket Campfire", name="Pocket Campfire", imported=True, missing_from_fs=True, sgdb_id=5)
+    )
+    scan_library(library)
+    assert len(db_game_handler.get_all_games()) == 2  # the scan alone cannot tell
+
+    def match(game):
+        db_game_handler.update_game(game.id, {"name": "Pocket Campfire", "igdb_id": 77, "summary": "camp"})
+        return True
+
+    monkeypatch.setattr(scrape_handler, "scrape_game", match)
+    scrape_handler.scrape_library(library.id)
+
+    (game,) = db_game_handler.get_all_games()
+    assert game.id == imported.id  # the saves and the clients' records are on this id
+    assert (game.fs_name, game.library_id, game.imported, game.missing_from_fs) == ("PocketCampfire_v2_WindowsInstaller.exe", library.id, False, False)
+    assert (game.igdb_id, game.summary, game.sgdb_id, game.size_bytes) == (77, "camp", 5, 1)  # what it lacked, from the other
+
+
+def test_the_next_scan_also_joins_a_game_that_was_named_after_the_fact(db, tmp_path, monkeypatch):
+    monkeypatch.setattr("handler.scan_handler.has_mods", lambda path: False)
+    library = _library_with(db, tmp_path, "Setup_Game.exe")
+    imported = db_game_handler.add_game(
+        Game(library_id=library.id, fs_name="Nice Game", name="Nice Game", imported=True, missing_from_fs=True)
+    )
+    scan_library(library)
+    real = db_game_handler.get_game_by_fs_name(library.id, "Setup_Game.exe")
+    db_game_handler.update_game(real.id, {"name": "Nice  game!"})  # renamed by hand, say
+
+    scan_library(library)
+
+    (game,) = db_game_handler.get_all_games()
+    assert (game.id, game.fs_name) == (imported.id, "Setup_Game.exe")
+
+
+def test_a_game_with_installs_or_saves_of_its_own_is_not_merged(db, tmp_path, monkeypatch):
+    from handler.imports import adopt_placeholders
+
+    library = _library_with(db, tmp_path, "Setup_Game.exe")
+    db_game_handler.add_game(Game(library_id=None, fs_name="Nice Game", name="Nice Game", imported=True, missing_from_fs=True))
+    real = db_game_handler.add_game(Game(library_id=library.id, fs_name="Setup_Game.exe", name="Nice Game"))
+    monkeypatch.setattr(db_game_handler, "has_dependents", lambda game_id: True)
+
+    assert adopt_placeholders(real.id) is None and len(db_game_handler.get_all_games()) == 2
+
+
+def test_a_game_with_artwork_uploaded_under_its_id_is_not_merged(db, tmp_path):
+    from handler.imports import adopt_placeholders
+
+    library = _library_with(db, tmp_path, "Setup_Game.exe")
+    db_game_handler.add_game(Game(library_id=None, fs_name="Nice Game", name="Nice Game", imported=True, missing_from_fs=True))
+    real = db_game_handler.add_game(Game(library_id=library.id, fs_name="Setup_Game.exe", name="Nice Game"))
+    db_game_handler.update_game(real.id, {"cover_path": f"/resources/media/{real.id}/cover.png"})
+
+    assert adopt_placeholders(real.id) is None and len(db_game_handler.get_all_games()) == 2

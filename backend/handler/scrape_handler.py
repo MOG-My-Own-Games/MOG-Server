@@ -13,6 +13,7 @@ import time
 from dataclasses import dataclass
 
 from handler.database import db_game_handler
+from handler.imports import adopt_placeholders, merged_into
 from handler.notifications import notify_games_added
 from handler import media as media_handler
 from handler import media_uploads
@@ -294,6 +295,7 @@ def scrape_library(library_id: int, refresh: bool = False) -> ScrapeResult:
     for game in games:
         try:
             scraped += fetch(game)
+            adopt_placeholders(game.id)  # the match may have given it the name of a game a client imported
         except Exception as e:  # noqa: BLE001 - one bad game must not stop the rest
             log.warning(f"Scrape of {game.name!r} failed: {e}")
     warm_videos([g for g in db_game_handler.get_games_for_library(library_id) if not g.missing_from_fs])
@@ -363,6 +365,7 @@ def scrape_and_announce(library: Library, new_games: tuple[tuple[int, str], ...]
         return
     named = []
     for game_id, folder_name in new_games:
+        game_id = merged_into.get(game_id, game_id)  # a game merged into one a client imported is announced as that one
         game = db_game_handler.get_game(game_id)
         named.append((game_id, game.name if game else folder_name))
     try:

@@ -1116,3 +1116,26 @@ a.chip { color: inherit; text-decoration: none; }
 .changelog a:hover { color: #fff; }
 .changelog-panel { width: min(720px, 94vw); }
 .changelog-panel .modal-footer { position: static; padding-top: var(--space-md); }
+
+/* Merge... in Edit metadata: the search and the three-column comparison */
+.merge-panel { width: min(1000px, 96vw); }
+.merge-results { list-style: none; margin: 0.6em 0 0; padding: 0; display: grid; gap: 0.35em; max-height: 50vh; overflow-y: auto; }
+.merge-result { display: flex; align-items: center; gap: 0.7em; width: 100%; text-align: left; padding: 0.4em 0.6em; background: var(--bg-elevated-2); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); cursor: pointer; }
+.merge-result:disabled { opacity: 0.5; cursor: not-allowed; }
+.merge-result img, .merge-thumb { width: 36px; height: 54px; object-fit: cover; border-radius: 3px; background: var(--bg); flex: none; }
+.merge-result .merge-meta { display: flex; flex-direction: column; min-width: 0; }
+.merge-result .merge-meta span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.merge-selected { display: flex; gap: 0.9em; align-items: flex-start; margin-bottom: 0.8em; }
+.merge-selected img { width: 90px; height: 135px; object-fit: cover; border-radius: var(--radius-sm); background: var(--bg); }
+.merge-table { display: grid; grid-template-columns: 8em minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.2fr); gap: 0.4em 0.8em; align-items: start; margin: 0.8em 0; }
+.merge-table .merge-head { font-size: 0.8em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--border); padding-bottom: 0.3em; }
+.merge-table .merge-label { font-weight: 600; padding-top: 0.3em; }
+.merge-cell { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.merge-cell img.merge-art { max-width: 100%; max-height: 90px; object-fit: contain; background: var(--bg); border-radius: 3px; }
+.merge-cell input[type="text"], .merge-cell textarea { width: 100%; }
+.merge-choices { display: flex; gap: 0.3em; flex-wrap: wrap; margin-top: 0.3em; }
+.merge-choices button { padding: 0.15em 0.6em; font-size: 0.8em; }
+.merge-choices button.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.merge-info { grid-column: 1 / -1; }
+.merge-banner { padding: 0.5em 0.8em; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-elevated-2); margin: 0.5em 0; }
+.merge-banner.merge-error { border-color: #c0392b; }

@@ -1933,18 +1933,20 @@ const ADDONS_BADGE =
 
 // Games sharing an IGDB id are versions of one title; the grid shows one
 // representative (preferring one that is still on disk) per group.
+// The title a game is a version of (the server says; the IGDB id for a server that does not).
+function titleKeyOf(game) {
+  return game.title_key || (game.igdb_id ? `igdb:${game.igdb_id}` : `mog:${game.id}`);
+}
+
 function groupGames(list) {
   const groups = new Map();
   const out = [];
   for (const game of list) {
-    if (!game.igdb_id) {
-      out.push({ game, versions: 1, lastPlayed: game.last_played || null, added: game.created_at || null });
-      continue;
-    }
-    let entry = groups.get(game.igdb_id);
+    const key = titleKeyOf(game);
+    let entry = groups.get(key);
     if (!entry) {
       entry = { game, versions: 0, lastPlayed: null, added: null };
-      groups.set(game.igdb_id, entry);
+      groups.set(key, entry);
       out.push(entry);
     } else if (entry.game.missing_from_fs && !game.missing_from_fs) {
       entry.game = game;
@@ -2611,7 +2613,8 @@ function relationCard(item) {
 
 function renderVersions(game) {
   const el = document.getElementById("game-versions");
-  const versions = game.igdb_id ? (gamesAll || games).filter((g) => g.igdb_id === game.igdb_id) : [];
+  const key = titleKeyOf(game);
+  const versions = (gamesAll || games).filter((g) => titleKeyOf(g) === key);
   el.hidden = versions.length < 2;
   el.innerHTML = versions
     .map((g) => {
@@ -3162,6 +3165,7 @@ document.getElementById("edit-metadata-btn").addEventListener("click", () => {
   document.getElementById("edit-summary").value = activeGame.summary || activeGame.igdb_metadata?.summary || "";
   document.getElementById("edit-igdb-id").value = activeGame.igdb_id ?? "";
   document.getElementById("edit-sgdb-id").value = activeGame.sgdb_id ?? "";
+  renderTitleVersions();
   document.getElementById("edit-metadata-form").hidden = false;
 });
 
@@ -3191,6 +3195,375 @@ document.getElementById("edit-metadata-form").addEventListener("submit", async (
     alert(`Could not save: ${err.message}`);
   }
 });
+
+// --- Versions of a game, and Merge... ---
+
+function normalizedName(text) {
+  return String(text || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+// The other versions of the title the game belongs to, and a warning when their names do not look alike.
+function renderTitleVersions() {
+  const key = titleKeyOf(activeGame);
+  const others = (gamesAll || games).filter((g) => g.id !== activeGame.id && titleKeyOf(g) === key);
+  const text = document.getElementById("edit-title-versions");
+  const warning = document.getElementById("edit-title-warning");
+  document.getElementById("edit-split-btn").hidden = others.length === 0;
+  text.textContent = others.length
+    ? `One game with ${others.length + 1} versions: ${[activeGame, ...others].map((g) => g.fs_name).join(", ")}. The name, summary, artwork, time played and saves go with the game, not with a version.`
+    : "No other version. Merge... puts another entry of the library together with this one.";
+  const mine = normalizedName(activeGame.name);
+  const strangers = others.filter((g) => {
+    const theirs = normalizedName(g.name);
+    return mine && theirs && !mine.includes(theirs) && !theirs.includes(mine);
+  });
+  warning.hidden = strangers.length === 0;
+  warning.textContent = strangers.length
+    ? `Their names differ (${strangers.map((g) => g.name).join(", ")}). If they are not versions of the same game, the IGDB match is wrong: correct it, or use "Not the same game as the others".`
+    : "";
+}
+
+document.getElementById("edit-split-btn").addEventListener("click", async () => {
+  try {
+    await api(`/api/games/${activeGame.id}/split`, { method: "POST" });
+    await refreshGames();
+    activeGame = await gameById(activeGame.id);
+    renderTitleVersions();
+    renderVersions(activeGame);
+  } catch (err) {
+    alert(`Could not split: ${err.message}`);
+  }
+});
+
+const mergeSearchModal = document.getElementById("merge-search-modal");
+const mergeCompareModal = document.getElementById("merge-compare-modal");
+const mergeSearchInput = document.getElementById("merge-search-input");
+
+function closeMerge() {
+  mergeSearchModal.hidden = true;
+  mergeCompareModal.hidden = true;
+}
+
+document.getElementById("edit-merge-btn").addEventListener("click", () => {
+  mergeSearchInput.value = activeGame.name;
+  document.getElementById("merge-search-error").hidden = true;
+  renderMergeResults();
+  mergeSearchModal.hidden = false;
+  mergeSearchInput.focus();
+  mergeSearchInput.select();
+});
+
+document.getElementById("merge-search-cancel").addEventListener("click", closeMerge);
+mergeSearchInput.addEventListener("input", renderMergeResults);
+for (const modal of [mergeSearchModal, mergeCompareModal]) {
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) closeMerge();
+  });
+}
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && (!mergeSearchModal.hidden || !mergeCompareModal.hidden)) closeMerge();
+});
+
+function hasOwnFiles(game) {
+  return game.library_id != null && !game.imported && !game.missing_from_fs;
+}
+
+// The games that match what was typed: a game id, or the title (letters and digits only, so "Pocket Campfire" finds
+// "PocketCampfire_v2"). The game being edited is not offered.
+function renderMergeResults() {
+  const typed = mergeSearchInput.value.trim();
+  const wanted = normalizedName(typed);
+  const asId = /^\d+$/.test(typed) ? parseInt(typed, 10) : null;
+  const found = (gamesAll || games)
+    .filter((g) => g.id !== activeGame.id)
+    .filter((g) => !typed || g.id === asId || normalizedName(g.name).includes(wanted) || normalizedName(g.fs_name).includes(wanted))
+    .slice(0, 60);
+  const list = document.getElementById("merge-search-results");
+  list.replaceChildren();
+  if (!found.length) {
+    const none = document.createElement("li");
+    none.className = "muted small";
+    none.textContent = "No other game matches.";
+    list.appendChild(none);
+    return;
+  }
+  for (const game of found) {
+    const li = document.createElement("li");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "merge-result";
+    const lib = (libraries.find((l) => l.id === game.library_id) || {}).name;
+    const state = game.imported ? "added by a client, no files" : game.missing_from_fs ? "files gone" : lib || "";
+    button.innerHTML = `${game.cover_path ? `<img src="${escapeHtml(game.cover_path)}" alt="" />` : '<span class="merge-thumb"></span>'}
+      <span class="merge-meta"><strong>${escapeHtml(game.name)}</strong><span class="muted small">#${game.id} · ${escapeHtml(game.fs_name)}${state ? ` · ${escapeHtml(state)}` : ""}</span></span>`;
+    button.addEventListener("click", () => openMergeCompare(game.id));
+    li.appendChild(button);
+    list.appendChild(li);
+  }
+}
+
+// What the person has chosen so far; nothing is sent until Save and the confirmation.
+let mergeState = null;
+
+async function openMergeCompare(otherId) {
+  const error = document.getElementById("merge-search-error");
+  error.hidden = true;
+  let preview;
+  try {
+    preview = await api(`/api/games/${activeGame.id}/merge/${otherId}`);
+  } catch (err) {
+    error.textContent = `Could not read the game: ${err.message}`;
+    error.hidden = false;
+    return;
+  }
+  const { this: a, other: b } = preview;
+  // What this game lacks, the other one lends; the rest stays as it is until the person says otherwise.
+  const lends = (mine, theirs) => (mine == null || mine === "" ? (theirs == null || theirs === "" ? "this" : "other") : "this");
+  mergeState = {
+    preview,
+    name: a.name,
+    summary: a.summary || b.summary || "",
+    igdb: lends(a.igdb_id, b.igdb_id),
+    sgdb: lends(a.sgdb_id, b.sgdb_id),
+    media: Object.fromEntries(
+      MEDIA_KINDS.map(([kind]) => [kind, lends(((a.media || {})[kind] || {}).url, ((b.media || {})[kind] || {}).url)]),
+    ),
+    playtime: "sum",
+  };
+  mergeSearchModal.hidden = true;
+  renderMergeCompare();
+  mergeCompareModal.hidden = false;
+}
+
+function mergeChoiceButtons(options, current, onPick) {
+  const wrap = document.createElement("div");
+  wrap.className = "merge-choices";
+  for (const [value, label] of options) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = label;
+    button.className = "button-secondary" + (value === current ? " selected" : "");
+    button.addEventListener("click", () => onPick(value));
+    wrap.appendChild(button);
+  }
+  return wrap;
+}
+
+function mergeThumb(url) {
+  if (!url) return Object.assign(document.createElement("span"), { className: "muted small", textContent: "None" });
+  const img = document.createElement("img");
+  img.className = "merge-art";
+  img.src = url;
+  img.alt = "";
+  return img;
+}
+
+function renderMergeCompare() {
+  const { preview } = mergeState;
+  const { this: a, other: b, counts, mode, conflict } = preview;
+  const panel = document.getElementById("merge-compare-panel");
+  panel.replaceChildren();
+  const heading = document.createElement("h3");
+  heading.id = "merge-compare-title";
+  heading.textContent = mode === "link" ? `Make "${b.name}" a version of this game` : `Merge "${b.name}" into this game`;
+  panel.appendChild(heading);
+
+  const brief = document.createElement("div");
+  brief.className = "merge-selected";
+  const played = counts.other.playtime_seconds > 0 ? ` · played ${formatPlayed(counts.other.playtime_seconds)}` : "";
+  brief.innerHTML = `${b.cover_path ? `<img src="${escapeHtml(b.cover_path)}" alt="" />` : ""}
+    <div><strong>${escapeHtml(b.name)}</strong><div class="muted small">#${b.id} · ${escapeHtml(b.fs_name)}${played}</div>
+    <p class="small">${escapeHtml((b.summary || "").slice(0, 280))}</p></div>`;
+  panel.appendChild(brief);
+
+  const note = document.createElement("div");
+  note.className = "merge-banner";
+  note.textContent =
+    mode === "link"
+      ? "Both games have their own files, so they are two versions of one game: both stay. They share the name, summary, artwork, time played and the saves a client can restore."
+      : hasOwnFiles(b)
+        ? `"${b.name}" is deleted and everything it had (saves, time played, installs, add-ons, launch settings) moves to this game.`
+        : `"${b.name}" has no files of its own. It is deleted and everything it had (saves, time played, launch settings) moves to this game.`;
+  panel.appendChild(note);
+  if (conflict) {
+    const banner = document.createElement("div");
+    banner.className = "merge-banner merge-error";
+    banner.textContent = "An install of one of the two games is in progress. Wait for it to end.";
+    panel.appendChild(banner);
+  }
+
+  const grid = document.createElement("div");
+  grid.className = "merge-table";
+  for (const title of ["", "This game", "Selected game", "Result"]) {
+    const head = document.createElement("div");
+    head.className = "merge-head";
+    head.textContent = title;
+    grid.appendChild(head);
+  }
+  const row = (label, left, right, result) => {
+    const cells = [Object.assign(document.createElement("div"), { className: "merge-label", textContent: label })];
+    for (const content of [left, right, result]) {
+      const cell = document.createElement("div");
+      cell.className = "merge-cell";
+      cell.append(content);
+      cells.push(cell);
+    }
+    grid.append(...cells);
+  };
+  const text = (value) => (value ? document.createTextNode(value) : Object.assign(document.createElement("span"), { className: "muted small", textContent: "—" }));
+  let rows = 0;
+
+  const textRow = (label, key, multiline) => {
+    const mine = key === "name" ? a.name : a.summary || "";
+    const theirs = key === "name" ? b.name : b.summary || "";
+    if (mine === theirs) return;
+    rows += 1;
+    const input = document.createElement(multiline ? "textarea" : "input");
+    if (!multiline) input.type = "text";
+    else input.rows = 4;
+    input.value = mergeState[key];
+    input.addEventListener("input", () => (mergeState[key] = input.value));
+    const cell = document.createElement("div");
+    cell.append(input);
+    cell.append(
+      mergeChoiceButtons([["this", "Use this"], ["other", "Use selected"]], null, (pick) => {
+        input.value = pick === "this" ? mine : theirs;
+        mergeState[key] = input.value;
+      }),
+    );
+    row(label, text(mine), text(theirs), cell);
+  };
+  textRow("Name", "name", false);
+  textRow("Summary", "summary", true);
+
+  const idRow = (label, key, mine, theirs) => {
+    if (mine === theirs) return;
+    rows += 1;
+    const cell = document.createElement("div");
+    const shown = document.createElement("div");
+    const paint = () => (shown.textContent = String((mergeState[key] === "this" ? mine : theirs) ?? "—"));
+    paint();
+    cell.append(shown);
+    cell.append(
+      mergeChoiceButtons([["this", "This"], ["other", "Selected"]], mergeState[key], (pick) => {
+        mergeState[key] = pick;
+        renderMergeCompare();
+      }),
+    );
+    row(label, text(mine == null ? "" : String(mine)), text(theirs == null ? "" : String(theirs)), cell);
+  };
+  idRow("IGDB ID", "igdb", a.igdb_id, b.igdb_id);
+  idRow("SteamGridDB ID", "sgdb", a.sgdb_id, b.sgdb_id);
+
+  for (const [kind, label] of MEDIA_KINDS) {
+    const mine = ((a.media || {})[kind] || {}).url || "";
+    const theirs = ((b.media || {})[kind] || {}).url || "";
+    if (mine === theirs) continue;
+    rows += 1;
+    const pick = mergeState.media[kind];
+    const shown = pick === "this" ? mine : pick === "other" ? theirs : "";
+    const cell = document.createElement("div");
+    cell.append(mergeThumb(shown));
+    cell.append(
+      mergeChoiceButtons([["this", "This"], ["other", "Selected"], ["none", "None"]], pick, (value) => {
+        mergeState.media[kind] = value;
+        renderMergeCompare();
+      }),
+    );
+    row(label, mergeThumb(mine), mergeThumb(theirs), cell);
+  }
+
+  if (mode === "merge" && (counts.this.playtime_seconds || counts.other.playtime_seconds)) {
+    rows += 1;
+    const total = { sum: counts.this.playtime_seconds + counts.other.playtime_seconds, this: counts.this.playtime_seconds, other: counts.other.playtime_seconds }[mergeState.playtime];
+    const cell = document.createElement("div");
+    cell.append(text(formatPlayed(total)));
+    cell.append(
+      mergeChoiceButtons([["sum", "Add up"], ["this", "This"], ["other", "Selected"]], mergeState.playtime, (value) => {
+        mergeState.playtime = value;
+        renderMergeCompare();
+      }),
+    );
+    row("Time played", text(formatPlayed(counts.this.playtime_seconds)), text(formatPlayed(counts.other.playtime_seconds)), cell);
+  }
+  panel.appendChild(grid);
+
+  if (!rows) {
+    const same = document.createElement("p");
+    same.className = "muted small";
+    same.textContent = "Nothing differs between the two games.";
+    panel.appendChild(same);
+  }
+  if (mode === "merge") {
+    const kept = [
+      ["save_versions", "saved versions"],
+      ["installs", "installs"],
+      ["addons", "add-ons"],
+      ["launch_settings", "launch settings"],
+    ]
+      .filter(([key]) => counts.this[key] || counts.other[key])
+      .map(([key, name]) => `${counts.this[key] + counts.other[key]} ${name}`);
+    if (kept.length) {
+      const info = document.createElement("p");
+      info.className = "muted small";
+      info.textContent = `All kept, put together: ${kept.join(", ")}.`;
+      panel.appendChild(info);
+    }
+  }
+
+  const footer = document.createElement("div");
+  footer.className = "modal-footer";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "button-secondary";
+  cancel.textContent = "Cancel";
+  cancel.addEventListener("click", closeMerge);
+  const save = document.createElement("button");
+  save.type = "button";
+  save.textContent = "Save";
+  save.disabled = Boolean(conflict);
+  save.addEventListener("click", saveMerge);
+  footer.append(cancel, save);
+  panel.appendChild(footer);
+  save.focus();
+}
+
+async function saveMerge() {
+  const { preview } = mergeState;
+  const { this: a, other: b, mode } = preview;
+  const name = mergeState.name.trim();
+  if (!name) {
+    alert("The name cannot be empty.");
+    return;
+  }
+  const lines =
+    mode === "link"
+      ? [`"${a.name}" and "${b.name}" become versions of one game.`, "They will share the name, summary, artwork, time played and saves."]
+      : [`"${b.name}" is deleted and everything it had moves to "${a.name}".`, "Saves, time played and settings are kept, but the entry itself is gone."];
+  lines.push("This cannot be undone.");
+  const ok = await confirmDanger({ title: "Merge these games?", lines, confirmLabel: "Merge", cancelLabel: "Go back" });
+  if (!ok) return;
+  const body = { other_id: b.id, igdb_id: mergeState.igdb, sgdb_id: mergeState.sgdb, playtime: mergeState.playtime };
+  if (name !== a.name) body.name = name;
+  if (mergeState.summary !== (a.summary || "")) body.summary = mergeState.summary;
+  body.media = Object.fromEntries(Object.entries(mergeState.media).filter(([, value]) => value !== "this"));
+  try {
+    const game = await api(`/api/games/${activeGame.id}/merge`, { method: "POST", body: JSON.stringify(body) });
+    closeMerge();
+    activeGame = game;
+    document.getElementById("game-title").textContent = game.name;
+    renderOverview(game);
+    showCover(game);
+    renderHeaderArt(game);
+    document.getElementById("edit-metadata-form").hidden = true;
+    await refreshGames();
+    renderVersions(game);
+    document.getElementById("scrape-status").textContent =
+      mode === "link" ? `"${b.name}" is now a version of this game.` : `"${b.name}" was merged into this game.`;
+  } catch (err) {
+    alert(`Could not merge: ${err.detail?.message || err.message}`);
+  }
+}
 
 // Searches use the name as currently typed in the edit form, not the saved one.
 function searchQuery() {

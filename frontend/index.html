@@ -169,6 +169,15 @@
               <button id="sgdb-search-btn" type="button">Search by name</button>
               <div id="sgdb-results" class="grid-results"></div>
             </div>
+            <div class="metadata-search">
+              <h4>Versions of this game</h4>
+              <p id="edit-title-versions" class="muted small"></p>
+              <p id="edit-title-warning" class="muted small" hidden></p>
+              <div class="page-actions">
+                <button id="edit-merge-btn" type="button">Merge...</button>
+                <button id="edit-split-btn" type="button" hidden>Not the same game as the others</button>
+              </div>
+            </div>
             <div class="page-actions form-actions">
               <button type="submit">Save</button>
               <button type="button" id="edit-metadata-cancel-btn" class="danger">Cancel</button>
@@ -692,6 +701,23 @@
         <button id="extract-modal-extract" type="button">Extract as it is</button>
       </div>
     </div>
+  </div>
+
+  <div id="merge-search-modal" class="modal" hidden>
+    <div class="modal-panel merge-panel" role="dialog" aria-modal="true" aria-labelledby="merge-search-title">
+      <h3 id="merge-search-title">Merge with another game</h3>
+      <p class="muted small">Pick the game to put together with this one. Search by title or by game id. Nothing changes until you press Save on the next step.</p>
+      <input id="merge-search-input" type="text" placeholder="Title or game id" autocomplete="off" />
+      <ul id="merge-search-results" class="merge-results"></ul>
+      <p id="merge-search-error" class="muted small" hidden></p>
+      <div class="modal-footer">
+        <button id="merge-search-cancel" type="button" class="button-secondary">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="merge-compare-modal" class="modal" hidden>
+    <div id="merge-compare-panel" class="modal-panel merge-panel merge-compare-panel" role="dialog" aria-modal="true" aria-labelledby="merge-compare-title"></div>
   </div>
 
   <div id="add-library-modal" class="modal" hidden>

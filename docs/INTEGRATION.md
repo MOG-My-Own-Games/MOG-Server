@@ -44,7 +44,7 @@ already inside, or as a folder of files, the server can also hand those over as 
 | Term | Meaning |
 | --- | --- |
 | **Library** | A folder on the server that is scanned. Every top-level file or folder in it is one game. Users can be kept away from some libraries (`hidden_library_ids`). |
-| **Game** | One top-level entry of a library, with its metadata. Several games that matched the same title (`igdb_id`) are versions of it. |
+| **Game** | One top-level entry of a library, with its metadata. Several games of the same title (`title_key`: the same IGDB match, or tied by hand) are versions of it. |
 | **Installer candidate** | A file the server found that may install the game (a setup program, an archive, a disc image, a Linux installer script). |
 | **Install session** | One attempt to install a game for one user. It has a state, a progress, and, when the installer is done, a list of files. |
 | **Install cache** | The folder on the server where a session's output lives until it expires or is deleted. Your client downloads from it. |
@@ -146,9 +146,29 @@ caches and its saves take on the server), and `GET /api/games/{id}/files` (the g
 not the install). An imported game has no files: whatever needs them (`/files`, the mods, installing) answers `409` with
 `{"detail": {"code": "no_files"}}`, and `/sizes` counts only its saves.
 
-**Grouping.** MOG Client shows games that share an `igdb_id` as one entry with "N versions". When the user
-installs it, the installers of every version are listed, each under its version's name, and the user picks one.
-Your client can do the same or show each game on its own.
+**Grouping.** Games of the same title are versions of one game. A game's `title_key` says which: `igdb:<id>` when the
+IGDB match says so, `mog:<id>` for a game by itself or one the server was told is the same game as another (a game IGDB does
+not know, or a wrong match split off). Group by `title_key`; a client that does not know the field can group by `igdb_id`.
+MOG Client shows a title as one entry with "N versions". When the user installs it, the installers of every version are
+listed, each under its version's name, and the user picks one. Your client can do the same or show each game on its own.
+
+What the versions of a title share: the name, summary and artwork (editing one edits all), the time played (every version
+carries the title's total in `playtime_seconds`, so do not add the versions up) and the saves a client may restore
+(`GET /api/games/{id}/saves` lists those of every version, each marked with the `game_id` of the version that made it, and
+its `game_name` and `fs_name`). What stays with a version: its files, installs, mods and add-ons, and its launch settings. Nothing
+is moved to make this so: each row keeps what was written under its own id, so correcting the `igdb_id` of a version (or
+`POST /api/games/{id}/split`, administrators) takes it out of the title and gives it back what is its own.
+
+**Merging.** `GET /api/games/{id}/merge/{other_id}` (administrators) shows what putting two games together would do and
+changes nothing: both games, `mode`, `conflict` and what hangs on each (`counts`: `playtime_seconds`, `play_sessions`,
+`save_versions`, `installs`, `addons`, `launch_settings`). `POST /api/games/{id}/merge` does it, with
+`{"other_id": 5, "name": "...", "summary": "...", "igdb_id": "this|other", "sgdb_id": "this|other", "media": {"cover":
+"this|other|none"}, "playtime": "sum|this|other"}` (everything but `other_id` optional). When at most one of the two has a
+folder of its own (`mode: "merge"`), game `{id}` stays and `other_id` is deleted, with its saves (the files move to the
+kept game's folder), time played, launch settings, installs, add-ons and notifications moved to it. When both have files
+(`mode: "link"`) they are two versions of one game: both stay and share one title. `409` with `detail.code`
+`install_in_progress` when an install of either is running. A client that has a record of the deleted game finds it gone from the
+list, as for any deleted game. It cannot be undone.
 
 ## 5. Installing a game
 
@@ -525,7 +545,7 @@ answers `404`: treat that as "not supported" and carry on, the log is never a re
 | Call | What it does |
 | --- | --- |
 | `POST /api/games/{id}/saves?device_id=D&trigger=T` | Upload a zip (multipart form field `file`) as the newest version of device `D`. `T` is `launch`, `quit`, `manual`, `uninstall`, `sync` or `import` (the first backup of a game just imported): a label shown next to the version. The answer has `created: false` when the archive is identical to the device's newest, and nothing was stored. |
-| `GET /api/games/{id}/saves` | Every device's versions, newest first, with `keep_versions`. |
+| `GET /api/games/{id}/saves` | Every device's versions, newest first, with `keep_versions`. Includes those made by the other versions of the game's title: each version has its `game_id`, `game_name` and `fs_name`; offer the ones of the version installed on the client first. |
 | `GET /api/saves/{version_id}` | One version with a (capped) list of the files in it. |
 | `GET /api/saves/{version_id}/download` | The zip. |
 | `DELETE /api/saves/{version_id}` | Remove one. |
@@ -568,7 +588,7 @@ sends it once the game has closed:
 `POST /api/games/{id}/playtime` with `{"started_at": "2026-10-29T18:30:00Z", "seconds": 3720, "device_id": 7}` (`device_id`
 optional, one of the user's own). `seconds` is 1 to 86400 (a session is never longer than a day; send two for a longer one)
 and `started_at` may not be more than a day ahead. The answer has `playtime_seconds` (the user's total for the game), `sessions`
-and `recorded`.
+and `recorded`. The total is the whole title's: every version of the game (section 4) carries the same figure.
 
 A session is told by its `started_at` (to the second): sending the same one again answers `recorded: false` and adds
 nothing, so a client that did not get the answer can keep the session and send it again later. `GET /api/games/{id}/playtime`

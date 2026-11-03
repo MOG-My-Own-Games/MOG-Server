@@ -716,6 +716,8 @@ async function openSettingsPage(subTab) {
     document.getElementById("setting-igdb-id").value = apiSettings.igdb_client_id || "";
     document.getElementById("setting-igdb-secret").value = apiSettings.igdb_client_secret || "";
     document.getElementById("setting-sgdb-key").value = apiSettings.steamgriddb_api_key || "";
+    document.getElementById("setting-romm-url").value = apiSettings.romm_url || "";
+    document.getElementById("setting-romm-token").value = apiSettings.romm_token || "";
     document.getElementById("setting-cache-ttl").value = apiSettings.install_cache_ttl_days ?? "";
     document.getElementById("setting-cache-max-gb").value = apiSettings.install_cache_max_bytes ? +(apiSettings.install_cache_max_bytes / GIB).toFixed(2) : 0;
     document.getElementById("setting-cache-auto-clean").checked = apiSettings.install_cache_auto_clean !== false;
@@ -872,7 +874,7 @@ for (const box of document.querySelectorAll("input[data-provider]")) {
     try {
       const saved = await api("/api/settings", { method: "PUT", body: JSON.stringify({ [box.dataset.provider]: box.checked }) });
       applyProviderToggles(saved);
-      const provider = { igdb_enabled: "igdb", steamgriddb_enabled: "steamgriddb" }[box.dataset.provider];
+      const provider = { igdb_enabled: "igdb", steamgriddb_enabled: "steamgriddb", romm_enabled: "romm" }[box.dataset.provider];
       if (provider) await refreshProviderValidityBadges(provider); // HowLongToBeat has no key to check
     } catch (err) {
       box.checked = !box.checked;
@@ -897,9 +899,27 @@ function applyValidityBadge(el, valid) {
   }
 }
 
-const PROVIDER_BADGES = { igdb: "igdb-valid-badge", steamgriddb: "sgdb-valid-badge" };
-// What each provider needs typed in before it can be asked anything: IGDB wants both values.
-const PROVIDER_FIELDS = { igdb: ["setting-igdb-id", "setting-igdb-secret"], steamgriddb: ["setting-sgdb-key"] };
+const PROVIDER_BADGES = { igdb: "igdb-valid-badge", steamgriddb: "sgdb-valid-badge", romm: "romm-valid-badge" };
+// What each provider needs typed in before it can be asked anything: IGDB wants both values, RomM its address and token.
+const PROVIDER_FIELDS = {
+  igdb: ["setting-igdb-id", "setting-igdb-secret"],
+  steamgriddb: ["setting-sgdb-key"],
+  romm: ["setting-romm-url", "setting-romm-token"],
+};
+const VALIDATED_KEYS = { igdb: "igdb_valid", steamgriddb: "steamgriddb_valid", romm: "romm_valid" };
+
+// Where an artwork comes from, as the artwork picker shows it (a short label on each picture, a full name in the preview).
+const SOURCE_SHORT = { igdb: "IGDB", steamgriddb: "SGDB", romm: "RomM", vndb: "VNDB", dlsite: "DLsite", steam: "Steam", itch: "itch.io", local: "FILE" };
+const SOURCE_NAMES = {
+  igdb: "IGDB",
+  steamgriddb: "SteamGridDB",
+  romm: "RomM",
+  vndb: "VNDB",
+  dlsite: "DLsite",
+  steam: "Steam",
+  itch: "itch.io",
+  local: "The game's files",
+};
 
 function providerHasItsKeys(provider) {
   return PROVIDER_FIELDS[provider].every((id) => document.getElementById(id).value.trim() !== "");
@@ -917,7 +937,7 @@ async function refreshProviderValidityBadges(only = null) {
   try {
     const result = await api(`/api/settings/validate${asked.length === 1 ? `?provider=${asked[0]}` : ""}`);
     for (const provider of asked) {
-      applyValidityBadge(document.getElementById(PROVIDER_BADGES[provider]), result[provider === "igdb" ? "igdb_valid" : "steamgriddb_valid"]);
+      applyValidityBadge(document.getElementById(PROVIDER_BADGES[provider]), result[VALIDATED_KEYS[provider]]);
     }
   } catch (_) {
     for (const provider of asked) applyValidityBadge(document.getElementById(PROVIDER_BADGES[provider]), null);
@@ -1197,11 +1217,14 @@ async function saveInstallDefaults() {
 
 // A key is saved when its field is left or Enter is pressed in it (never half typed), then checked against its provider.
 async function saveApiKeys(provider) {
-  await putSettings({
+  const saved = await putSettings({
     igdb_client_id: document.getElementById("setting-igdb-id").value,
     igdb_client_secret: document.getElementById("setting-igdb-secret").value,
     steamgriddb_api_key: document.getElementById("setting-sgdb-key").value,
+    romm_url: document.getElementById("setting-romm-url").value,
+    romm_token: document.getElementById("setting-romm-token").value,
   });
+  document.getElementById("setting-romm-token").value = saved.romm_token || ""; // a pairing code is now its (masked) token
   await refreshProviderValidityBadges(provider); // only the provider whose field this is, and only if it has all its keys
 }
 
@@ -1447,7 +1470,7 @@ async function refreshMissingTable() {
       const tr = document.createElement("tr");
       const libName = (libraries.find((l) => l.id === game.library_id) || {}).name || "";
       tr.innerHTML = `
-        <td>${escapeHtml(game.name)}${game.imported ? ' <span class="chip chip-imported" title="Added from a client to sync its saves">Saves only (imported)</span>' : game.saves_only ? ' <span class="chip chip-saves" title="Its saves are kept">Saves only</span>' : ""}</td>
+        <td>${escapeHtml(game.name)}</td>
         <td>${escapeHtml(libName)}</td>
         <td>${escapeHtml(game.fs_name)}</td>
       `;
@@ -1461,10 +1484,10 @@ async function refreshMissingTable() {
             `/api/games/${game.id}`,
             `"${game.name}"`,
             "Without the game entry the saves could no longer be listed, downloaded or restored.",
-            "Keep the saves (the game stays listed as Saves only)"
-          );
+            "Keep the saves (the game stays as Saves only)"
+          ); // a game listed here has none, unless a client uploaded some since the list was read
           if (!done) {
-            alert("Nothing was removed: the game stays listed as Saves only.");
+            alert("Nothing was removed: the game now has saves and stays as Saves only.");
             return;
           }
           await refreshMissingTable();
@@ -1730,8 +1753,8 @@ function renderLibraryList(containerId, { clickable, showScrape = false, allowDe
     allItem.className = selectedLibraryId === null ? "active" : "";
     const allName = document.createElement("div");
     allName.innerHTML = '<span class="lib-name">All games</span>';
-    allName.addEventListener("click", () => {
-      location.hash = "library/all";
+    allItem.addEventListener("click", () => {
+      location.hash = "library/all"; // the whole row, not just its text: the row is what lights up under the pointer
     });
     allItem.appendChild(allName);
     if (isAdmin() && libraries.length > 1) {
@@ -1768,7 +1791,7 @@ function renderLibraryList(containerId, { clickable, showScrape = false, allowDe
     const info = document.createElement("div");
     info.innerHTML = `<span class="lib-name">${escapeHtml(lib.name)}</span><span class="lib-path">${escapeHtml(lib.root_path)}</span>`;
     if (clickable) {
-      info.addEventListener("click", () => {
+      li.addEventListener("click", () => {
         location.hash = `library/${lib.id}`;
       });
     }
@@ -2556,9 +2579,7 @@ async function openGamePage(id) {
 
   document.getElementById("scrape-status").textContent = "";
   document.getElementById("client-install-status").textContent = "";
-  document.getElementById("igdb-results").innerHTML = "";
-  document.getElementById("sgdb-results").innerHTML = "";
-  document.getElementById("hltb-results").innerHTML = "";
+  closeProviderSearch();
   document.getElementById("edit-metadata-form").hidden = true;
 
   document.getElementById("install-status").hidden = true;
@@ -2958,7 +2979,7 @@ function renderMediaChoices(data, game) {
       const tile = document.createElement("button");
       tile.type = "button";
       tile.className = "media-choice";
-      const sourceName = { igdb: "IGDB", local: option.label || "The game's files" }[option.source] || "SteamGridDB";
+      const sourceName = option.source === "local" ? option.label || SOURCE_NAMES.local : SOURCE_NAMES[option.source] || SOURCE_NAMES.steamgriddb;
       tile.title = `${sourceName}${option.width ? `, ${option.width}x${option.height}` : ""}`;
       tile.classList.toggle("selected", option.url === chosen());
       const img = document.createElement("img");
@@ -2968,7 +2989,7 @@ function renderMediaChoices(data, game) {
       tile.appendChild(img);
       const source = document.createElement("span");
       source.className = "media-source";
-      source.textContent = { igdb: "IGDB", local: "FILE" }[option.source] || "SGDB";
+      source.textContent = SOURCE_SHORT[option.source] || "SGDB";
       tile.appendChild(source);
       tile.addEventListener("click", () => pick(option.url, tile));
       row.appendChild(tile);
@@ -2999,8 +3020,9 @@ async function openScrapeModal() {
     document.getElementById("game-title").textContent = game.name;
     renderOverview(game);
     showCover(game);
-    const igdb = game.igdb_id ? "" : " No IGDB match (check the IGDB keys in Settings).";
-    status.textContent = `Matched: ${game.name}. The providers' defaults are applied; pick any other artwork below if you want.${igdb}`;
+    const via = game.metadata_source ? ` (${SOURCE_NAMES[game.metadata_source] || game.metadata_source})` : "";
+    const none = game.metadata_source || game.igdb_id ? "" : " No provider has matched this game: add one in Edit metadata, by name, address or id.";
+    status.textContent = `Matched: ${game.name}${via}. The providers' defaults are applied; pick any other artwork below if you want.${none}`;
   } catch (err) {
     status.textContent = `The scrape failed: ${err.message}. You can still pick artwork below.`;
   }
@@ -3100,7 +3122,7 @@ function renderEditMedia() {
     preview.appendChild(tile);
     const source = document.createElement("span");
     source.className = "muted small";
-    source.textContent = current.url ? (current.source === "upload" ? "Your upload" : current.source === "igdb" ? "IGDB" : "SteamGridDB") : "";
+    source.textContent = current.url ? (current.source === "upload" ? "Your upload" : SOURCE_NAMES[current.source] || SOURCE_NAMES.steamgriddb) : "";
 
     const input = document.createElement("input");
     input.type = "file";
@@ -3130,7 +3152,7 @@ function renderEditMedia() {
       }
     });
     row.append(name, preview, source, upload, input);
-    if (current.source === "upload") {
+    if (current.url) {
       const remove = document.createElement("button");
       remove.type = "button";
       remove.className = "danger";
@@ -3138,7 +3160,7 @@ function renderEditMedia() {
       remove.addEventListener("click", async () => {
         try {
           applyMediaChange(await api(`/api/games/${activeGame.id}/media`, { method: "PUT", body: JSON.stringify({ [kind]: null }) }));
-          status.textContent = `The ${label.toLowerCase()} was removed. Scrape to get the providers' again.`;
+          status.textContent = `The ${label.toLowerCase()} was removed. It stays empty until you choose or upload one, or ask for a scrape.`;
         } catch (err) {
           status.textContent = `Could not remove: ${err.message}`;
         }
@@ -3163,8 +3185,10 @@ document.getElementById("edit-metadata-btn").addEventListener("click", () => {
   document.getElementById("edit-media-status").textContent = "";
   document.getElementById("edit-name").value = activeGame.name;
   document.getElementById("edit-summary").value = activeGame.summary || activeGame.igdb_metadata?.summary || "";
-  document.getElementById("edit-igdb-id").value = activeGame.igdb_id ?? "";
-  document.getElementById("edit-sgdb-id").value = activeGame.sgdb_id ?? "";
+  closeProviderSearch();
+  renderProviderLinks();
+  const linkedKeys = new Set(linkedProviders(activeGame).map((l) => l.key));
+  pickProvider((PROVIDER_ROWS.find((p) => !linkedKeys.has(p.key)) || PROVIDER_ROWS[0]).key); // the first one it is not matched with
   renderTitleVersions();
   document.getElementById("edit-metadata-form").hidden = false;
 });
@@ -3181,8 +3205,6 @@ document.getElementById("edit-metadata-form").addEventListener("submit", async (
       body: JSON.stringify({
         name: document.getElementById("edit-name").value,
         summary: document.getElementById("edit-summary").value,
-        igdb_id: document.getElementById("edit-igdb-id").value === "" ? null : parseInt(document.getElementById("edit-igdb-id").value, 10),
-        sgdb_id: document.getElementById("edit-sgdb-id").value === "" ? null : parseInt(document.getElementById("edit-sgdb-id").value, 10),
       }),
     });
     activeGame = game;
@@ -3571,48 +3593,213 @@ function searchQuery() {
   return typed ? `?${new URLSearchParams({ query: typed })}` : "";
 }
 
-document.getElementById("igdb-search-btn").addEventListener("click", async () => {
-  const list = document.getElementById("igdb-results");
-  list.innerHTML = "Searching...";
-  try {
-    const results = await api(`/api/games/${activeGame.id}/metadata/igdb/search${searchQuery()}`);
-    if (results.length === 0) {
-      list.innerHTML = '<li class="muted">No results (check the IGDB keys in Settings).</li>';
-      return;
-    }
-    list.innerHTML = "";
-    for (const r of results) {
-      const li = document.createElement("li");
-      const name = document.createElement("span");
-      name.className = "match-name";
-      name.textContent = r.name;
-      li.appendChild(name);
-      const applyBtn = document.createElement("button");
-      applyBtn.textContent = "Apply";
-      applyBtn.addEventListener("click", async () => {
-        const game = await api(`/api/games/${activeGame.id}/metadata/igdb/${r.id}`, { method: "POST" });
-        activeGame = game;
-        document.getElementById("game-title").textContent = game.name;
-        renderOverview(game);
-        document.getElementById("scrape-status").textContent = `Matched: ${game.name}`;
-        await refreshGames();
-        renderVersions(game);
-      });
-      li.appendChild(applyBtn);
-      list.appendChild(li);
-    }
-  } catch (err) {
-    list.innerHTML = `<li class="error">${escapeHtml(err.message)}</li>`;
-  }
-});
+// --- Providers of a game (Edit metadata) ---
+// Every provider the game is matched with is a row: its id, a new search and a removal. A provider it is not matched with
+// is added from the list under them. IGDB, SteamGridDB and HowLongToBeat keep their own routes; the rest share one.
 
-document.getElementById("hltb-search-btn").addEventListener("click", async () => {
-  const list = document.getElementById("hltb-results");
+const PROVIDER_ROWS = [
+  { key: "igdb", name: "IGDB", icon: "igdb.svg", mono: true },
+  { key: "sgdb", name: "SteamGridDB", icon: "steamgriddb.png" },
+  { key: "hltb", name: "HowLongToBeat", icon: "hltb.png" },
+  { key: "romm", name: "RomM", icon: "romm.svg" },
+  { key: "steam", name: "Steam", icon: "steam.svg" },
+  { key: "vndb", name: "VNDB", icon: "vndb.png" },
+  { key: "dlsite", name: "DLsite", icon: "dlsite.png" },
+  { key: "itch", name: "itch.io", icon: "itch.svg", mono: true },
+];
+const PROVIDER_HINTS = {
+  itch: "itch.io's search leaves out adult games: type the game's page address instead.",
+  dlsite: "A product code (RJ155385) or the product page's address finds that work alone.",
+  steam: "The store page's address or the app id finds that game alone.",
+  vndb: "The novel's address or its id (v17) finds it alone.",
+  sgdb: "The game's address on steamgriddb.com or its id finds it alone.",
+  hltb: "The game's address on howlongtobeat.com or its id finds it alone.",
+  igdb: "A game's address on igdb.com or its id finds it alone.",
+  romm: "A game's page address on your RomM, or its id, finds it alone.",
+};
+
+// The providers the game is matched with, in the order of PROVIDER_ROWS: {key, id, url}.
+function linkedProviders(game) {
+  const source = game.metadata_source || (game.igdb_id ? "igdb" : null);
+  const ids = { ...(game.provider_ids || {}) };
+  if (game.igdb_id) ids.igdb = game.igdb_id;
+  if (game.sgdb_id) ids.sgdb = game.sgdb_id;
+  if (game.hltb_id) ids.hltb = game.hltb_id; // 0 is "looked up, nothing found"
+  // The page of each id, for the providers whose pages follow from it (the source's own record has its address too).
+  const links = {
+    sgdb: (id) => `https://www.steamgriddb.com/game/${id}`,
+    hltb: (id) => `https://howlongtobeat.com/game/${id}`,
+    steam: (id) => `https://store.steampowered.com/app/${id}`,
+    vndb: (id) => `https://vndb.org/${id}`,
+    dlsite: (id) => `https://www.dlsite.com/maniax/work/=/product_id/${id}.html`,
+    itch: (id) => {
+      const at = String(id).indexOf(".");
+      return at > 0 ? `https://${String(id).slice(0, at)}.itch.io/${String(id).slice(at + 1)}` : null;
+    },
+  };
+  return PROVIDER_ROWS.filter((p) => ids[p.key]).map((p) => ({
+    ...p,
+    id: ids[p.key],
+    source: source === p.key,
+    url: (links[p.key] && links[p.key](ids[p.key])) || (source === p.key ? game.igdb_metadata?.url || null : null),
+  }));
+}
+
+function providerIcon(row) {
+  const img = document.createElement("img");
+  img.className = `provider-icon${row.mono ? " mono" : ""}`;
+  img.src = `assets/providers/${row.icon}`;
+  img.alt = "";
+  return img;
+}
+
+function providerOptions() {
+  const select = document.getElementById("provider-add-select");
+  if (select.options.length === PROVIDER_ROWS.length) return;
+  for (const p of PROVIDER_ROWS) select.add(new Option(p.name, p.key));
+  select.addEventListener("change", () => pickProvider(select.value));
+}
+
+function renderProviderLinks() {
+  providerOptions();
+  const list = document.getElementById("provider-links");
+  list.replaceChildren();
+  const linked = linkedProviders(activeGame);
+  if (linked.length === 0) {
+    const none = document.createElement("li");
+    none.className = "muted small";
+    none.textContent = "No provider yet. Scrape the game, or add one below.";
+    list.appendChild(none);
+  }
+  for (const row of linked) {
+    const li = document.createElement("li");
+    const name = document.createElement("span");
+    name.className = "provider-name";
+    name.append(providerIcon(row), row.name);
+    const ref = document.createElement(row.url ? "a" : "span");
+    ref.className = "provider-ref";
+    ref.textContent = String(row.id);
+    ref.title = String(row.id);
+    if (row.url) {
+      ref.href = row.url;
+      ref.target = "_blank";
+      ref.rel = "noopener";
+    }
+    li.append(name, ref);
+    if (row.source) {
+      const chip = document.createElement("span");
+      chip.className = "chip";
+      chip.title = "The summary, genres and artwork choices of this game come from here";
+      chip.textContent = "metadata";
+      li.appendChild(chip);
+    }
+    const actions = document.createElement("span");
+    actions.className = "provider-actions";
+    const search = document.createElement("button");
+    search.type = "button";
+    search.textContent = "Search";
+    search.addEventListener("click", () => openProviderSearch(row.key));
+    const fetchBtn = document.createElement("button");
+    fetchBtn.type = "button";
+    fetchBtn.textContent = "Fetch metadata";
+    fetchBtn.title = `Read this game again from ${row.name} only`;
+    fetchBtn.addEventListener("click", () => fetchProvider(row, fetchBtn));
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "danger";
+    remove.textContent = "Remove";
+    remove.addEventListener("click", () => removeProvider(row));
+    actions.append(search, fetchBtn, remove);
+    li.appendChild(actions);
+    list.appendChild(li);
+  }
+}
+
+// What a change of the game's providers refreshes: the form's list, the header and the library grid.
+async function providersChanged(game, note) {
+  // The form's Name and Summary were filled in before the change. A field the person has not touched follows the game, or Save
+  // would send the old text back: that is a rename, and a rename drops the matches and searches the game again by the old name.
+  const nameField = document.getElementById("edit-name");
+  const summaryField = document.getElementById("edit-summary");
+  if (nameField.value === activeGame.name) nameField.value = game.name;
+  if (summaryField.value === (activeGame.summary || activeGame.igdb_metadata?.summary || "")) {
+    summaryField.value = game.summary || game.igdb_metadata?.summary || "";
+  }
+  activeGame = game;
+  document.getElementById("game-title").textContent = game.name;
+  renderProviderLinks();
+  renderOverview(game);
+  document.getElementById("scrape-status").textContent = note;
+  await refreshGames();
+  renderVersions(game);
+}
+
+// The scrape of one provider: the game is read again from it alone, and what it gives becomes the game's metadata.
+async function fetchProvider(row, button) {
+  button.disabled = true;
+  button.textContent = "Fetching...";
+  try {
+    const game = await api(`/api/games/${activeGame.id}/fetch-metadata/${row.key}`, { method: "POST" });
+    await providersChanged(game, `Metadata fetched from ${row.name}.`);
+  } catch (err) {
+    alert(`Could not fetch from ${row.name}: ${err.message}`);
+  } finally {
+    button.disabled = false;
+    button.textContent = "Fetch metadata";
+  }
+}
+
+async function removeProvider(row) {
+  if (!confirm(`Remove ${row.name} from this game? Scrapes will not match it again unless you add it back.`)) return;
+  try {
+    const game = await api(`/api/games/${activeGame.id}/metadata/${row.key}`, { method: "DELETE" });
+    await providersChanged(game, `${row.name} was removed.`);
+  } catch (err) {
+    alert(`Could not remove: ${err.message}`);
+  }
+}
+
+// The select under the list is the provider the next search asks: a row's Search button picks its provider there.
+function pickProvider(key) {
+  document.getElementById("provider-add-select").value = key;
+  document.getElementById("provider-search-hint").textContent = PROVIDER_HINTS[key] || "";
+  document.getElementById("match-results").replaceChildren();
+}
+
+function openProviderSearch(key) {
+  pickProvider(key);
+  document.getElementById("match-query").focus();
+}
+
+function closeProviderSearch() {
+  document.getElementById("match-query").value = "";
+  document.getElementById("match-results").replaceChildren();
+}
+
+// The name, address or id typed in the box; empty, the name as typed in the form (and, empty too, the saved one).
+function matchQuery() {
+  const typed = document.getElementById("match-query").value.trim();
+  return typed ? `?${new URLSearchParams({ query: typed })}` : searchQuery();
+}
+
+// How to ask each provider and apply what the person picks from its answer.
+const PROVIDER_ROUTES = {
+  igdb: { search: "igdb/search", apply: (r) => `igdb/${r.id}`, note: (g) => `Matched: ${g.name}` },
+  sgdb: { search: "sgdb/games", apply: (r) => `sgdb/games/${r.id}`, note: () => "SteamGridDB game chosen" },
+  hltb: { search: "hltb/search", apply: (r) => `hltb/${r.id}`, note: () => "How Long To Beat chosen", label: (r) => (r.metadata?.main_story ? `${r.name} (${formatPlaytime(r.metadata.main_story)})` : r.name) },
+};
+
+async function runMatchSearch() {
+  const key = document.getElementById("provider-add-select").value;
+  if (!key) return;
+  const row = PROVIDER_ROWS.find((p) => p.key === key);
+  const route = PROVIDER_ROUTES[key] || { search: `${key}/search`, apply: (r) => `${key}/${encodeURIComponent(r.id)}`, note: (g) => `Matched: ${g.name}` };
+  const list = document.getElementById("match-results");
   list.innerHTML = "Searching...";
   try {
-    const results = await api(`/api/games/${activeGame.id}/metadata/hltb/search${searchQuery()}`);
+    const results = await api(`/api/games/${activeGame.id}/metadata/${route.search}${matchQuery()}`);
     if (results.length === 0) {
-      list.innerHTML = '<li class="muted">No results with a completion time.</li>';
+      list.innerHTML = `<li class="muted">No results on ${escapeHtml(row.name)} (check that it is on, and its keys, in Settings). ${escapeHtml(PROVIDER_HINTS[key] || "")}</li>`;
       return;
     }
     list.innerHTML = "";
@@ -3620,19 +3807,16 @@ document.getElementById("hltb-search-btn").addEventListener("click", async () =>
       const li = document.createElement("li");
       const name = document.createElement("span");
       name.className = "match-name";
-      const main = r.metadata?.main_story;
-      name.textContent = main ? `${r.name} (${formatPlaytime(main)})` : r.name;
+      name.textContent = route.label ? route.label(r) : r.name;
       li.appendChild(name);
       const applyBtn = document.createElement("button");
       applyBtn.type = "button";
       applyBtn.textContent = "Apply";
       applyBtn.addEventListener("click", async () => {
         try {
-          const game = await api(`/api/games/${activeGame.id}/metadata/hltb/${r.id}`, { method: "POST" });
-          activeGame = game;
-          renderOverview(game);
-          document.getElementById("scrape-status").textContent = `How Long To Beat: ${r.name}`;
-          await refreshGames();
+          const game = await api(`/api/games/${activeGame.id}/metadata/${route.apply(r)}`, { method: "POST" });
+          await providersChanged(game, route.note(game));
+          closeProviderSearch();
         } catch (err) {
           alert(`Could not apply: ${err.message}`);
         }
@@ -3643,36 +3827,13 @@ document.getElementById("hltb-search-btn").addEventListener("click", async () =>
   } catch (err) {
     list.innerHTML = `<li class="error">${escapeHtml(err.message)}</li>`;
   }
-});
+}
 
-document.getElementById("sgdb-search-btn").addEventListener("click", async () => {
-  const grid = document.getElementById("sgdb-results");
-  grid.innerHTML = "Searching...";
-  try {
-    const urls = await api(`/api/games/${activeGame.id}/metadata/sgdb/search${searchQuery()}`);
-    if (urls.length === 0) {
-      grid.innerHTML = '<p class="muted">No results (check the SteamGridDB key in Settings).</p>';
-      return;
-    }
-    grid.innerHTML = "";
-    for (const url of urls) {
-      const img = document.createElement("img");
-      img.src = url;
-      img.addEventListener("click", async () => {
-        const params = new URLSearchParams({ cover_path: url });
-        const game = await api(`/api/games/${activeGame.id}/metadata/sgdb?${params}`, { method: "POST" });
-        activeGame = game;
-        const coverImg = document.getElementById("game-cover-img");
-        coverImg.src = game.cover_path;
-        coverImg.hidden = false;
-        document.getElementById("game-cover-placeholder").hidden = true;
-        await refreshGames();
-      });
-      grid.appendChild(img);
-    }
-  } catch (err) {
-    grid.innerHTML = `<p class="error">${escapeHtml(err.message)}</p>`;
-  }
+document.getElementById("match-search-btn").addEventListener("click", runMatchSearch);
+document.getElementById("match-query").addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  e.preventDefault(); // Enter here is the search, not a save of the whole edit form
+  runMatchSearch();
 });
 
 // --- Install tab: candidates, proton builds ---

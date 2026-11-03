@@ -146,8 +146,6 @@
           <form id="edit-metadata-form" class="card edit-metadata-form" hidden>
             <label class="field-label">Name<input type="text" id="edit-name" required /></label>
             <label class="field-label">Summary<textarea id="edit-summary" rows="4"></textarea></label>
-            <label class="field-label">IGDB ID (manual override)<input type="number" id="edit-igdb-id" placeholder="unset" /></label>
-            <label class="field-label">SteamGridDB ID (manual override)<input type="number" id="edit-sgdb-id" placeholder="unset" /></label>
             <div class="metadata-search">
               <h4>Your own artwork</h4>
               <p class="muted small">Upload an image of your own for any kind of artwork (PNG, JPEG, WebP or GIF, up to 10 MiB). It is used at once, replaces the earlier choice of that kind and is not replaced by a scrape. Pick or clear provider artwork with Scrape.</p>
@@ -155,19 +153,16 @@
               <p id="edit-media-status" class="muted small"></p>
             </div>
             <div class="metadata-search">
-              <h4>IGDB</h4>
-              <button id="igdb-search-btn" type="button">Search by name</button>
-              <ul id="igdb-results" class="match-results"></ul>
-            </div>
-            <div class="metadata-search">
-              <h4>How Long To Beat</h4>
-              <button id="hltb-search-btn" type="button">Search by name</button>
-              <ul id="hltb-results" class="match-results"></ul>
-            </div>
-            <div class="metadata-search">
-              <h4>SteamGridDB cover</h4>
-              <button id="sgdb-search-btn" type="button">Search by name</button>
-              <div id="sgdb-results" class="grid-results"></div>
+              <h4>Providers</h4>
+              <p class="muted small">Where this game is matched. A scrape fills the list in; each one can be searched again, changed or removed, and one the scrape did not find can be added.</p>
+              <ul id="provider-links" class="provider-links"></ul>
+              <div class="provider-search-row">
+                <select id="provider-add-select" aria-label="Provider to search"></select>
+                <input type="text" id="match-query" placeholder="Name, address or id" aria-label="Name, address or id" autocomplete="off" />
+                <button id="match-search-btn" type="button">Search</button>
+              </div>
+              <p id="provider-search-hint" class="muted small"></p>
+              <ul id="match-results" class="match-results"></ul>
             </div>
             <div class="metadata-search">
               <h4>Versions of this game</h4>
@@ -545,7 +540,7 @@
           <div id="settings-tab-providers" class="tab-panel" hidden>
             <div class="card provider-card">
               <div class="provider-card-header">
-                <h3>IGDB <span id="igdb-valid-badge" class="validity-badge"></span></h3>
+                <h3><img class="provider-icon mono" src="assets/providers/igdb.svg" alt="" />IGDB <span id="igdb-valid-badge" class="validity-badge"></span></h3>
                 <div class="provider-card-actions">
                   <a href="https://api-docs.igdb.com/#getting-started" target="_blank" rel="noopener">Getting started guide &#8599;</a>
                   <label class="switch" title="Use IGDB"><input type="checkbox" id="igdb-enabled" data-provider="igdb_enabled" aria-label="Use IGDB" /><span class="slider"></span></label>
@@ -562,7 +557,7 @@
 
             <div class="card provider-card">
               <div class="provider-card-header">
-                <h3>SteamGridDB <span id="sgdb-valid-badge" class="validity-badge"></span></h3>
+                <h3><img class="provider-icon" src="assets/providers/steamgriddb.png" alt="" />SteamGridDB <span id="sgdb-valid-badge" class="validity-badge"></span></h3>
                 <div class="provider-card-actions">
                   <a href="https://www.steamgriddb.com/profile/preferences/api" target="_blank" rel="noopener">Get an API key &#8599;</a>
                   <label class="switch" title="Use SteamGridDB"><input type="checkbox" id="sgdb-enabled" data-provider="steamgriddb_enabled" aria-label="Use SteamGridDB" /><span class="slider"></span></label>
@@ -574,12 +569,69 @@
 
             <div class="card provider-card">
               <div class="provider-card-header">
-                <h3>HowLongToBeat</h3>
+                <h3><img class="provider-icon" src="assets/providers/hltb.png" alt="" />HowLongToBeat</h3>
                 <div class="provider-card-actions">
                   <label class="switch" title="Use HowLongToBeat"><input type="checkbox" id="hltb-enabled" data-provider="hltb_enabled" aria-label="Use HowLongToBeat" /><span class="slider"></span></label>
                 </div>
               </div>
-              <p class="muted small">Completion times (main story, main + extra, completionist). No account or key is needed, and only games with an IGDB match are looked up.</p>
+              <p class="muted small">Completion times (main story, main + extra, completionist). No account or key is needed, and only games that have a match are looked up.</p>
+            </div>
+
+            <div class="card provider-card">
+              <div class="provider-card-header">
+                <h3><img class="provider-icon" src="assets/providers/romm.svg" alt="" />RomM <span id="romm-valid-badge" class="validity-badge"></span></h3>
+                <div class="provider-card-actions">
+                  <a href="https://docs.romm.app" target="_blank" rel="noopener">RomM documentation &#8599;</a>
+                  <label class="switch" title="Use RomM"><input type="checkbox" id="romm-enabled" data-provider="romm_enabled" aria-label="Use RomM" /><span class="slider"></span></label>
+                </div>
+              </div>
+              <p class="muted small">Your own RomM server. The games it has matched give the metadata of the games in your library. Enter the address you open it at, then an API token of a user on that server (Client API Tokens in RomM), or the 8-digit pairing code of one: the code is exchanged for the token and only the token is kept.</p>
+              <label class="field-label">Address<input type="url" id="setting-romm-url" placeholder="https://romm.example.com" autocomplete="off" /></label>
+              <label class="field-label">API token or pairing code<input type="password" id="setting-romm-token" placeholder="rmm_... or 12345678" autocomplete="off" /></label>
+            </div>
+
+            <div class="card provider-card">
+              <div class="provider-card-header">
+                <h3><img class="provider-icon" src="assets/providers/vndb.png" alt="" />VNDB</h3>
+                <div class="provider-card-actions">
+                  <a href="https://vndb.org" target="_blank" rel="noopener">vndb.org &#8599;</a>
+                  <label class="switch" title="Use VNDB"><input type="checkbox" id="vndb-enabled" data-provider="vndb_enabled" aria-label="Use VNDB" /><span class="slider"></span></label>
+                </div>
+              </div>
+              <p class="muted small">The visual novel database, adult titles included. No account or key is needed.</p>
+            </div>
+
+            <div class="card provider-card">
+              <div class="provider-card-header">
+                <h3><img class="provider-icon" src="assets/providers/dlsite.png" alt="" />DLsite</h3>
+                <div class="provider-card-actions">
+                  <a href="https://www.dlsite.com/maniax/" target="_blank" rel="noopener">DLsite (adult) &#8599;</a>
+                  <label class="switch" title="Use DLsite"><input type="checkbox" id="dlsite-enabled" data-provider="dlsite_enabled" aria-label="Use DLsite" /><span class="slider"></span></label>
+                </div>
+              </div>
+              <p class="muted small">DLsite product pages. A folder with its product code (RJ, RE, VJ or BJ followed by digits) is matched by that code. No account or key is needed. The site's age confirmation is answered the way its own button answers it.</p>
+            </div>
+
+            <div class="card provider-card">
+              <div class="provider-card-header">
+                <h3><img class="provider-icon" src="assets/providers/steam.svg" alt="" />Steam</h3>
+                <div class="provider-card-actions">
+                  <a href="https://store.steampowered.com" target="_blank" rel="noopener">Steam store &#8599;</a>
+                  <label class="switch" title="Use Steam"><input type="checkbox" id="steam-enabled" data-provider="steam_enabled" aria-label="Use Steam" /><span class="slider"></span></label>
+                </div>
+              </div>
+              <p class="muted small">The Steam store. Titles Steam shows only after its age check are not used. No account or key is needed.</p>
+            </div>
+
+            <div class="card provider-card">
+              <div class="provider-card-header">
+                <h3><img class="provider-icon mono" src="assets/providers/itch.svg" alt="" />itch.io</h3>
+                <div class="provider-card-actions">
+                  <a href="https://itch.io" target="_blank" rel="noopener">itch.io &#8599;</a>
+                  <label class="switch" title="Use itch.io"><input type="checkbox" id="itch-enabled" data-provider="itch_enabled" aria-label="Use itch.io" /><span class="slider"></span></label>
+                </div>
+              </div>
+              <p class="muted small">itch.io's public game pages. No account or key is needed.</p>
             </div>
 
             <p class="muted small">A provider that is switched off is not asked anything. Its saved keys stay, so switching it on again needs nothing typed in.</p>

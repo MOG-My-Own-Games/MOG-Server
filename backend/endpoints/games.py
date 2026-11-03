@@ -22,13 +22,13 @@ from handler.filesystem.installer_detection import category_for_path
 from handler import media as media_handler
 from handler import local_icons, media_uploads
 from handler import video_handler
-from handler.metadata import hltb_handler, igdb_handler, ludusavi_handler, sgdb_handler
+from handler.metadata import hltb_handler, igdb_handler, ludusavi_handler, providers, sgdb_handler, web
 from handler import mods as mods_handler
 from handler.notifications import notify_mod_downloaded, notify_mod_zipped
 from handler.saves import purge_game
 from handler.sizes import game_sizes
 from handler.scan_handler import import_key
-from handler.scrape_handler import refresh_game, scrape_imported_in_background, search_name
+from handler.scrape_handler import promote_source, refresh_game, remove_match, scrape_imported_in_background, search_name, set_match, set_sgdb_game
 from models.game import FS_NAME_MAX_LENGTH, Game
 from models.install_session import InstallSessionState
 from starlette.concurrency import run_in_threadpool
@@ -149,11 +149,13 @@ async def import_game(user: CurrentUser, form: GameImportForm) -> GameSchema:
 
 @router.get("/missing")
 async def list_missing_games(user: AdminUser) -> list[GameSchema]:
-    """Games a scan could not find, the ones that still have saves flagged `saves_only`."""
+    """Games a scan could not find. A game kept for its saves (`saves_only`) or added from a client for them (`imported`) has no
+    folder on purpose, so it is not listed: there is nothing to look for, and nothing to clear."""
     with_saves = db_saves_handler.game_ids_with_saves()
     return [
-        GameSchema.model_validate(g).model_copy(update={"saves_only": g.id in with_saves})
+        GameSchema.model_validate(g).model_copy(update={"saves_only": False})
         for g in db_game_handler.get_missing_games()
+        if g.id not in with_saves and not g.imported
     ]
 
 
@@ -263,7 +265,9 @@ async def choose_media(user: AdminUser, id: Annotated[int, Path(ge=1)], data: Me
     media = dict(game.media or {})
     update: dict = {}
     uploaded = media_uploads.uploaded_kinds(media)
+    cleared = set(game.media_cleared or [])
     for kind, url in data.model_dump(exclude_unset=True).items():
+        cleared = cleared | {kind} if url is None else cleared - {kind}
         if kind in uploaded and url != (media.get(kind) or {}).get("url"):
             media_uploads.remove(media[kind]["url"])  # the upload is replaced or cleared: its file goes
         if url is None:
@@ -286,7 +290,7 @@ async def choose_media(user: AdminUser, id: Annotated[int, Path(ge=1)], data: Me
         media[kind] = chosen
         if kind == "cover":
             update["cover_path"] = url
-    updated = db_game_handler.update_game(id, {**update, "media": media})
+    updated = db_game_handler.update_game(id, {**update, "media": media, "media_cleared": sorted(cleared)})
     for sibling in titles.versions(game, user)[1:]:  # the artwork is the title's: every version has it
         for kind in data.model_dump(exclude_unset=True):
             await run_in_threadpool(titles.share_artwork, sibling, kind, media.get(kind))
@@ -312,7 +316,7 @@ async def upload_game_media(
     if previous and previous != url:
         media_uploads.remove(previous)
     media[kind] = {"url": url, "source": media_uploads.UPLOAD}
-    update: dict = {"media": media}
+    update: dict = {"media": media, "media_cleared": sorted(set(game.media_cleared or []) - {kind})}
     if kind == "cover":
         update["cover_path"] = url
     updated = db_game_handler.update_game(id, update)
@@ -504,6 +508,9 @@ async def update_game(user: AdminUser, id: Annotated[int, Path(ge=1)], data: Gam
             body["igdb_id"] = None
         if "sgdb_id" not in rematch:
             body["sgdb_id"] = None
+        if body.get("igdb_id") is None:  # no hand-set IGDB id: the game is searched anew, with no match carried over
+            body["metadata_source"] = None
+            body["provider_ids"] = {}
 
     game = db_game_handler.update_game(id, body)
     shared = {k: body[k] for k in ("name", "summary") if k in changed}
@@ -580,9 +587,18 @@ async def scrape_one_game(user: AdminUser, id: Annotated[int, Path(ge=1)]) -> Ga
     if not applied:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Nothing could be fetched from IGDB or SteamGridDB (check the provider keys in Settings)",
+            detail=f"No provider has this game ({_asked_providers()}): switch on or key the ones that are off in Settings, or match it by name, address or id in Edit metadata",
         )
     return GameSchema.model_validate(db_game_handler.get_game(id))
+
+
+def _asked_providers() -> str:
+    """The providers a scrape asked, by name: the ones that are on and have what they need."""
+    names = {"igdb": "IGDB", "sgdb": "SteamGridDB", "romm": "RomM", "steam": "Steam", "vndb": "VNDB", "dlsite": "DLsite", "itch": "itch.io"}
+    asked = [names["igdb"]] if igdb_handler.is_configured() else []
+    asked += [names[module.KEY] for module in providers.ORDER if module.is_configured()]
+    asked += [names["sgdb"]] if sgdb_handler.is_configured() else []
+    return ", ".join(asked) or "none is on"
 
 
 @router.get("/{id}/metadata/igdb/search")
@@ -590,7 +606,7 @@ async def search_igdb(
     user: AdminUser, id: Annotated[int, Path(ge=1)], query: Annotated[str | None, Query()] = None
 ) -> list[dict]:
     game = check_visible(user, db_game_handler.get_game(id))
-    return await run_in_threadpool(igdb_handler.search_games, query or search_name(game.name))
+    return await run_in_threadpool(igdb_handler.search_typed, query or search_name(game.name))
 
 
 @router.post("/{id}/metadata/igdb/{igdb_id}")
@@ -602,8 +618,19 @@ async def apply_igdb_match(user: AdminUser, id: Annotated[int, Path(ge=1)], igdb
     full = await run_in_threadpool(igdb_handler.get_game_by_id, igdb_id)
     if full is None:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Could not fetch this game from IGDB")
+    before = db_game_handler.get_game(id)
+    misses = {k: v for k, v in ((before.provider_misses if before else None) or {}).items() if k != "igdb"}  # chosen again after a removal
     game = db_game_handler.update_game(
-        id, {"igdb_id": igdb_id, "name": full.get("name"), "summary": full.get("summary"), "igdb_metadata": full}
+        id,
+        {
+            "igdb_id": igdb_id,
+            "provider_ids": {**((before.provider_ids if before else None) or {}), "igdb": igdb_id},
+            "metadata_source": "igdb",  # chosen by hand: IGDB's record is the metadata again
+            "name": full.get("name"),
+            "summary": full.get("summary"),
+            "igdb_metadata": full,
+            "provider_misses": misses,
+        },
     )
     if game is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
@@ -619,7 +646,7 @@ async def search_hltb(
     """HowLongToBeat games for the name, each with the times it has: {id, name, metadata}."""
     game = check_visible(user, db_game_handler.get_game(id))
     try:
-        return await run_in_threadpool(hltb_handler.search_games, query or search_name(game.name))
+        return await run_in_threadpool(hltb_handler.search_typed, query or search_name(game.name))
     except hltb_handler.HLTBUnavailable as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"HowLongToBeat could not be reached: {e}")
 
@@ -635,7 +662,9 @@ async def apply_hltb_match(user: AdminUser, id: Annotated[int, Path(ge=1)], hltb
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"HowLongToBeat could not be reached: {e}")
     if found is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="HowLongToBeat has no times for this game")
-    game = db_game_handler.update_game(id, {"hltb_id": found["id"], "hltb_metadata": found["metadata"]})
+    before = db_game_handler.get_game(id)
+    misses = {k: v for k, v in ((before.provider_misses if before else None) or {}).items() if k != "hltb"}  # chosen again after a removal
+    game = db_game_handler.update_game(id, {"hltb_id": found["id"], "hltb_metadata": found["metadata"], "provider_misses": misses})
     return GameSchema.model_validate(game)
 
 
@@ -659,3 +688,111 @@ async def apply_sgdb_cover(user: AdminUser, id: Annotated[int, Path(ge=1)], cove
     update: dict = {"cover_path": cover_path, "media": {**(current.media or {}), "cover": chosen}}
     game = db_game_handler.update_game(id, update)
     return GameSchema.model_validate(game)
+
+
+@router.get("/{id}/metadata/sgdb/games")
+async def search_sgdb_games(
+    user: AdminUser, id: Annotated[int, Path(ge=1)], query: Annotated[str | None, Query()] = None
+) -> list[dict]:
+    """SteamGridDB games for the name, an id or a game address, each with its `id` and `name`, to pick the game its artwork comes from."""
+    game = check_visible(user, db_game_handler.get_game(id))
+    return await run_in_threadpool(sgdb_handler.search_typed, (query or "").strip() or search_name(game.name))
+
+
+@router.post("/{id}/metadata/sgdb/games/{sgdb_id}")
+async def apply_sgdb_game(user: AdminUser, id: Annotated[int, Path(ge=1)], sgdb_id: Annotated[int, Path(ge=1)]) -> GameSchema:
+    """Take this SteamGridDB game as the game's, and choose its artwork again from it (the person's own uploads are kept)."""
+    game = check_visible(user, db_game_handler.get_game(id))
+    found = await run_in_threadpool(sgdb_handler.get_game, sgdb_id)
+    if found is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SteamGridDB has no game with this id")
+    await run_in_threadpool(set_sgdb_game, game, sgdb_id)
+    return GameSchema.model_validate(db_game_handler.get_game(id))
+
+
+@router.delete("/{id}/metadata/{provider}")
+async def remove_provider_match(user: AdminUser, id: Annotated[int, Path(ge=1)], provider: str) -> GameSchema:
+    """Take away the game's match with a provider (`igdb`, `sgdb`, `hltb`, `romm`, `steam`, `vndb`, `dlsite` or `itch`): its id, and
+    the metadata it gave when it was the source of them. The automatic scrape does not match that provider again."""
+    game = check_visible(user, db_game_handler.get_game(id))
+    if provider not in ("igdb", "sgdb", "hltb") and providers.by_key(provider) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not a metadata provider")
+    updated = db_game_handler.update_game(id, remove_match(game, provider))
+    promoted = await run_in_threadpool(promote_source, updated)  # the next provider's record, when the source was the one removed
+    if promoted:
+        updated = db_game_handler.update_game(id, promoted)
+    return GameSchema.model_validate(updated)
+
+
+@router.post("/{id}/fetch-metadata/{provider}")
+async def fetch_provider_metadata(user: AdminUser, id: Annotated[int, Path(ge=1)], provider: str) -> GameSchema:
+    """Read the game again from one provider it is matched with, and only from it: its record becomes the game's metadata (name,
+    summary, genres, artwork) as when it was picked, for `sgdb` the artwork of its game is chosen again, and for `hltb` the times
+    are read again. The other providers are not asked. `409` when the game is not matched with the provider."""
+    game = check_visible(user, db_game_handler.get_game(id))
+    if provider not in ("igdb", "sgdb", "hltb") and providers.by_key(provider) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not a metadata provider")
+    ref = {"igdb": game.igdb_id, "sgdb": game.sgdb_id, "hltb": game.hltb_id or None}.get(provider) or (game.provider_ids or {}).get(provider)
+    if ref is None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"This game is not matched with {provider}")
+    try:
+        if provider == "igdb":
+            return await apply_igdb_match(user, id, int(ref))
+        if provider == "sgdb":
+            await run_in_threadpool(set_sgdb_game, game, int(ref))
+        elif provider == "hltb":
+            found = await run_in_threadpool(hltb_handler.get_game_by_id, int(ref))
+            if found is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="HowLongToBeat has no times for this game any more")
+            db_game_handler.update_game(id, {"hltb_metadata": found["metadata"]})
+        else:
+            found = await run_in_threadpool(providers.by_key(provider).get, ref)
+            if found is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"{provider} has no game with this id any more")
+            await run_in_threadpool(set_match, game, provider, found)
+    except (web.Unavailable, hltb_handler.HLTBUnavailable) as e:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"{provider} is not answering right now: {e}") from e
+    return GameSchema.model_validate(db_game_handler.get_game(id))
+
+
+# The other metadata providers (RomM, Steam, VNDB, DLsite, itch.io). Declared last: the IGDB, SteamGridDB and HowLongToBeat
+# routes above keep their own paths.
+@router.get("/{id}/metadata/{provider}/search")
+async def search_provider(
+    user: AdminUser, id: Annotated[int, Path(ge=1)], provider: str, query: Annotated[str | None, Query()] = None
+) -> list[dict]:
+    """Games the provider has for the name (each with its id, name and what it has), for a person to pick from. A page address or an
+    id of the provider as the `query` finds that game alone: it is how a game the provider's search leaves out is matched."""
+    game = check_visible(user, db_game_handler.get_game(id))
+    module = providers.by_key(provider)
+    if module is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not a metadata provider")
+    if not module.is_configured():
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"{provider} is switched off or not set up")
+    typed = (query or "").strip()
+    try:
+        pointed_at = await run_in_threadpool(providers.lookup, module, typed) if typed else None
+        if pointed_at is not None:
+            return pointed_at
+        return await run_in_threadpool(module.search, typed or search_name(game.name))
+    except web.Unavailable as e:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"{provider} is not answering right now: {e}") from e
+
+
+@router.post("/{id}/metadata/{provider}/{ref}")
+async def apply_provider_match(
+    user: AdminUser, id: Annotated[int, Path(ge=1)], provider: str, ref: str
+) -> GameSchema:
+    """Apply one game a provider has, as this game's match: its metadata, name and artwork. It replaces the IGDB match."""
+    game = check_visible(user, db_game_handler.get_game(id))
+    module = providers.by_key(provider)
+    if module is None or not module.is_configured():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not a metadata provider that is set up")
+    try:
+        found = await run_in_threadpool(module.get, ref)
+    except web.Unavailable as e:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"{provider} is not answering right now: {e}") from e
+    if found is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"{provider} has no game with this id")
+    await run_in_threadpool(set_match, game, provider, found)
+    return GameSchema.model_validate(db_game_handler.get_game(id))

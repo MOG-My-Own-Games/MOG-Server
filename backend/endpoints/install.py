@@ -713,8 +713,7 @@ async def remove_proton_build_route(user: AdminUser, build_id: str) -> None:
 # --- Install cache management ---
 
 
-@router.get("/install/cache")
-async def list_install_cache(user: AdminUser) -> InstallCacheSchema:
+def _cache_entries() -> list[InstallCacheEntrySchema]:
     entries = []
     for path in cache_root_dirs():
         try:
@@ -731,6 +730,13 @@ async def list_install_cache(user: AdminUser) -> InstallCacheSchema:
                 expires_at=session.expires_at if session else None,
             )
         )
+    return entries
+
+
+@router.get("/install/cache")
+async def list_install_cache(user: AdminUser) -> InstallCacheSchema:
+    # Measuring the caches walks every file of them (tens of thousands): in a thread, or the whole server waits for it.
+    entries = await asyncio.to_thread(_cache_entries)
     mod_zips = await asyncio.to_thread(mods_handler.cached_zips)
     quota = await asyncio.to_thread(cache_quota.snapshot, sum(e.size_bytes for e in entries))
     return InstallCacheSchema(

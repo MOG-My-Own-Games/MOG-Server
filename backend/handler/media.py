@@ -12,13 +12,24 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import urlsplit
 
+from handler import cover_art
 from handler.metadata import sgdb_handler
 from models.game import Game
 
 KINDS = ("cover", "banner", "hero", "logo", "icon")
 SGDB, IGDB = "steamgriddb", "igdb"
+VNDB, DLSITE, STEAM, ITCH = "vndb", "dlsite", "steam", "itch"  # the other metadata providers (see metadata/providers.py)
 LOCAL = "local"  # an icon found in the game's own folder (see local_icons)
-_HOST_SOURCES = {"steamgriddb.com": SGDB, "images.igdb.com": IGDB}
+# A RomM server's own address is not here: its artwork is the provider's (IGDB's, SteamGridDB's) URL it stores, and
+# a server the user runs is never made to serve files to this one.
+_HOST_SOURCES = {
+    "steamgriddb.com": SGDB,
+    "images.igdb.com": IGDB,
+    "t.vndb.org": VNDB,
+    "img.dlsite.jp": DLSITE,
+    "steamstatic.com": STEAM,
+    "itch.zone": ITCH,
+}
 
 
 def source_of(url: str) -> str | None:
@@ -38,16 +49,18 @@ def _candidate(url: str, source: str, thumb: str | None = None, width: int | Non
 
 
 
-def igdb_candidates(metadata: dict[str, Any] | None) -> dict[str, list[dict]]:
+def metadata_candidates(metadata: dict[str, Any] | None, source: str = IGDB) -> dict[str, list[dict]]:
+    """The artwork a game's metadata offers, labelled with the provider it came from: its cover, and its screenshots and
+    artworks as hero art."""
     meta = metadata or {}
     found: dict[str, list[dict]] = {}
     cover = (meta.get("cover") or {}).get("url")
     if cover:
-        found["cover"] = [_candidate(cover, IGDB)]
+        found["cover"] = [_candidate(cover, source)]
     wide = [a["url"] for a in meta.get("artworks") or [] if a.get("url")]
     wide += [s["url"] for s in meta.get("screenshots") or [] if s.get("url")]
     if wide:
-        found["hero"] = [_candidate(url, IGDB) for url in wide]
+        found["hero"] = [_candidate(url, source) for url in wide]
     return found
 
 
@@ -57,7 +70,7 @@ def candidates(game: Game, sgdb_id: int | None = None) -> dict[str, list[dict]]:
     sgdb = sgdb_handler.get_media(sgdb_id or game.sgdb_id) if (sgdb_id or game.sgdb_id) else {}
     for kind, items in (sgdb or {}).items():
         found[kind] += [_candidate(i["url"], SGDB, i.get("thumb"), i.get("width"), i.get("height")) for i in items]
-    for kind, items in igdb_candidates(game.igdb_metadata).items():
+    for kind, items in metadata_candidates(game.igdb_metadata, game.metadata_source or IGDB).items():
         found[kind] += items
     from handler import local_icons  # here: it needs media_uploads, which needs this module
 
@@ -75,6 +88,9 @@ def defaults(found: dict[str, list[dict]]) -> dict[str, dict]:
     """The provider's own pick for each kind: the first candidate. An icon found in the game's folder is only on offer, never
     picked by itself."""
     picks = {kind: next((i for i in items if i["source"] != LOCAL), None) for kind, items in found.items()}
+    # A cover is the first one that is as tall as the cards (the providers that say their sizes), else the first.
+    portrait = next((i for i in found.get("cover", []) if i["source"] != LOCAL and i.get("width") and i.get("height") and cover_art.fits(i["width"], i["height"])), None)
+    picks["cover"] = portrait or picks.get("cover")
     return {kind: {"url": item["url"], "source": item["source"]} for kind, item in picks.items() if item}
 
 

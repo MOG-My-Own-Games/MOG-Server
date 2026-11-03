@@ -6,10 +6,20 @@ import pytest
 from endpoints import games
 from endpoints.responses.game import MediaSelectionForm
 from fastapi import HTTPException
-from handler import media
+from handler import cover_art, media, media_uploads
 from handler.metadata import sgdb_handler
 from models.game import Game
 from utils import image_cache
+
+
+def _png(size: tuple[int, int]) -> bytes:
+    import io
+
+    from PIL import Image
+
+    out = io.BytesIO()
+    Image.new("RGB", size, (90, 40, 140)).save(out, "PNG")
+    return out.getvalue()
 
 
 def _game(**kw) -> Game:
@@ -100,9 +110,80 @@ class TestStoreMedia:
         ok, saved = self._store(game, {"cover": {"url": "new", "source": "steamgriddb"}}, replace=True, keep={"cover"})
         assert saved.get("media", game.media)["cover"]["url"] == "typed" and "cover_path" not in saved
 
-    def test_nothing_on_offer_changes_nothing(self):
-        ok, saved = self._store(_game(), {}, replace=True)
+    def test_a_kind_a_person_removed_stays_empty_for_the_automatic_pass_and_comes_back_with_the_scrape_they_ask_for(self):
+        game = _game(cover_path=None, media={"logo": {"url": "l", "source": "steamgriddb"}}, media_cleared=["cover"])
+        chosen = {"cover": {"url": "c", "source": "steamgriddb"}, "hero": {"url": "h", "source": "steamgriddb"}}
+
+        ok, saved = self._store(game, chosen, replace=False)
+        assert "cover" not in saved["media"] and saved["media"]["hero"]["url"] == "h" and "cover_path" not in saved
+
+        ok, saved = self._store(game, chosen, replace=True)
+        assert saved["media"]["cover"]["url"] == "c" and saved["cover_path"] == "c" and saved["media_cleared"] == []
+
+    def test_a_game_with_a_cover_and_nothing_on_offer_is_left_alone(self):
+        game = _game(cover_path="c", media={"cover": {"url": "c", "source": "steamgriddb"}})
+        ok, saved = self._store(game, {}, replace=True)
         assert ok is False and saved == {}
+
+    def test_a_game_with_no_art_at_all_is_given_a_poster_with_its_name(self):
+        ok, saved = self._store(_game(name="Ryona no Mori"), {}, replace=True)
+        cover = saved["media"]["cover"]
+        assert ok is False  # no provider gave anything: it is a poster, not a scrape that found something
+        assert cover["source"] == "generated" and cover["from"] is None and saved["cover_path"] == cover["url"]
+        assert media_uploads.is_upload(cover["url"]) and media_uploads.path_for(cover["url"]).is_file()
+
+    def test_a_cover_that_is_not_as_tall_as_the_cards_is_set_whole_on_a_tall_canvas(self, monkeypatch):
+        from handler import scrape_handler
+
+        monkeypatch.setattr(scrape_handler, "_image_bytes", lambda entry: _png((460, 215)))
+        game = _game(name="Lustful Apocalypse")
+        chosen = {"cover": {"url": "https://shared.steamstatic.com/h.jpg", "source": "steam"}}
+        ok, saved = self._store(game, chosen, replace=False)
+        cover = saved["media"]["cover"]
+        assert cover["source"] == "generated" and cover["from"] == chosen["cover"]["url"] and saved["cover_path"] == cover["url"]
+        assert cover_art.size_of(media_uploads.path_for(cover["url"]).read_bytes()) == (600, 900)
+
+    def test_a_cover_that_is_tall_enough_is_kept_as_it_is(self, monkeypatch):
+        from handler import scrape_handler
+
+        monkeypatch.setattr(scrape_handler, "_image_bytes", lambda entry: _png((600, 900)))
+        chosen = {"cover": {"url": "https://cdn2.steamgriddb.com/c.png", "source": "steamgriddb"}}
+        ok, saved = self._store(_game(), chosen, replace=False)
+        assert saved["media"]["cover"] == chosen["cover"]
+
+    def test_a_game_with_only_a_banner_gets_a_cover_made_of_it(self, monkeypatch):
+        from handler import scrape_handler
+
+        monkeypatch.setattr(scrape_handler, "_image_bytes", lambda entry: _png((920, 430)))
+        game = _game(cover_path=None, media={"banner": {"url": "https://cdn2.steamgriddb.com/b.png", "source": "steamgriddb"}})
+        ok, saved = self._store(game, {}, replace=False)
+        assert saved["media"]["cover"]["from"] == "https://cdn2.steamgriddb.com/b.png"
+
+    def test_a_cover_the_person_removed_is_not_made_again_by_the_automatic_pass(self):
+        ok, saved = self._store(_game(media_cleared=["cover"]), {}, replace=False)
+        assert ok is False and saved == {}
+
+    def test_a_made_cover_gives_way_to_a_real_one_and_its_file_goes(self, monkeypatch):
+        from handler import scrape_handler
+
+        made = scrape_handler._tall_cover(_game(name="X"), {})
+        old_path = media_uploads.path_for(made["url"])
+        game = _game(cover_path=made["url"], media={"cover": made})
+        monkeypatch.setattr(scrape_handler, "_image_bytes", lambda entry: _png((600, 900)))
+        chosen = {"cover": {"url": "https://cdn2.steamgriddb.com/real.png", "source": "steamgriddb"}}
+
+        ok, saved = self._store(game, chosen, replace=False)
+
+        assert saved["media"]["cover"] == chosen["cover"] and saved["cover_path"] == chosen["cover"]["url"]
+        assert not old_path.exists()
+
+    def test_the_cover_picked_by_default_is_the_first_one_as_tall_as_the_cards(self):
+        found = {"cover": [
+            {"url": "wide", "source": "steamgriddb", "width": 920, "height": 430},
+            {"url": "tall", "source": "steamgriddb", "width": 600, "height": 900},
+        ]}
+        assert media.defaults(found)["cover"]["url"] == "tall"
+        assert media.defaults({"cover": [{"url": "x", "source": "igdb", "width": None, "height": None}]})["cover"]["url"] == "x"
 
 
 class TestMediaEndpoints:

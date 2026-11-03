@@ -70,3 +70,12 @@ class Settings(BaseModel):
     # Files a client downloads in parallel. NULL falls back to
     # config.INSTALL_DOWNLOAD_WORKERS_DEFAULT.
     download_workers: Mapped[int | None] = mapped_column(Integer, default=None)
+    # Metadata providers beyond IGDB, SteamGridDB and HowLongToBeat (see handler/metadata/providers.py). A switch that is
+    # NULL means on. RomM is the user's own server: its address and a client API token are what it needs.
+    romm_enabled: Mapped[bool | None] = mapped_column(Boolean, default=None)
+    romm_url: Mapped[str | None] = mapped_column(String(length=500), default=None)
+    romm_token: Mapped[str | None] = mapped_column(String(length=255), default=None)
+    vndb_enabled: Mapped[bool | None] = mapped_column(Boolean, default=None)
+    dlsite_enabled: Mapped[bool | None] = mapped_column(Boolean, default=None)
+    steam_enabled: Mapped[bool | None] = mapped_column(Boolean, default=None)
+    itch_enabled: Mapped[bool | None] = mapped_column(Boolean, default=None)

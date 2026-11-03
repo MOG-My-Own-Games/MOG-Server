@@ -121,8 +121,13 @@ def test_a_game_gone_from_disk_that_has_saves_is_saves_only_not_missing(world):
     assert world.client.get(f"/api/games/{gone_with.id}").json()["saves_only"] is True
     assert world.client.get(f"/api/games/{present.id}").json()["saves_only"] is False
     assert world.client.get(f"/api/games/{gone_without.id}").json()["saves_only"] is False
-    listed = {g["name"]: g["saves_only"] for g in world.client.get("/api/games/missing").json()}
-    assert listed == {"Without": False, "WithSaves": True}
+    assert [g["name"] for g in world.client.get("/api/games/missing").json()] == ["Without"]  # the one kept for its saves is not "missing"
+
+
+def test_a_game_a_client_imported_is_not_listed_as_missing_either(world):
+    add_game(world, "Imported", missing_from_fs=True, imported=True)
+    add_game(world, "Gone", missing_from_fs=True)
+    assert [g["name"] for g in world.client.get("/api/games/missing").json()] == ["Gone"]
 
 
 def test_clearing_the_missing_games_keeps_the_ones_with_saves(world):

@@ -10,6 +10,7 @@ docs/TODO.md.
 
 from __future__ import annotations
 
+import re
 import time
 from typing import Any
 
@@ -116,6 +117,12 @@ def _query(body: str) -> list[dict[str, Any]]:
         return []
 
 
+def is_configured() -> bool:
+    """Whether the provider is on and has a client id and secret, so a search can work at all."""
+    client_id, client_secret = _credentials()
+    return bool(client_id and client_secret)
+
+
 def validate_credentials() -> bool:
     """Whether the configured client id/secret actually authenticate - used
     by Settings to show a pass/fail indicator next to the fields, not to
@@ -147,6 +154,22 @@ def get_game_by_id(igdb_id: int) -> dict[str, Any] | None:
     is what RomM's own igdb_handler.py does for this same reason."""
     results = _query(f"fields {_GAME_FIELDS}; where id = {igdb_id};")
     return _resolve_media(results[0]) if results else None
+
+
+_GAME_ADDRESS = re.compile(r"^https?://(?:www\.)?igdb\.com/games/([a-z0-9-]+)", re.IGNORECASE)
+
+
+def search_typed(text: str) -> list[dict[str, Any]]:
+    """What a person typed in the match box: an IGDB id or a game address (https://www.igdb.com/games/portal-2) finds that game
+    alone, anything else is a name to search for."""
+    text = text.strip()
+    if text.isdigit():
+        found = get_game_by_id(int(text))
+        return [found] if found else []
+    address = _GAME_ADDRESS.match(text)
+    if address:
+        return [_resolve_media(g) for g in _query(f'fields {_GAME_FIELDS}; where slug = "{address.group(1).lower()}"; limit 1;')]
+    return search_games(text)
 
 
 def cover_url(igdb_image_url: str | None, size: str = "cover_big") -> str | None:

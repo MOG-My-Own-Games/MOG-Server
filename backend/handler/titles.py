@@ -48,7 +48,8 @@ def share_artwork(game: Game, kind: str, entry: dict | None, db=db_game_handler)
     previous = (media.get(kind) or {}).get("url")
     if previous and media_uploads.is_upload(previous):
         media_uploads.remove(previous)
-    update: dict = {}
+    cleared = set(game.media_cleared or [])
+    update: dict = {"media_cleared": sorted(cleared | {kind} if entry is None else cleared - {kind})}
     if entry is None:
         media.pop(kind, None)
         if kind == "cover":
@@ -58,7 +59,8 @@ def share_artwork(game: Game, kind: str, entry: dict | None, db=db_game_handler)
             source = media_uploads.path_for(entry["url"])
             if source is None or not source.is_file():
                 return
-            entry = {"url": media_uploads.store(game.id, kind, source.read_bytes()), "source": media_uploads.UPLOAD}
+            made = entry.get("source") == "generated"  # a cover made by the server stays one the next scrape may replace
+            entry = {**entry, "url": media_uploads.store(game.id, kind, source.read_bytes())} if made else {"url": media_uploads.store(game.id, kind, source.read_bytes()), "source": media_uploads.UPLOAD}
         media[kind] = entry
         if kind == "cover":
             update["cover_path"] = entry["url"]

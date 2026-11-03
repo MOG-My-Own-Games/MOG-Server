@@ -101,23 +101,36 @@ def clear_session_cache(session_id: int) -> bool:
 
 def dir_size_bytes(path: Path) -> int:
     """Size on disk of a directory tree. Hardlinks (the live install loop
-    links files into the cache root) are counted once."""
+    links files into the cache root) are counted once; symbolic links are not followed.
+    A cache has tens of thousands of files: scandir gives each one's type with the listing, so it takes one stat per file."""
     if not path.exists():
         return 0
     seen: set[tuple[int, int]] = set()
     total = 0
-    for f in path.rglob("*"):
+    pending = [str(path)]
+    while pending:
         try:
-            if f.is_symlink() or not f.is_file():
-                continue
-            st = f.stat()
+            listing = os.scandir(pending.pop())
         except OSError:
             continue
-        key = (st.st_dev, st.st_ino)
-        if key in seen:
-            continue
-        seen.add(key)
-        total += st.st_size
+        with listing:
+            for entry in listing:
+                try:
+                    if entry.is_symlink():
+                        continue
+                    if entry.is_dir(follow_symlinks=False):
+                        pending.append(entry.path)
+                        continue
+                    if not entry.is_file(follow_symlinks=False):
+                        continue
+                    st = entry.stat(follow_symlinks=False)
+                except OSError:
+                    continue
+                key = (st.st_dev, st.st_ino)
+                if key in seen:
+                    continue
+                seen.add(key)
+                total += st.st_size
     return total
 
 

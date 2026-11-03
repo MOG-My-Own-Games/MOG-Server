@@ -122,6 +122,20 @@ def test_the_upload_is_on_offer_among_the_candidates_and_choosing_none_removes_t
     assert not (world.root / str(world.game.id) / url.rsplit("/", 1)[1]).exists()
 
 
+def test_removing_an_image_is_remembered_until_another_is_chosen_or_uploaded(world):
+    """A removed cover must not be put back by the next automatic pass, whatever put it there."""
+    url = "https://cdn2.steamgriddb.com/hero/a.png"
+    put = lambda body: world.client.put(f"/api/games/{world.game.id}/media", json=body)  # noqa: E731
+    cleared = lambda: db_game_handler.get_game(world.game.id).media_cleared  # noqa: E731
+
+    assert put({"hero": url}).status_code == 200 and cleared() == []
+    assert put({"hero": None}).status_code == 200 and cleared() == ["hero"]
+    assert put({"hero": url}).status_code == 200 and cleared() == []
+    put({"hero": None})
+    _upload(world, "hero")
+    assert cleared() == []
+
+
 def test_choosing_a_providers_image_over_an_upload_removes_the_upload_and_the_same_upload_can_be_sent_again(world):
     url = _upload(world, "hero").json()["media"]["hero"]["url"]
     again = world.client.put(f"/api/games/{world.game.id}/media", json={"hero": url})

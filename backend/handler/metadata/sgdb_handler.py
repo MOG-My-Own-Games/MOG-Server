@@ -6,6 +6,7 @@ note on scope - no fuzzy matching yet.
 
 from __future__ import annotations
 
+import re
 from urllib.parse import quote
 
 import httpx
@@ -33,6 +34,11 @@ def _api_key() -> str | None:
     if not enabled_in(settings):
         return None
     return settings.steamgriddb_api_key or STEAMGRIDDB_API_KEY
+
+
+def is_configured() -> bool:
+    """Whether the provider is on and has a key, so a search can work at all."""
+    return bool(_api_key())
 
 
 def validate_key() -> bool:
@@ -72,6 +78,34 @@ def search_games(name: str) -> list[dict]:
     except httpx.HTTPError as e:
         log.warning(f"SteamGridDB search for {name!r} failed: {e}")
         return []
+
+
+_GAME_ADDRESS = re.compile(r"^https?://(?:www\.)?steamgriddb\.com/game/(\d+)", re.IGNORECASE)
+
+
+def get_game(sgdb_id: int) -> dict | None:
+    """One SteamGridDB game ({id, name, ...}) by its id, or None."""
+    api_key = _api_key()
+    if not api_key:
+        return None
+    try:
+        found = _get(f"games/id/{int(sgdb_id)}", api_key)
+    except httpx.HTTPError as e:
+        log.warning(f"SteamGridDB game {sgdb_id} failed: {e}")
+        return None
+    return found if isinstance(found, dict) and found.get("id") else None
+
+
+def search_typed(text: str) -> list[dict]:
+    """What a person typed in the match box: a SteamGridDB id or game address (https://www.steamgriddb.com/game/5254286) finds that
+    game alone, anything else is a name to search for."""
+    text = text.strip()
+    address = _GAME_ADDRESS.match(text)
+    ref = address.group(1) if address else (text if text.isdigit() else None)
+    if ref is None:
+        return search_games(text)
+    found = get_game(int(ref))
+    return [found] if found else []
 
 
 def search_game_id(name: str) -> int | None:

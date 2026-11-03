@@ -15,6 +15,15 @@ def _no_provider_calls_from_scrapes(monkeypatch, request):
 
 
 @pytest.fixture(autouse=True)
+def _artwork_files_in_tmp(monkeypatch, tmp_path):
+    """The artwork a test makes (an upload, a cover made by the server) goes under tmp_path, and no image is fetched."""
+    from handler import media_uploads, scrape_handler
+
+    monkeypatch.setattr(media_uploads, "RESOURCES_BASE_PATH", str(tmp_path / "resources"))
+    monkeypatch.setattr(scrape_handler, "_image_bytes", lambda entry: None)
+
+
+@pytest.fixture(autouse=True)
 def _no_video_lookups_in_the_background(monkeypatch, tmp_path):
     """A scrape starts the background video lookups; no test may reach YouTube or write the real cache file."""
     from handler import video_handler

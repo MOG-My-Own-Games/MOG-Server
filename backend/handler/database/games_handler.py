@@ -99,7 +99,18 @@ class DBGamesHandler(DBBaseHandler):
         metadata it lacks, and the other row goes. The imported one is kept, so the saves and the clients' records stay on its id."""
         placeholder, real = session.get(Game, placeholder_id), session.get(Game, game_id)
         taken = {f: getattr(real, f) for f in ("library_id", "fs_name", "size_bytes", "addons_only", "has_mods")}
-        for field in ("summary", "igdb_id", "igdb_metadata", "sgdb_id", "hltb_id", "hltb_metadata", "cover_path", "media"):
+        for field in (
+            "summary",
+            "igdb_id",
+            "igdb_metadata",
+            "metadata_source",
+            "provider_ids",
+            "sgdb_id",
+            "hltb_id",
+            "hltb_metadata",
+            "cover_path",
+            "media",
+        ):
             if not getattr(placeholder, field):
                 taken[field] = getattr(real, field)
         session.execute(delete(Game).where(Game.id == game_id))

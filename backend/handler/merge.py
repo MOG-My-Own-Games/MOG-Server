@@ -148,7 +148,12 @@ def _values(keep: Game, drop: Game, form: dict, moves: _Moves) -> dict:
         if field in form:
             values[field] = form[field]
     if form.get("igdb_id", "this") == "other":
-        values.update(igdb_id=drop.igdb_id, igdb_metadata=drop.igdb_metadata)
+        values.update(
+            igdb_id=drop.igdb_id,
+            igdb_metadata=drop.igdb_metadata,
+            metadata_source=drop.metadata_source,
+            provider_ids=drop.provider_ids,
+        )
     if form.get("sgdb_id", "this") == "other":
         values["sgdb_id"] = drop.sgdb_id
     for field in ("hltb_id", "hltb_metadata"):  # what the kept game lacks, the other one lends

@@ -21,6 +21,11 @@ NAME_MAX_LENGTH = 400
 FS_NAME_MAX_LENGTH = 450
 
 
+# Which provider's id names the title of a game that IGDB does not know, and whose record is its metadata when several have it (a test
+# keeps it the same as handler.scrape_handler.PRIORITY).
+PROVIDER_PRIORITY = ("igdb", "romm", "steam", "vndb", "dlsite", "itch")
+
+
 class Game(BaseModel):
     __tablename__ = "games"
 
@@ -40,9 +45,17 @@ class Game(BaseModel):
     sgdb_id: Mapped[int | None] = mapped_column(Integer(), default=None)
     # Which title the game is a version of, when that was decided and not told by the IGDB id (`mog:<id>`, see handler/titles.py).
     title_key: Mapped[str | None] = mapped_column(String(length=40), default=None)
+    # Which provider the metadata in igdb_metadata came from, and each provider's id for this game ({"igdb": 42, "vndb": 17}).
+    # igdb_metadata keeps its name for every source: it holds the record of whichever match is in use.
+    metadata_source: Mapped[str | None] = mapped_column(String(length=20), default=None)
+    provider_ids: Mapped[dict[str, Any] | None] = mapped_column(CustomJSON(), default=dict)
     hltb_id: Mapped[int | None] = mapped_column(Integer(), default=None)
     # Completion times in seconds (main_story, main_plus_extra, completionist, all_styles) and their report counts.
     hltb_metadata: Mapped[dict[str, Any] | None] = mapped_column(CustomJSON(), default=dict)
+    # Providers that found nothing for this game, as {provider: ISO time of the search} (see handler/scrape_handler.py).
+    provider_misses: Mapped[dict[str, str] | None] = mapped_column(CustomJSON(), default=dict)
+    # Artwork kinds (cover, banner...) a person removed on purpose: the automatic scrape leaves them empty (an explicit one fills them).
+    media_cleared: Mapped[list[str] | None] = mapped_column(CustomJSON(), default=list)
     cover_path: Mapped[str | None] = mapped_column(String(length=1000), default=None)
     # The artwork chosen for each kind (see handler/media.py): {kind: {"url": ..., "source": ...}}.
     # cover_path mirrors media["cover"] for what reads it directly.
@@ -75,7 +88,13 @@ class Game(BaseModel):
     @property
     def effective_title_key(self) -> str:
         """The title this game is a version of (see handler/titles.py): games with the same one are one game."""
-        return self.title_key or (f"igdb:{self.igdb_id}" if self.igdb_id else f"mog:{self.id}")
+        if self.title_key:
+            return self.title_key
+        if self.igdb_id:
+            return f"igdb:{self.igdb_id}"
+        ids = self.provider_ids or {}
+        key = next((key for key in PROVIDER_PRIORITY if ids.get(key)), None)
+        return f"{key}:{ids[key]}" if key else f"mog:{self.id}"
 
     def __repr__(self) -> str:
         return f"Game({self.id} {self.name!r})"

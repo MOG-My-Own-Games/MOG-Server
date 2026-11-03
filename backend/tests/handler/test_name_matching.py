@@ -1,4 +1,4 @@
-from handler.name_matching import query_variants, title_score
+from handler.name_matching import is_other_title, query_variants, title_score
 
 
 def test_extra_release_token_still_scores_high():
@@ -40,3 +40,13 @@ def test_the_parentheses_around_a_year_are_not_sent_to_the_search_and_the_plain_
     assert query_variants(["Doom (1993)"]) == ["Doom 1993", "Doom"]
     assert query_variants(["Half Life 2 (2004)"]) == ["Half Life 2 2004", "Half Life 2", "Half Life"]
     assert query_variants(["Some Game"]) == ["Some Game"]
+
+
+def test_a_title_with_a_word_swapped_is_another_title_but_a_subtitle_or_a_tag_is_not():
+    """"Streets of Ryona" was matched with Steam's "Streets of Fortuna": 2 of 3 words shared reads alike to the score."""
+    assert is_other_title("Streets of Ryona", "Streets of Fortuna")
+    assert not is_other_title("Dohna Dohna", "Dohna Dohna: Issho ni Warui Koto o Shiyou")  # a subtitle
+    assert not is_other_title("Lewd Realm Sacrifice Araka Uncensored", "Lewd Realm: Sacrifice Araka")  # a leftover tag
+    assert not is_other_title("The Dark Game", "Dark Game")
+    assert not is_other_title("SamuraiSacrament", "Samurai Sacrament")  # the same letters, spaced differently
+    assert is_other_title("SamuraiSacrament", "Samurai Garden")

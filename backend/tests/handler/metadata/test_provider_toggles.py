@@ -27,6 +27,13 @@ def row(**over):
         backup_saves=None,
         install_cache_max_bytes=None,
         install_cache_auto_clean=None,
+        romm_enabled=None,
+        romm_url=None,
+        romm_token=None,
+        vndb_enabled=None,
+        dlsite_enabled=None,
+        steam_enabled=None,
+        itch_enabled=None,
     )
     return SimpleNamespace(**{**base, **over})
 

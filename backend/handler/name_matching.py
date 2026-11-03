@@ -41,6 +41,18 @@ def _title_score(q: list[str], t: list[str]) -> float:
     return max(f1, SequenceMatcher(None, " ".join(q), " ".join(t)).ratio())
 
 
+_FILLER = {"the", "a", "an", "of", "and", "edition", "version"}
+
+
+def is_other_title(query: str, title: str) -> bool:
+    """Whether each of the two has a word the other lacks ("Streets of Ryona" and "Streets of Fortuna"): a different game
+    that only reads alike. A name with extra words on one side only (a subtitle, a leftover tag) is not."""
+    q, t = [w for w in tokens(query) if w not in _FILLER], [w for w in tokens(title) if w not in _FILLER]
+    if "".join(q) == "".join(t):  # the same letters, spaced differently ("SamuraiSacrament", "Samurai Sacrament")
+        return False
+    return bool(set(q) - set(t)) and bool(set(t) - set(q))
+
+
 _TRAILING_YEAR = re.compile(r"\s*\(\s*(?:19\d{2}|20[0-2]\d)\s*\)\s*$")
 
 

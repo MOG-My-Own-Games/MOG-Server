@@ -13,6 +13,14 @@ class SettingsSchema(BaseModel):
     igdb_enabled: bool
     steamgriddb_enabled: bool
     hltb_enabled: bool
+    # RomM is the user's own server: its address and an API token. The token is never sent back, only masked.
+    romm_enabled: bool
+    romm_url: str | None
+    romm_token: str | None
+    vndb_enabled: bool
+    dlsite_enabled: bool
+    steam_enabled: bool
+    itch_enabled: bool
     watch_libraries: bool
     debug_logging: bool
     backup_daily: bool
@@ -32,6 +40,7 @@ class SettingsValidationSchema(BaseModel):
     # live pass/fail of whatever is configured.
     igdb_valid: bool | None
     steamgriddb_valid: bool | None
+    romm_valid: bool | None
 
 
 class SettingsUpdateForm(BaseModel):
@@ -41,6 +50,13 @@ class SettingsUpdateForm(BaseModel):
     igdb_enabled: bool | None = None
     steamgriddb_enabled: bool | None = None
     hltb_enabled: bool | None = None
+    romm_enabled: bool | None = None
+    romm_url: str | None = None
+    romm_token: str | None = None  # a token (rmm_...) or a pairing code, which is exchanged for its token
+    vndb_enabled: bool | None = None
+    dlsite_enabled: bool | None = None
+    steam_enabled: bool | None = None
+    itch_enabled: bool | None = None
     watch_libraries: bool | None = None
     debug_logging: bool | None = None
     backup_daily: bool | None = None

@@ -1,3 +1,4 @@
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -5,16 +6,29 @@ import pytest
 
 import config
 from handler import scrape_handler
-from handler.metadata import hltb_handler
+from handler.metadata import hltb_handler, igdb_handler, sgdb_handler
 from handler.metadata.hltb_handler import HLTBUnavailable
 
-from handler.scrape_handler import search_names, scrape_game, search_name
+from handler.scrape_handler import MISS_RETRY, search_names, scrape_game, search_name
 from models.game import Game
 
 
 def _game(**overrides) -> Game:
     defaults = dict(id=1, library_id=1, fs_name="Some Game", name="Some Game", igdb_id=None, igdb_metadata=None, sgdb_id=None, cover_path=None)
     return Game(**{**defaults, **overrides})
+
+
+def _configured(monkeypatch) -> None:
+    """Both providers on and keyed, so a search can run."""
+    monkeypatch.setattr(igdb_handler, "is_configured", lambda: True)
+    monkeypatch.setattr(sgdb_handler, "is_configured", lambda: True)
+
+
+@pytest.fixture(autouse=True)
+def _other_providers_off(monkeypatch):
+    """The providers beyond IGDB and SteamGridDB are off unless a test turns one on, so no test reaches the network."""
+    for module in scrape_handler.providers.ORDER:
+        monkeypatch.setattr(module, "is_configured", lambda: False)
 
 
 class TestScrapeGame:
@@ -64,7 +78,7 @@ class TestScrapeGame:
     @patch("handler.scrape_handler.db_game_handler")
     @patch("handler.scrape_handler.sgdb_handler")
     @patch("handler.scrape_handler.igdb_handler")
-    def test_no_results_applies_nothing(self, igdb, sgdb, db):
+    def test_no_results_applies_nothing_but_remembers_the_misses(self, igdb, sgdb, db):
         igdb.search_games.return_value = []
         sgdb.search_games.return_value = []
         sgdb.get_grids.return_value = []
@@ -72,7 +86,81 @@ class TestScrapeGame:
         applied = scrape_game(_game())
 
         assert applied is False
+        db.update_game.assert_called_once()
+        assert db.update_game.call_args.args[1].keys() == {"provider_misses"}
+        assert db.update_game.call_args.args[1]["provider_misses"].keys() == {"igdb", "sgdb"}
+
+
+class TestMisses:
+    """A provider that found nothing is not asked again by an automatic pass for MISS_RETRY; a refresh asks anyway."""
+
+    @patch("handler.scrape_handler.db_game_handler")
+    @patch("handler.scrape_handler.sgdb_handler")
+    @patch("handler.scrape_handler.igdb_handler")
+    def test_a_recent_miss_is_not_searched_again(self, igdb, sgdb, db, monkeypatch):
+        _configured(monkeypatch)
+        recent = datetime.now(UTC).isoformat()
+
+        scrape_game(_game(provider_misses={"igdb": recent, "sgdb": recent}))
+
+        igdb.search_games.assert_not_called()
+        sgdb.search_games.assert_not_called()
+
+    @patch("handler.scrape_handler.db_game_handler")
+    @patch("handler.scrape_handler.sgdb_handler")
+    @patch("handler.scrape_handler.igdb_handler")
+    def test_an_old_miss_is_searched_and_a_new_miss_replaces_it(self, igdb, sgdb, db, monkeypatch):
+        _configured(monkeypatch)
+        igdb.search_games.return_value = []
+        sgdb.search_games.return_value = []
+        old = (datetime.now(UTC) - MISS_RETRY - timedelta(days=1)).isoformat()
+
+        scrape_game(_game(provider_misses={"igdb": old, "sgdb": old}))
+
+        igdb.search_games.assert_called_once()
+        written = db.update_game.call_args.args[1]["provider_misses"]
+        assert written["igdb"] > old and written["sgdb"] > old
+
+    @patch("handler.scrape_handler.db_game_handler")
+    @patch("handler.scrape_handler.sgdb_handler")
+    @patch("handler.scrape_handler.igdb_handler")
+    def test_a_match_clears_the_miss(self, igdb, sgdb, db, monkeypatch):
+        _configured(monkeypatch)
+        igdb.search_games.return_value = [{"id": 42, "name": "Some Game"}]
+        igdb.get_game_by_id.return_value = {"id": 42, "name": "Some Game"}
+        sgdb.search_games.return_value = []
+        old = (datetime.now(UTC) - MISS_RETRY - timedelta(days=1)).isoformat()
+
+        scrape_game(_game(provider_misses={"igdb": old, "sgdb": old}))
+
+        assert "igdb" not in db.update_game.call_args_list[-1].args[1]["provider_misses"]
+
+    @patch("handler.scrape_handler.db_game_handler")
+    @patch("handler.scrape_handler.sgdb_handler")
+    @patch("handler.scrape_handler.igdb_handler")
+    def test_a_provider_with_no_key_is_not_searched_and_records_nothing(self, igdb, sgdb, db):
+        igdb.is_configured.return_value = False
+        sgdb.is_configured.return_value = False
+
+        scrape_game(_game())
+
+        igdb.search_games.assert_not_called()
+        sgdb.search_games.assert_not_called()
         db.update_game.assert_not_called()
+
+    @patch("handler.scrape_handler.db_game_handler")
+    @patch("handler.scrape_handler.sgdb_handler")
+    @patch("handler.scrape_handler.igdb_handler")
+    def test_a_refresh_searches_even_with_a_recent_miss(self, igdb, sgdb, db, monkeypatch):
+        _configured(monkeypatch)
+        igdb.search_games.return_value = []
+        sgdb.search_games.return_value = []
+        recent = datetime.now(UTC).isoformat()
+
+        scrape_handler.refresh_game(_game(provider_misses={"igdb": recent, "sgdb": recent}), rematch_cover=True)
+
+        igdb.search_games.assert_called_once()
+        sgdb.search_games.assert_called_once()
 
 
 class TestManualIds:
@@ -114,6 +202,21 @@ class TestSearchName:
 
     def test_the_stripped_group_is_kept_as_a_fallback_title(self):
         assert search_names("Some Game - FLT") == ["Some Game", "Some Game FLT"]
+        assert search_names("SamuraiSacrament") == ["SamuraiSacrament", "Samurai Sacrament"]  # a folder with no spaces
+        assert search_names("TiNYiSO") == ["TiNYiSO"]  # a tag-like word is not split into "Ti NYi SO"
+
+    def test_a_cover_a_person_removed_does_not_keep_the_game_waiting_for_one(self, monkeypatch):
+        _configured(monkeypatch)
+        matched = dict(igdb_id=1, sgdb_id=7, hltb_id=0)
+        assert scrape_handler.needs_scrape(_game(**matched, cover_path=None, media={"logo": {"url": "l"}})) is True
+        assert scrape_handler.needs_scrape(_game(**matched, cover_path=None, media={"logo": {"url": "l"}}, media_cleared=["cover"])) is False
+
+    def test_a_name_with_the_tags_of_the_folder_taken_off_is_still_the_scan_name(self):
+        from handler.scrape_handler import _has_default_name
+
+        assert _has_default_name(_game(fs_name="Mori [Lab] [EN]", name="Mori [Lab] [EN]"))
+        assert _has_default_name(_game(fs_name="Mori [Lab] [EN]", name="Mori"))
+        assert not _has_default_name(_game(fs_name="Mori [Lab] [EN]", name="Mori no Mori"))
 
     def test_hyphenated_title_survives(self):
         assert search_name("Half-Life") == "Half-Life"
@@ -199,7 +302,14 @@ class TestRefreshGame:
         igdb.search_games.assert_not_called()
         sgdb.search_games.assert_not_called()
         updates = [c.args[1] for c in db.update_game.call_args_list]
-        assert {"igdb_id": 9, "igdb_metadata": igdb.get_game_by_id.return_value, "summary": "S", "name": "New"} in updates
+        assert {
+            "igdb_id": 9,
+            "provider_ids": {"igdb": 9},
+            "metadata_source": "igdb",
+            "igdb_metadata": igdb.get_game_by_id.return_value,
+            "summary": "S",
+            "name": "New",
+        } in updates
         assert store.call_args.args[1] == 5 and store.call_args.kwargs["replace"] is True
 
     @patch("handler.scrape_handler.db_game_handler")
@@ -277,9 +387,10 @@ class TestScrapeLibrary:
         assert [c.args[0].id for c in scrape.call_args_list] == [1, 3]
         assert (result.total, result.scraped) == (2, 1)
 
-    def test_needs_scrape_only_for_present_games_missing_a_match_or_cover(self):
+    def test_needs_scrape_only_for_present_games_missing_a_match_or_cover(self, monkeypatch):
         from handler.scrape_handler import needs_scrape
 
+        _configured(monkeypatch)
         picked = {"cover": {"url": "c.png", "source": "steamgriddb"}}
         assert needs_scrape(_game())
         assert needs_scrape(_game(igdb_id=1))
@@ -290,6 +401,7 @@ class TestScrapeLibrary:
     def test_a_scraped_game_never_looked_up_on_hltb_still_needs_a_scrape(self, monkeypatch):
         from handler.scrape_handler import needs_scrape
 
+        _configured(monkeypatch)
         done = dict(igdb_id=1, cover_path="c.png", media={"cover": {"url": "c.png", "source": "steamgriddb"}})
         monkeypatch.setattr(config, "HLTB_ENABLED", True)
         assert needs_scrape(_game(**done))
@@ -298,6 +410,30 @@ class TestScrapeLibrary:
         assert needs_scrape(_game(**{**done, "igdb_id": None}, hltb_id=0))  # the IGDB match is what is missing
         monkeypatch.setattr(config, "HLTB_ENABLED", False)
         assert not needs_scrape(_game(**done))
+
+    def test_an_unmatched_game_is_not_pending_once_the_providers_missed_it(self, monkeypatch):
+        from handler.scrape_handler import needs_scrape
+
+        _configured(monkeypatch)
+        recent = {"igdb": datetime.now(UTC).isoformat(), "sgdb": datetime.now(UTC).isoformat()}
+        has_cover = dict(cover_path="c", media=None)  # one with no cover is still waiting for the poster it is given
+        assert not needs_scrape(_game(provider_misses=recent, **has_cover))
+        assert needs_scrape(_game(provider_misses={"igdb": recent["igdb"]}, **has_cover))  # SteamGridDB has not been asked yet
+
+    def test_a_miss_older_than_the_retry_period_is_pending_again(self, monkeypatch):
+        from handler.scrape_handler import needs_scrape
+
+        _configured(monkeypatch)
+        old = (datetime.now(UTC) - MISS_RETRY - timedelta(hours=1)).isoformat()
+        assert needs_scrape(_game(provider_misses={"igdb": old, "sgdb": old}))
+
+    def test_a_provider_with_no_key_is_never_pending(self, monkeypatch):
+        from handler.scrape_handler import needs_scrape
+
+        monkeypatch.setattr(igdb_handler, "is_configured", lambda: False)
+        monkeypatch.setattr(sgdb_handler, "is_configured", lambda: False)
+        assert not needs_scrape(_game(cover_path="c"))
+        assert needs_scrape(_game())  # with no cover, a poster is still to be made, whatever the providers
 
 
 class TestExplicitScrapeReplaces:
@@ -599,3 +735,220 @@ class TestVideosAfterAScrape:
 
         monkeypatch.setattr(video_handler, "prefetch_in_background", boom)
         scrape_handler.warm_videos([_game()])
+
+
+class TestOtherProviders:
+    """IGDB first, then the other providers in turn; one match is the game's metadata."""
+
+    @staticmethod
+    def _record(**over) -> dict:
+        from handler.metadata import record
+
+        return {**record.make(3, "Dark Game", summary="Dark.", cover="https://c.example/c.jpg"), **over}
+
+    @patch("handler.scrape_handler.db_game_handler")
+    @patch("handler.scrape_handler.sgdb_handler")
+    @patch("handler.scrape_handler.igdb_handler")
+    def test_a_scrape_matches_the_game_with_every_provider_that_has_it_and_the_first_by_priority_gives_the_metadata(self, igdb, sgdb, db, monkeypatch):
+        from handler.metadata import romm_handler, steam_handler, vndb_handler
+
+        db.get_game.return_value = None
+        igdb.search_games.return_value = []
+        sgdb.search_games.return_value = []
+        for module in (romm_handler, steam_handler, vndb_handler):
+            monkeypatch.setattr(module, "is_configured", lambda: True)
+        monkeypatch.setattr(romm_handler, "search", lambda name: [])
+        monkeypatch.setattr(steam_handler, "search", lambda name: [{"id": 10, "name": "Dark Game"}])
+        monkeypatch.setattr(steam_handler, "get", lambda ref: self._record(id=10, summary="Steam's"))
+        monkeypatch.setattr(vndb_handler, "search", lambda name: [self._record(id="v3", summary="VNDB's")])
+        monkeypatch.setattr(vndb_handler, "SEARCH_RESULTS_ARE_FULL", True, raising=False)
+
+        assert scrape_game(_game(name="Dark Game", fs_name="Dark Game")) is True
+
+        match = db.update_game.call_args_list[0].args[1]
+        assert match["provider_ids"] == {"steam": 10, "vndb": "v3"}  # both have it
+        assert match["metadata_source"] == "steam" and match["igdb_metadata"]["summary"] == "Steam's"  # steam comes before vndb
+        # IGDB, SteamGridDB and RomM were asked and had nothing: a later pass does not ask them again
+        assert db.update_game.call_args_list[-1].args[1]["provider_misses"].keys() == {"igdb", "sgdb", "romm"}
+
+    @patch("handler.scrape_handler.db_game_handler")
+    @patch("handler.scrape_handler.sgdb_handler")
+    @patch("handler.scrape_handler.igdb_handler")
+    def test_an_igdb_match_is_the_metadata_and_the_other_providers_that_have_the_game_are_matched_too(self, igdb, sgdb, db, monkeypatch):
+        from handler.metadata import steam_handler
+
+        db.get_game.return_value = _game(igdb_id=42, provider_ids={"igdb": 42}, metadata_source="igdb")
+        igdb.search_games.return_value = [{"id": 42, "name": "Dark Game"}]
+        igdb.get_game_by_id.return_value = {"id": 42, "name": "Dark Game", "summary": "IGDB's"}
+        sgdb.search_games.return_value = []
+        monkeypatch.setattr(steam_handler, "is_configured", lambda: True)
+        monkeypatch.setattr(steam_handler, "search", lambda name: [{"id": 10, "name": "Dark Game"}])
+        monkeypatch.setattr(steam_handler, "get", lambda ref: self._record(id=10, summary="Steam's"))
+
+        scrape_game(_game(name="Dark Game", fs_name="Dark Game"))
+
+        update = next(c.args[1] for c in db.update_game.call_args_list if c.args[1].get("provider_ids") == {"igdb": 42, "steam": 10})
+        assert "metadata_source" not in update and "igdb_metadata" not in update  # the record in use is still IGDB's
+
+    @patch("handler.scrape_handler.db_game_handler")
+    @patch("handler.scrape_handler.sgdb_handler")
+    @patch("handler.scrape_handler.igdb_handler")
+    def test_a_provider_a_person_removed_is_not_asked_even_by_a_scrape_they_ask_for(self, igdb, sgdb, db, monkeypatch):
+        from handler.metadata import steam_handler
+
+        db.get_game.return_value = None
+        igdb.search_games.return_value = []
+        sgdb.search_games.return_value = []
+        monkeypatch.setattr(steam_handler, "is_configured", lambda: True)
+        monkeypatch.setattr(steam_handler, "search", lambda name: pytest.fail("it was removed from the game"))
+        gone = (datetime.now(UTC) + scrape_handler.DISMISSED_FOR).isoformat()
+
+        scrape_handler.refresh_game(_game(name="Dark Game", fs_name="Dark Game", provider_misses={"steam": gone}))
+
+    @patch("handler.scrape_handler.db_game_handler")
+    @patch("handler.scrape_handler.sgdb_handler")
+    @patch("handler.scrape_handler.igdb_handler")
+    def test_a_game_already_matched_by_a_provider_is_not_searched_again(self, igdb, sgdb, db, monkeypatch):
+        from handler.metadata import steam_handler
+
+        igdb.search_games.return_value = [{"id": 42, "name": "Dark Game"}]
+        sgdb.search_games.return_value = []
+        monkeypatch.setattr(steam_handler, "is_configured", lambda: True)
+        monkeypatch.setattr(steam_handler, "search", lambda name: pytest.fail("already matched"))
+
+        scrape_game(_game(metadata_source="steam", provider_ids={"steam": 10}))
+
+        igdb.search_games.assert_not_called()
+
+    def test_a_game_with_a_match_from_any_provider_is_not_pending(self, monkeypatch):
+        from handler.metadata import vndb_handler
+
+        _configured(monkeypatch)
+        monkeypatch.setattr(vndb_handler, "is_configured", lambda: True)
+        picked = {"cover": {"url": "c.png", "source": "vndb"}}
+        assert scrape_handler.needs_scrape(_game(metadata_source="vndb", provider_ids={"vndb": "v17"}, cover_path="c", media=picked, hltb_id=0)) is False
+        now = datetime.now(UTC).isoformat()
+        assert scrape_handler.needs_scrape(_game(provider_misses={"igdb": now, "sgdb": now, "vndb": now}, cover_path="c", media=picked)) is False
+
+    def test_a_provider_that_is_on_and_has_not_been_asked_makes_a_game_pending(self, monkeypatch):
+        from handler.metadata import vndb_handler
+
+        _configured(monkeypatch)
+        monkeypatch.setattr(vndb_handler, "is_configured", lambda: True)
+        picked = {"cover": {"url": "c.png", "source": "vndb"}}
+        assert scrape_handler.needs_scrape(_game(cover_path="c", media=picked, provider_misses={"igdb": datetime.now(UTC).isoformat()})) is True
+
+    def test_the_title_of_a_game_matched_elsewhere_is_that_provider_and_its_id(self):
+        assert _game(provider_ids={"vndb": "v17"}).effective_title_key == "vndb:v17"
+        assert _game(igdb_id=5, provider_ids={"vndb": "v17"}).effective_title_key == "igdb:5"
+        assert _game(provider_ids={}).effective_title_key == "mog:1"
+
+    @patch("handler.scrape_handler._store_media", return_value=True)
+    @patch("handler.scrape_handler.db_game_handler")
+    def test_a_match_picked_by_hand_joins_the_others_and_becomes_the_metadata(self, db, store):
+        db.get_game.return_value = _game(igdb_id=5, provider_ids={"igdb": 5}, metadata_source="igdb")
+        scrape_handler.set_match(_game(igdb_id=5, provider_ids={"igdb": 5}), "vndb", self._record(id="v17"))
+
+        update = db.update_game.call_args.args[1]
+        assert "igdb_id" not in update  # IGDB is still matched; it can be removed on its own
+        assert update["provider_ids"] == {"igdb": 5, "vndb": "v17"}
+        assert update["metadata_source"] == "vndb"
+        assert store.call_args.kwargs == {"replace": True}
+
+    @patch("handler.scrape_handler._store_media", return_value=True)
+    @patch("handler.scrape_handler.db_game_handler")
+    def test_choosing_a_provider_again_replaces_only_its_own_id(self, db, store):
+        db.get_game.return_value = _game(provider_ids={"steam": 1, "itch": "old.id"}, metadata_source="steam")
+        scrape_handler.set_match(_game(), "itch", self._record(id="mod-princess.streetsofryona"))
+        assert db.update_game.call_args.args[1]["provider_ids"] == {"steam": 1, "itch": "mod-princess.streetsofryona"}
+
+
+class TestOtherProvidersRobustness:
+    @patch("handler.scrape_handler.db_game_handler")
+    @patch("handler.scrape_handler.sgdb_handler")
+    @patch("handler.scrape_handler.igdb_handler")
+    def test_a_provider_that_could_not_answer_leaves_no_miss_and_the_next_one_is_asked(self, igdb, sgdb, db, monkeypatch):
+        """A 429 from VNDB read as "no results" and the game was not searched there for a week."""
+        from handler.metadata import steam_handler, vndb_handler, web
+
+        igdb.is_configured.return_value = False
+        sgdb.is_configured.return_value = False
+        monkeypatch.setattr(steam_handler, "is_configured", lambda: True)
+        monkeypatch.setattr(vndb_handler, "is_configured", lambda: True)
+        monkeypatch.setattr(steam_handler, "search", lambda name: (_ for _ in ()).throw(web.Unavailable("steam: 429")))
+        monkeypatch.setattr(vndb_handler, "search", lambda name: [])
+
+        misses: dict = {}
+        assert scrape_handler._find_elsewhere(_game(), misses) == {}
+
+        assert set(misses) == {"vndb"}  # asked and empty; steam could not be asked, so it is not a miss
+
+
+    def test_a_miss_that_is_not_a_time_is_no_miss(self):
+        assert scrape_handler._missed(_game(provider_misses={"igdb": "not a time"}), "igdb") is False
+        assert scrape_handler._missed(_game(provider_misses={"igdb": None}), "igdb") is False
+
+    @patch("handler.scrape_handler.db_game_handler")
+    @patch("handler.scrape_handler.sgdb_handler")
+    @patch("handler.scrape_handler.igdb_handler")
+    def test_a_provider_that_fails_neither_stops_the_next_nor_leaves_a_miss(self, igdb, sgdb, db, monkeypatch):
+        from handler.metadata import romm_handler, steam_handler
+
+        igdb.search_games.return_value = []
+        sgdb.search_games.return_value = []
+        for module in (romm_handler, steam_handler):
+            monkeypatch.setattr(module, "is_configured", lambda: True)
+
+        def broken(name):
+            raise KeyError("id")
+
+        monkeypatch.setattr(romm_handler, "search", broken)
+        monkeypatch.setattr(steam_handler, "search", lambda name: [{"id": 10, "name": "Dark Game"}])
+        monkeypatch.setattr(steam_handler, "get", lambda ref: TestOtherProviders._record(id=10))
+
+        db.get_game.return_value = None
+        assert scrape_game(_game(name="Dark Game", fs_name="Dark Game")) is True
+
+        assert db.update_game.call_args_list[0].args[1]["metadata_source"] == "steam"
+        assert "romm" not in db.update_game.call_args_list[-1].args[1]["provider_misses"]
+
+    def test_the_title_follows_igdb_then_the_providers_in_priority_order(self):
+        assert _game(provider_ids={"vndb": "v17", "itch": "a.b"}).effective_title_key == "vndb:v17"
+        assert _game(provider_ids={"itch": "a.b", "steam": 7}).effective_title_key == "steam:7"
+        assert _game(igdb_id=5, provider_ids={"igdb": 5, "steam": 7}).effective_title_key == "igdb:5"
+
+
+class TestOtherProvidersNames:
+    @patch("handler.scrape_handler.db_game_handler")
+    @patch("handler.scrape_handler.sgdb_handler")
+    @patch("handler.scrape_handler.igdb_handler")
+    def test_a_name_an_earlier_match_gave_is_kept_by_a_scrape(self, igdb, sgdb, db, monkeypatch):
+        from handler.metadata import vndb_handler
+
+        igdb.search_games.return_value = []
+        sgdb.search_games.return_value = []
+        monkeypatch.setattr(vndb_handler, "is_configured", lambda: True)
+        full = TestOtherProviders._record(id="v1", name="Romanised Title")
+        monkeypatch.setattr(vndb_handler, "search", lambda name: [full])
+
+        db.get_game.return_value = None
+        scrape_game(_game(name="Nice English Name", fs_name="nice_english_name"))
+
+        assert "name" not in db.update_game.call_args_list[0].args[1]
+
+    @patch("handler.scrape_handler.db_game_handler")
+    @patch("handler.scrape_handler.sgdb_handler")
+    @patch("handler.scrape_handler.igdb_handler")
+    def test_a_refresh_asks_the_other_providers_whatever_they_missed_before(self, igdb, sgdb, db, monkeypatch):
+        from handler.metadata import steam_handler
+
+        igdb.search_games.return_value = []
+        sgdb.search_games.return_value = []
+        monkeypatch.setattr(steam_handler, "is_configured", lambda: True)
+        monkeypatch.setattr(steam_handler, "search", lambda name: [{"id": 10, "name": "Dark Game"}])
+        monkeypatch.setattr(steam_handler, "get", lambda ref: TestOtherProviders._record(id=10))
+        recent = datetime.now(UTC).isoformat()
+        db.get_game.return_value = None
+
+        assert scrape_handler.refresh_game(_game(name="Dark Game", fs_name="Dark Game", provider_misses={"steam": recent}))
+        assert db.update_game.call_args_list[0].args[1]["metadata_source"] == "steam"

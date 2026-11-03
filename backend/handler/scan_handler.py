@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from handler.database import db_game_handler
+from handler.filesystem.fs_tags import name_without_tags
 from handler.filesystem.installer_detection import is_addon_folder, is_base_installer
 from handler.mods import has_mods
 from logger.logger import log
@@ -128,7 +129,7 @@ def _scan_library(library: Library) -> ScanResult:
             Game(
                 library_id=library.id,
                 fs_name=fs_name,
-                name=fs_name,
+                name=name_without_tags(fs_name),
                 addons_only=only_addons(root / fs_name),
                 has_mods=has_mods(root / fs_name),
                 size_bytes=size_of(root / fs_name),

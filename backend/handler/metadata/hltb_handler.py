@@ -281,6 +281,20 @@ def search_games(name: str) -> list[dict]:
     return [g for g in found if has_times(g["metadata"])]
 
 
+_GAME_ADDRESS = re.compile(r"^https?://(?:www\.)?howlongtobeat\.com/game/(\d+)", re.IGNORECASE)
+
+
+def search_typed(text: str) -> list[dict]:
+    """What a person typed in the match box: a HowLongToBeat id or game address finds that game alone, anything else is a name."""
+    text = text.strip()
+    address = _GAME_ADDRESS.match(text)
+    ref = address.group(1) if address else (text if text.isdigit() else None)
+    if ref is None:
+        return search_games(text)
+    found = get_game_by_id(int(ref))
+    return [found] if found else []
+
+
 def get_game_by_id(hltb_id: int) -> dict | None:
     """One game as {id, name, metadata}, or None if it is gone or has no time. The API only searches, so
     this reads the record the game page ships to the browser."""

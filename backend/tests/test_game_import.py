@@ -75,7 +75,9 @@ def test_the_sizes_of_an_imported_game_count_only_what_its_saves_take(api):
     assert (sizes.installer, sizes.cache, sizes.files, sizes.total) == (0, 0, 0, 0)
 
 
-def test_an_imported_game_still_wants_its_cover_but_a_missing_one_does_not():
+def test_an_imported_game_still_wants_its_cover_but_a_missing_one_does_not(monkeypatch):
+    monkeypatch.setattr(scrape_handler.igdb_handler, "is_configured", lambda: True)
+    monkeypatch.setattr(scrape_handler.sgdb_handler, "is_configured", lambda: True)
     imported = Game(library_id=None, fs_name="A", name="A", imported=True, missing_from_fs=True)
     gone = Game(library_id=1, fs_name="B", name="B", imported=False, missing_from_fs=True)
 
@@ -317,3 +319,24 @@ def test_a_game_with_artwork_uploaded_under_its_id_is_not_merged(db, tmp_path):
     db_game_handler.update_game(real.id, {"cover_path": f"/resources/media/{real.id}/cover.png"})
 
     assert adopt_placeholders(real.id) is None and len(db_game_handler.get_all_games()) == 2
+
+
+def test_matching_a_game_again_by_name_drops_the_match_it_had(db, monkeypatch, tmp_path):
+    """A game matched by another provider that is renamed is searched anew: the old source and ids must not stay, or the scrape
+    would never ask IGDB or the other providers again (a game with a source is taken for matched)."""
+    library = db_library_handler.add_library(Library(name="games", root_path=str(tmp_path)))
+    game = db_game_handler.add_game(
+        Game(library_id=library.id, fs_name="A", name="Old name", metadata_source="vndb", provider_ids={"vndb": "v17"})
+    )
+    seen = []
+    monkeypatch.setattr(games_endpoints, "refresh_game", lambda g, keep=frozenset(), **kw: seen.append(g))
+    app = FastAPI()
+    app.include_router(games_endpoints.router, prefix="/api")
+    admin = SimpleNamespace(id=1, is_admin=True, hidden_library_ids=[])
+    app.dependency_overrides[get_current_user] = lambda: admin
+    app.dependency_overrides[require_admin] = lambda: admin
+
+    response = TestClient(app).put(f"/api/games/{game.id}", json={"name": "New name"})
+
+    assert response.status_code == 200
+    assert seen[0].metadata_source is None and seen[0].provider_ids == {}

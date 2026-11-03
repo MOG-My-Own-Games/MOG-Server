@@ -17,6 +17,10 @@ class GameSchema(BaseModel):
     name: str
     summary: str | None
     igdb_id: int | None
+    # The metadata in igdb_metadata is the record of the provider named here (`igdb`, `romm`, `steam`, `vndb`, `dlsite`, `itch`)
+    # and that provider's id for the game is in provider_ids; null for a game with no match yet.
+    metadata_source: str | None = None
+    provider_ids: dict[str, Any] | None = None
     igdb_metadata: dict[str, Any] | None
     sgdb_id: int | None
     # The title the game is a version of: games with the same key are one game (their time played, saves, name and artwork go

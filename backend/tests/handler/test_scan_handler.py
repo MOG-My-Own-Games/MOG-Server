@@ -57,6 +57,18 @@ class TestEmptyFolders:
         assert result.total == 2
 
     @patch("handler.scan_handler.db_game_handler")
+    def test_a_new_game_is_named_without_the_tags_of_its_folder(self, db, tmp_path):
+        folder = tmp_path / "Ryona no Mori [Black Megane Laboratory] [English Translation]"
+        folder.mkdir()
+        (folder / "setup.exe").write_bytes(b"x")
+        db.get_games_for_library.return_value = []
+
+        scan_library(Library(id=1, name="L", root_path=str(tmp_path)))
+
+        added = db.add_game.call_args.args[0]
+        assert added.name == "Ryona no Mori" and added.fs_name == folder.name  # the tags stay in fs_name (fs_tags)
+
+    @patch("handler.scan_handler.db_game_handler")
     def test_a_known_game_whose_folder_was_emptied_is_flagged_missing(self, db, tmp_path):
         (tmp_path / "Hollow").mkdir()
         db.get_games_for_library.return_value = [_game(1, "Hollow")]

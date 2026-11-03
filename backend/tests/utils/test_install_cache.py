@@ -139,3 +139,21 @@ def test_clearing_a_session_whose_files_stay_keeps_the_session_when_a_game_is_pu
     assert install_cache.purge_superseded_sessions(1, keep_session_id=8, owner_user_id=1) == 0
 
     assert 7 in store.rows
+
+
+def test_a_cache_is_measured_once_per_file_whatever_links_or_folders_it_has(tmp_path):
+    """dir_size_bytes walks tens of thousands of files on the real server; it must count what the old rglob walk counted."""
+    import os
+
+    from utils.install_cache import dir_size_bytes
+
+    (tmp_path / "a" / "b").mkdir(parents=True)
+    (tmp_path / "one").write_bytes(b"x" * 10)
+    (tmp_path / "a" / "two").write_bytes(b"y" * 20)
+    (tmp_path / "a" / "b" / "three").write_bytes(b"z" * 30)
+    os.link(tmp_path / "one", tmp_path / "a" / "b" / "one-again")  # a hardlink: counted once
+    os.symlink(tmp_path / "one", tmp_path / "link")  # a symbolic link: not followed
+    os.symlink(tmp_path / "a", tmp_path / "linked-folder")
+    assert dir_size_bytes(tmp_path) == 60
+    assert dir_size_bytes(tmp_path / "missing") == 0
+    assert dir_size_bytes(tmp_path / "a" / "two") == 0  # not a folder

@@ -108,15 +108,42 @@ URL: the streaming calls do not follow a redirect to another origin.
 A game object carries, among others:
 
 - `id`, `name` (the display name, matched or edited), `fs_name` (the folder or file name on disk), `library_id` (`null` for an imported game filed under no library);
-- `summary`, `igdb_id`, `igdb_metadata` (the whole IGDB record: genres, release date, developers, publishers,
-  modes, screenshots, age ratings, DLC and so on), `sgdb_id`;
+- `summary`, `igdb_id`, `igdb_metadata` (the whole record of the match in use: for IGDB, its genres, release date, developers,
+  publishers, modes, screenshots, age ratings, DLC and so on; for another provider, the same shape with what that provider has,
+  see `metadata_source`), `sgdb_id`;
+- `metadata_source`: which provider `igdb_metadata` came from: `igdb`, `romm`, `steam`, `vndb`, `dlsite` or `itch`; `null` for a
+  game with no match yet. `provider_ids` holds the game's id at every provider it is matched with (`{"igdb": 42, "steam": 10}`,
+  `{"vndb": "v17"}`, `{"dlsite": "RJ01660384"}`, `{"itch": "ill.portal-panic"}`); `igdb_id`, `sgdb_id` and `hltb_id` stay as they were.
+  A scrape asks every provider that is on, together, and matches the game with each that has it. Only one record is the game's
+  metadata (`igdb_metadata`, named by `metadata_source`): IGDB's when IGDB has the game, else the first of `romm`, `steam`,
+  `vndb`, `dlsite`, `itch`; a match picked by hand from a provider makes that one the source. A game that already has a match is
+  not asked again by the automatic pass, only by a scrape someone asks for. `title_key` is `igdb:<id>` or, with no IGDB id, the
+  id of the first provider of that list the game is matched with. A match by name from another provider: `GET /api/games/{id}/metadata/{provider}/search?query=`
+  lists its games (each with an `id` and a `name`), and `POST /api/games/{id}/metadata/{provider}/{ref}` applies one, with `{provider}`
+  one of `romm`, `steam`, `vndb`, `dlsite` or `itch` (IGDB keeps its own `/metadata/igdb/...` routes). The `query` may also be a game's page address or its id at the provider (`https://dev.itch.io/game`,
+  `https://www.dlsite.com/maniax/work/=/product_id/RJ155385.html`, `https://store.steampowered.com/app/220`, `https://vndb.org/v17`,
+  a RomM game's address or numeric id; for IGDB its id or `https://www.igdb.com/games/<slug>`): the answer is then that game alone,
+  which is how a game the provider's own search leaves out (itch.io does not list adult games) is matched. A provider that cannot
+  answer (it is rate limiting or down) gives `503`, and nothing is learned about the game from it. `POST /api/games/{id}/fetch-metadata/{provider}` reads the game again from that one provider it is matched with (`409` when it is not,
+  `404` when the provider no longer has it, `503` when it cannot answer): its record becomes the game's metadata as when it was picked
+  (for `sgdb` the artwork of its game is chosen again, for `hltb` the times are read again), and no other provider is asked.
+  `DELETE /api/games/{id}/metadata/{provider}`
+  (`igdb`, `sgdb`, `hltb`, `romm`, `steam`, `vndb`, `dlsite` or `itch`) takes away the game's match with that provider: its id, and the
+  metadata and summary it gave when it was their source (the next provider of the list above then becomes the source); no scrape,
+  the one asked for included, matches that provider again until it is chosen again. SteamGridDB games are picked with `GET /api/games/{id}/metadata/sgdb/games?query=` (a name, an id or a
+  `steamgriddb.com/game/<id>` address; each result has an `id` and a `name`) and `POST /api/games/{id}/metadata/sgdb/games/{sgdb_id}`,
+  which sets `sgdb_id` and chooses the artwork again from that game; the HowLongToBeat search takes an id or address in `query` too. The search answers `409`
+  when the provider is off or has no key or address; the apply answers `404` when it is not set up or has no game with that id;
 - `hltb_id` and `hltb_metadata`: how long the game takes, in **seconds**: `main_story`, `main_plus_extra`,
   `completionist` and `all_styles` (any of them may be missing), each with a `_count` of reports. Show nothing
   when it is empty: a game that has not been matched simply has no times;
 - `cover_path` and `media`: the artwork the server chose for each kind (`cover`, `banner`, `hero`, `logo`,
-  `icon`), each `{url, source}` with `source` `steamgriddb`, `igdb` or `upload` (an image the administrator uploaded:
+  `icon`), each `{url, source}` with `source` `steamgriddb`, `igdb`, `romm`, `vndb`, `dlsite`, `steam`, `itch` or `upload` (an image the administrator uploaded:
   its `url`, like `cover_path` for a cover, is relative to the server, `/resources/media/<game>/<file>`, so resolve
-  it against the server's address, or better, take the image from the endpoints below);
+  it against the server's address, or better, take the image from the endpoints below), or `generated`: a cover the server made
+  because the one chosen was not as tall as the cards (the art whole over a blurred copy of itself, on a 600x900 canvas) or there
+  was none (a poster with the game's name). It is a file of the server like an upload (same `/resources/media/` URL), has an extra
+  `from` (the image it was made of, or `null`), and a scrape replaces it when a real cover is found;
 - `size_bytes`: what the game's own folder (or file) takes on the server's disk, `null` until the server has measured it
   (a scan does, and `GET /api/games/{id}/size` refreshes it). Sort by it with `null` last;
 - `installed` (this user has a finished install whose cache is still on the server), `last_played` and
@@ -129,7 +156,8 @@ Artwork is served by the server so a client does not depend on the metadata prov
 An administrator sets artwork of their own with `POST /api/games/{id}/media/{kind}` (multipart field `file`; a PNG, JPEG,
 WebP or GIF up to 10 MiB, WebP and GIF being kept as PNG; `kind` is one of the five above). It becomes the choice for
 that kind, replaces the earlier one, and a scrape does not replace it; `PUT /api/games/{id}/media` with `null` for the kind
-removes it. A refused file answers `400` with the reason. Uploaded files are served without credentials from
+removes it, whether it is an upload or a provider's image, and the automatic scrape leaves that kind empty from then on (a scrape
+an administrator asks for, or choosing or uploading an image for the kind, fills it again). A refused file answers `400` with the reason. Uploaded files are served without credentials from
 `/resources/media/`, like the avatars.
 
 `GET /api/games/{id}/media/candidates` (administrators) lists what is on offer for each kind. For `icon` it also lists the
@@ -148,7 +176,7 @@ not the install). An imported game has no files: whatever needs them (`/files`, 
 
 **Grouping.** Games of the same title are versions of one game. A game's `title_key` says which: `igdb:<id>` when the
 IGDB match says so, `mog:<id>` for a game by itself or one the server was told is the same game as another (a game IGDB does
-not know, or a wrong match split off). Group by `title_key`; a client that does not know the field can group by `igdb_id`.
+not know, or a wrong match split off), `<provider>:<id>` (for example `vndb:v17`) when only another provider has matched it. Group by `title_key`; a client that does not know the field can group by `igdb_id`.
 MOG Client shows a title as one entry with "N versions". When the user installs it, the installers of every version are
 listed, each under its version's name, and the user picks one. Your client can do the same or show each game on its own.
 

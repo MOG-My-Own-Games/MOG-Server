@@ -815,10 +815,7 @@ For real use, stream bodies to disk in chunks instead of reading them whole, run
 
 ## 15. Security and compatibility notes
 
-- **Keep it on your LAN.** MOG Server is vibe-coded and has had no security audit. It speaks plain HTTP with Basic
-  auth by default, so a password crosses the network in the clear. Do not expose it to the internet; if you must
-  reach it from outside, put it behind a VPN or a TLS-terminating reverse proxy you trust. The project does not
-  support running it exposed.
+- **Keep it on your LAN.** MOG Server is developed through **Human-Directed Agentic Engineering**. It uses plain HTTP with Basic Authentication by default, meaning credentials are transmitted unencrypted over the network. Do not expose it directly to the internet. If you need remote access, put it behind a VPN or a trusted TLS-terminating reverse proxy. The project does not officially support internet-exposed deployments.
 - **Treat what the server sends as untrusted on your side too.** Paths in a manifest are meant to be relative to
   the install folder; refuse any that are not (`..`, absolute paths, drive letters) before writing a byte. MOG
   Client checks the keys of a save archive this way; do the same for manifest paths in yours.

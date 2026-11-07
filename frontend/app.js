@@ -4511,8 +4511,11 @@ function addonSubtabLabel(category) {
 
 async function loadGameAddons(gameId) {
   try {
-    gameAddons = await api(`/api/games/${gameId}/addons`);
+    const addons = await api(`/api/games/${gameId}/addons`);
+    if (!activeGame || activeGame.id !== gameId) return;
+    gameAddons = addons;
   } catch (_) {
+    if (!activeGame || activeGame.id !== gameId) return;
     gameAddons = [];
   }
   renderFilesTab();
@@ -4739,9 +4742,13 @@ function renderFilesTab() {
 }
 
 async function loadGameFiles(gameId) {
+  // The answer can arrive after the page moved on to another game: it must not fill that game's tab.
   try {
-    libFiles = await api(`/api/games/${gameId}/files`);
+    const files = await api(`/api/games/${gameId}/files`);
+    if (!activeGame || activeGame.id !== gameId) return;
+    libFiles = files;
   } catch (_) {
+    if (!activeGame || activeGame.id !== gameId) return;
     libFiles = null;
   }
   renderFilesTab();
@@ -4750,8 +4757,10 @@ async function loadGameFiles(gameId) {
 async function loadCacheFiles(gameId, cachePath) {
   try {
     const data = await api(`/api/games/${gameId}/install/files`);
+    if (!activeGame || activeGame.id !== gameId) return;
     cacheFiles = { gameId, cachePath: cachePath || "", files: data.files };
   } catch (_) {
+    if (!activeGame || activeGame.id !== gameId) return;
     cacheFiles = null;
   }
   renderFilesTab();

@@ -21,6 +21,7 @@ from handler.database import (
     db_launch_settings_handler,
     db_library_handler,
     db_playtime_handler,
+    db_save_rules_handler,
     db_saves_handler,
     db_user_handler,
 )
@@ -175,6 +176,18 @@ def test_launch_settings_both_have_for_a_device_keep_the_started_from_games(worl
 
     rows = db_launch_settings_handler.list_for_game(this.id)
     assert [r.proton for r in rows] == ["mine"]
+
+
+def test_save_rules_follow_the_game_that_goes_and_the_kept_games_kind_wins_for_a_path_both_have(world):
+    """A blacklist made for the entry a client imported must not be lost when the scan's entry takes its place."""
+    this, other = _scanned(world), _placeholder(world)
+    db_save_rules_handler.add(this.id, "whitelist", ["game/both"])
+    db_save_rules_handler.add(other.id, "blacklist", ["game/both", "game/shaders"])
+
+    _merge(world, this, other)
+
+    rules = {r.path: r.kind for r in db_save_rules_handler.get_for_games([this.id])}
+    assert rules == {"game/both": "whitelist", "game/shaders": "blacklist"}
 
 
 def test_the_name_and_summary_are_what_the_person_typed_and_the_igdb_id_follows_the_choice(world):

@@ -120,3 +120,24 @@ def test_the_number_of_versions_kept_is_the_setting_else_the_environments(db, tm
     db_settings_handler.update_settings({"saves_keep_versions": 2})
     stored = [_store(tmp_path, str(n).encode())[0] for n in range(4)]
     assert [saves.resolve_path(s.file_path).exists() for s in stored] == [False, False, True, True]
+
+
+def test_files_taken_out_of_an_archive_keep_the_dates_and_the_rest_of_the_files_readable(tmp_path):
+    """The rewrite copies member by member: what stays must still extract with the bytes it had."""
+    import zipfile
+
+    from utils.archive_safety import rewrite_without
+
+    source, target = tmp_path / "a.zip", tmp_path / "b.zip"
+    with zipfile.ZipFile(source, "w") as z:
+        z.writestr(zipfile.ZipInfo("game/slot.sav", (2026, 5, 1, 10, 0, 0)), b"progress")
+        z.writestr("game/cache/a.bin", b"x")
+        z.writestr("game/cache2/b.bin", b"y")
+
+    kept, dropped = rewrite_without(source, target, lambda name: name == "game/cache" or name.startswith("game/cache/"))
+
+    assert (kept, dropped) == (2, 1)
+    with zipfile.ZipFile(target) as z:
+        assert sorted(z.namelist()) == ["game/cache2/b.bin", "game/slot.sav"]
+        assert z.read("game/slot.sav") == b"progress"
+        assert z.getinfo("game/slot.sav").date_time == (2026, 5, 1, 10, 0, 0)

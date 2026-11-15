@@ -999,7 +999,28 @@ a.chip { color: inherit; text-decoration: none; }
 .danger-title { color: var(--danger); }
 .danger-panel { width: min(520px, 94vw); border-color: var(--danger); }
 .danger-panel ul { margin: 0.6em 0; padding-left: 1.2em; }
+.danger-files { max-height: 14em; overflow-y: auto; font-size: 0.85em; padding: 0.4em 0.4em 0.4em 1.6em; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; overflow-wrap: anywhere; }
+.danger-files .muted { list-style: none; margin-left: -1.2em; }
 .danger-panel .modal-footer { position: static; gap: var(--space-sm); padding-top: var(--space-md); }
+
+/* Save rules: a blacklisted path is a greyed row with a red tag, an added one has a green tag; the tag's x removes the rule */
+.saves-rules { margin-top: var(--space-lg); }
+.saves-rules h4 { margin: 0 0 0.3em; }
+.saves-rules-list { margin-bottom: 0.6em; }
+.saves-rules-purge { margin: 0.8em 0 0; }
+.saves-rules-form { display: flex; flex-wrap: wrap; gap: var(--space-sm); align-items: center; }
+.saves-rules-form input { flex: 1 1 22em; min-width: 12em; }
+.saves-files li.blacklisted .saves-path, .saves-files li.blacklisted .saves-size { color: var(--muted); text-decoration: line-through; text-decoration-color: transparent; }
+.saves-files li.blacklisted { opacity: 0.65; }
+.saves-files li .saves-meta { display: inline-flex; align-items: center; gap: var(--space-sm); flex: none; }
+.saves-files li label { display: flex; align-items: center; gap: 0.5em; min-width: 0; flex: 1; cursor: pointer; }
+.saves-files li label input { accent-color: var(--accent); flex: none; }
+.chip-blacklisted { background: var(--danger); border-color: var(--danger); color: #fff; }
+.chip-whitelisted { background: var(--success); border-color: var(--success); color: #fff; }
+.chip-blacklisted .chip-x, .chip-whitelisted .chip-x { color: #fff; opacity: 0.8; }
+.chip-blacklisted .chip-x:hover, .chip-whitelisted .chip-x:hover { color: #fff; opacity: 1; }
+.saves-edit-bar { display: flex; flex-wrap: wrap; gap: var(--space-sm); align-items: center; margin: 0.4em 0; font-size: 0.85em; }
+.saves-edit-bar .muted { margin-left: auto; }
 
 .saves-status { margin: 0.4em 0 0.8em; min-height: 1.3em; font-size: 0.95em; color: var(--muted); }
 .saves-status.success { color: var(--success); }

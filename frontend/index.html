@@ -330,6 +330,23 @@
                     <span id="saves-keep">3</span> of each machine are kept.
                   </p>
                   <p id="saves-status" class="saves-status" role="status"></p>
+                  <div class="saves-rules">
+                    <h4>Save rules</h4>
+                    <p class="muted small">
+                      Teach MOG what to back up for this game. A blacklisted path (a file, or a folder and all that is in it) is
+                      never synced, so shader and build caches stop bloating the server; a path added by hand is synced even
+                      if the clients would not find it, and wins over the blacklist: blacklist a folder and add one inside it to keep only that. Paths are the ones in the file lists below; a pattern works too: <code>*.png</code> is every png wherever it is, <code>game/*/shaders</code> a folder at any name, <code>re:\.(png|jpg)$</code> a regular expression. Every machine follows them.
+                    </p>
+                    <ul id="saves-rules-list" class="saves-files saves-rules-list" hidden></ul>
+                    <form id="saves-rules-form" class="saves-rules-form">
+                      <input type="text" id="saves-rule-path" placeholder="users/USER/AppData/Local/Game/shadercache" aria-label="Path to blacklist or add" autocomplete="off" />
+                      <button type="submit" class="danger" data-kind="blacklist">Blacklist</button>
+                      <button type="submit" data-kind="whitelist">Add as save</button>
+                    </form>
+                    <p class="saves-rules-purge">
+                      <button type="button" id="saves-rules-purge" class="danger" hidden>Delete blacklisted files</button>
+                    </p>
+                  </div>
                   <div id="saves-devices"></div>
                   <p id="saves-empty" class="muted" hidden>No saves uploaded for this game yet.</p>
                 </div>

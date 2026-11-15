@@ -1401,7 +1401,8 @@ document.getElementById("clear-all-cache-btn").addEventListener("click", async (
 });
 
 // A dialog that cannot be mistaken for the usual confirm(): deleting something that cannot be recovered.
-function confirmDanger({ title, lines, confirmLabel, cancelLabel = "Cancel" }) {
+// `files` is a list shown under the lines, scrolling when it is long (what is about to be lost, one per row).
+function confirmDanger({ title, lines, files = [], confirmLabel, cancelLabel = "Cancel" }) {
   return new Promise((resolve) => {
     const overlay = document.createElement("div");
     overlay.className = "modal";
@@ -1409,6 +1410,7 @@ function confirmDanger({ title, lines, confirmLabel, cancelLabel = "Cancel" }) {
       <div class="modal-panel danger-panel" role="alertdialog" aria-modal="true">
         <h3 class="danger-title">&#9888; ${escapeHtml(title)}</h3>
         <ul>${lines.map((l) => `<li>${escapeHtml(l)}</li>`).join("")}</ul>
+        ${files.length ? `<ul class="danger-files">${files.map((f) => `<li>${escapeHtml(f)}</li>`).join("")}</ul>` : ""}
         <div class="modal-footer">
           <button type="button" data-answer="no">${escapeHtml(cancelLabel)}</button>
           <button type="button" class="danger" data-answer="yes">${escapeHtml(confirmLabel)}</button>
@@ -2592,6 +2594,8 @@ async function openGamePage(id) {
   gameAddons = [];
   cacheFiles = null;
   gameSaves = null;
+  saveRules = { blacklist: [], whitelist: [] };
+  saveEdits.clear();
   setSavesStatus("");
   filesSubtab = "all";
   renderFilesTab();
@@ -4492,6 +4496,8 @@ function renderInstallState(session) {
 let libFiles = null; // { root_path, files } from /api/games/{id}/files
 let cacheFiles = null; // { gameId, cachePath, files } of a finished install
 let gameSaves = null; // { devices, keep_versions } from /api/games/{id}/saves
+let saveRules = { blacklist: [], whitelist: [] }; // from /api/games/{id}/save-rules: archive keys the clients skip / add
+const saveEdits = new Map(); // version id -> Set of the paths ticked, while that version's file list is in edit mode
 let userDevices = []; // the signed-in user's devices, for the upload picker
 let filesSubtab = "all";
 
@@ -4818,10 +4824,15 @@ function savesCount() {
 
 async function loadSaves(gameId) {
   try {
-    const [saves, devices] = await Promise.all([api(`/api/games/${gameId}/saves`), api("/api/devices")]);
+    const [saves, devices, rules] = await Promise.all([
+      api(`/api/games/${gameId}/saves`),
+      api("/api/devices"),
+      api(`/api/games/${gameId}/save-rules`).catch(() => ({ blacklist: [], whitelist: [] })),
+    ]);
     if (!activeGame || activeGame.id !== gameId) return;
     gameSaves = saves;
     userDevices = devices;
+    saveRules = rules;
   } catch (_) {
     if (!activeGame || activeGame.id !== gameId) return;
     gameSaves = null;
@@ -4847,6 +4858,7 @@ function newestSave(devices) {
 }
 
 function renderSavesPanel() {
+  renderSaveRules();
   document.getElementById("saves-keep").textContent = gameSaves ? gameSaves.keep_versions : 3;
   const devices = gameSaves ? gameSaves.devices : [];
   const latest = newestSave(devices);
@@ -4940,6 +4952,194 @@ document.getElementById("saves-download-latest").addEventListener("click", async
   }
 });
 
+// --- Save rules ---
+
+// The same matching as the server's models/game_save_rules (`covers`): a path, a folder, a glob (`*.png`, `game/*/shaders`) or
+// `re:` and a regular expression. Used to grey what a rule leaves out; the server is what decides.
+const RULE_RE_PREFIX = "re:";
+const globCache = new Map();
+
+function globRegex(pattern) {
+  if (globCache.has(pattern)) return globCache.get(pattern);
+  let out = "";
+  for (let i = 0; i < pattern.length; ) {
+    const c = pattern[i];
+    let close;
+    if (pattern.startsWith("**/", i)) {
+      out += "(?:.*/)?";
+      i += 3;
+    } else if (pattern.startsWith("**", i)) {
+      out += ".*";
+      i += 2;
+    } else if (c === "*") {
+      out += "[^/]*";
+      i++;
+    } else if (c === "?") {
+      out += "[^/]";
+      i++;
+    } else if (c === "[" && (close = pattern.indexOf("]", i + 2)) !== -1) {
+      const body = pattern.slice(i + 1, close).replace(/\\/g, "\\\\");
+      out += "[" + ("!^".includes(body[0]) ? "^" + body.slice(1) : body) + "]";
+      i = close + 1;
+    } else {
+      out += c.replace(/[.*+?^${}()|[\]\\\/]/g, "\\$&");
+      i++;
+    }
+  }
+  let rx = null;
+  try {
+    rx = new RegExp(`^(?:${out})$`, "i");
+  } catch (_) {
+    // a pattern the browser cannot read greys nothing
+  }
+  globCache.set(pattern, rx);
+  return rx;
+}
+
+function isRulePattern(rule) {
+  return rule.startsWith(RULE_RE_PREFIX) || /[*?]/.test(rule) || (rule.includes("[") && rule.includes("]"));
+}
+
+function ruleCovers(rule, path) {
+  if (rule.startsWith(RULE_RE_PREFIX)) {
+    try {
+      return new RegExp(rule.slice(RULE_RE_PREFIX.length)).test(path);
+    } catch (_) {
+      return false;
+    }
+  }
+  if (!isRulePattern(rule)) return path === rule || path.startsWith(rule + "/");
+  const rx = globRegex(rule);
+  if (!rx) return false;
+  const parts = path.split("/");
+  if (!rule.includes("/")) return parts.some((part) => rx.test(part));
+  return parts.some((_, n) => rx.test(parts.slice(0, n + 1).join("/")));
+}
+
+// The blacklist rules that leave a path out. None when the whitelist names it: that is stronger, so a folder can be blacklisted
+// and a folder inside it added (`game/thisgame` and `game/thisgame/saves`).
+function blacklistRulesFor(path) {
+  if (saveRules.whitelist.some((rule) => ruleCovers(rule, path))) return [];
+  return saveRules.blacklist.filter((rule) => ruleCovers(rule, path));
+}
+
+function renderSaveRules() {
+  const rows = [
+    ...saveRules.blacklist.map((path) => ({ path, kind: "blacklist" })),
+    ...saveRules.whitelist.map((path) => ({ path, kind: "whitelist" })),
+  ];
+  document.getElementById("saves-rules-purge").hidden = saveRules.blacklist.length === 0;
+  const list = document.getElementById("saves-rules-list");
+  list.hidden = rows.length === 0;
+  list.innerHTML = rows
+    .map(({ path, kind }) => {
+      const black = kind === "blacklist";
+      return `<li class="${black ? "blacklisted" : ""}">
+        <span class="saves-path">${escapeHtml(path)}</span>
+        <span class="saves-meta">${ruleChip(path, black ? "blacklist" : "whitelist")}</span>
+      </li>`;
+    })
+    .join("");
+}
+
+// The tag of a rule: its x takes the rule off, so a blacklisted path is synced again the next time it is there.
+function ruleChip(rulePath, kind) {
+  const black = kind === "blacklist";
+  return `<span class="chip chip-removable ${black ? "chip-blacklisted" : "chip-whitelisted"}">${black ? "blacklisted" : "added"}
+    <span class="chip-x" role="button" tabindex="0" data-rule="${escapeHtml(rulePath)}" title="Remove the rule for ${escapeHtml(rulePath)}"
+      aria-label="Remove the rule for ${escapeHtml(rulePath)}">&times;</span></span>`;
+}
+
+async function sendSaveRules(path, body) {
+  if (!activeGame) return;
+  const gameId = activeGame.id;
+  saveRules = await api(`/api/games/${gameId}/save-rules${path}`, { method: "POST", body: JSON.stringify(body) });
+  if (!activeGame || activeGame.id !== gameId) return;
+  renderSaveRules();
+  refreshFileLists();
+}
+
+async function saveRulesAction(action) {
+  try {
+    await action();
+  } catch (err) {
+    setSavesStatus(`Failed: ${err.message}`, "error");
+  }
+}
+
+document.getElementById("saves-rules-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const kind = e.submitter ? e.submitter.dataset.kind : "blacklist";
+  const input = document.getElementById("saves-rule-path");
+  const path = input.value.trim();
+  if (!path) return;
+  saveRulesAction(async () => {
+    await sendSaveRules("", { kind, paths: [path] });
+    input.value = "";
+    setSavesStatus(kind === "blacklist" ? `${path} is blacklisted.` : `${path} is added to the saves.`, "success");
+  });
+});
+
+// Blacklisting stops new uploads; this takes what is already stored out too, after showing which files and how much room.
+document.getElementById("saves-rules-purge").addEventListener("click", () => {
+  if (!activeGame) return;
+  const gameId = activeGame.id;
+  saveRulesAction(async () => {
+    setSavesStatus("Looking for blacklisted files...");
+    const found = await api(`/api/games/${gameId}/save-rules/blacklisted`);
+    if (!found.files.length && !found.truncated) {
+      setSavesStatus("No blacklisted file is stored on the server.");
+      return;
+    }
+    setSavesStatus("");
+    const count = found.files.length;
+    const ok = await confirmDanger({
+      title: "Delete the blacklisted files from the server?",
+      lines: [
+        `${count}${found.truncated ? "+" : ""} file${count === 1 ? "" : "s"} in ${found.versions} saved version${found.versions === 1 ? "" : "s"}, ${fmtBytes(found.bytes)} in all, will be taken out of your saved versions of this game.` +
+          (found.truncated ? " Some versions are too big to list every file: the others in them that are blacklisted go too." : ""),
+        "A version with nothing else in it is deleted. This cannot be undone; the files on your machines are not touched.",
+        "Only your own saved versions are changed.",
+      ],
+      files: found.files.map((f) => `${f.path}  (${fmtBytes(f.size)}${f.versions > 1 ? `, in ${f.versions} versions` : ""})`),
+      confirmLabel: "Delete them",
+    });
+    if (!ok) return;
+    setSavesStatus("Deleting...");
+    const done = await api(`/api/games/${gameId}/save-rules/purge`, { method: "POST" });
+    setSavesStatus(
+      `${done.files_removed} file${done.files_removed === 1 ? "" : "s"} taken out of ${done.versions_changed} version${done.versions_changed === 1 ? "" : "s"}` +
+        (done.versions_deleted ? `, ${done.versions_deleted} left empty and deleted.` : "."),
+      "success"
+    );
+    if (activeGame && activeGame.id === gameId) await loadSaves(gameId);
+  });
+});
+
+function removeRuleFromChip(x) {
+  saveRulesAction(async () => {
+    await sendSaveRules("/remove", { paths: [x.dataset.rule] });
+    setSavesStatus(`Rule for ${x.dataset.rule} removed.`, "success");
+  });
+}
+
+for (const id of ["saves-rules-list", "saves-devices"]) {
+  const el = document.getElementById(id);
+  el.addEventListener("click", (e) => {
+    const x = e.target.closest(".chip-x[data-rule]");
+    if (x) removeRuleFromChip(x);
+  });
+  el.addEventListener("keydown", (e) => {
+    const x = e.target.closest(".chip-x[data-rule]");
+    if (x && (e.key === "Enter" || e.key === " ")) {
+      e.preventDefault();
+      removeRuleFromChip(x);
+    }
+  });
+}
+
+// --- A version's file list ---
+
 // The file list of a version is fetched the first time it is opened.
 async function toggleSaveFiles(button) {
   const row = button.closest("tbody").querySelector(`tr[data-files-for="${button.dataset.version}"]`);
@@ -4948,18 +5148,114 @@ async function toggleSaveFiles(button) {
   button.setAttribute("aria-expanded", String(open));
   if (!open || row.dataset.loaded) return;
   row.dataset.loaded = "1";
-  const list = row.querySelector(".saves-files");
   try {
-    const version = await api(`/api/saves/${button.dataset.version}`);
-    const more = version.file_count - version.manifest.length;
-    list.innerHTML =
-      version.manifest
-        .map((f) => `<li><span class="saves-path">${escapeHtml(f.path)}</span><span class="saves-size">${fmtBytes(f.size)}</span></li>`)
-        .join("") + (more > 0 ? `<li class="muted">and ${more} more</li>` : "");
+    row.version = await api(`/api/saves/${button.dataset.version}`);
+    renderVersionFiles(row);
   } catch (err) {
     row.dataset.loaded = "";
-    list.innerHTML = `<li class="muted">${escapeHtml(err.message)}</li>`;
+    row.querySelector(".saves-files").innerHTML = `<li class="muted">${escapeHtml(err.message)}</li>`;
   }
+}
+
+function refreshFileLists() {
+  for (const row of document.querySelectorAll("tr.saves-files-row")) {
+    if (row.version) renderVersionFiles(row);
+  }
+}
+
+// The files of one version, with the bar of its edit mode: files are ticked to be deleted from the version or to be put on
+// the blacklist (and taken off it). A blacklisted file is greyed with the tag that takes it off.
+function renderVersionFiles(row) {
+  const version = row.version;
+  const id = version.id;
+  const picked = saveEdits.get(id);
+  const editing = !!picked;
+  const more = version.file_count - version.manifest.length;
+  const items = version.manifest
+    .map((f) => {
+      const rules = blacklistRulesFor(f.path);
+      const tag = rules.map((rule) => ruleChip(rule, "blacklist")).join("");
+      const name = `<span class="saves-path">${escapeHtml(f.path)}</span>`;
+      const body = editing
+        ? `<label><input type="checkbox" data-path="${escapeHtml(f.path)}" ${picked.has(f.path) ? "checked" : ""} />${name}</label>`
+        : name;
+      return `<li class="${rules.length ? "blacklisted" : ""}">${body}<span class="saves-meta">${tag}<span class="saves-size">${fmtBytes(f.size)}</span></span></li>`;
+    })
+    .join("");
+  const bar = editing
+    ? `<button type="button" data-edit="all">${picked.size === version.manifest.length ? "Select none" : "Select all"}</button>
+       <button type="button" class="danger" data-edit="delete" ${picked.size ? "" : "disabled"}>Delete from this version</button>
+       <button type="button" data-edit="blacklist" ${picked.size ? "" : "disabled"}>Blacklist</button>
+       <button type="button" data-edit="unblacklist" ${picked.size ? "" : "disabled"}>Un-blacklist</button>
+       <button type="button" data-edit="done">Done</button>
+       <span class="muted">${picked.size} selected</span>`
+    : `<button type="button" data-edit="start">Edit</button>`;
+  let bars = row.querySelector(".saves-edit-bar");
+  if (!bars) {
+    bars = document.createElement("div");
+    bars.className = "saves-edit-bar";
+    row.querySelector("td").insertBefore(bars, row.querySelector(".saves-files"));
+    bars.addEventListener("click", (e) => editBarClick(row, e.target.closest("button[data-edit]")));
+    row.querySelector(".saves-files").addEventListener("change", (e) => {
+      const box = e.target.closest("input[type=checkbox][data-path]");
+      const set = saveEdits.get(row.version.id);
+      if (!box || !set) return;
+      if (box.checked) set.add(box.dataset.path);
+      else set.delete(box.dataset.path);
+      renderVersionFiles(row);
+    });
+  }
+  bars.innerHTML = bar;
+  row.querySelector(".saves-files").innerHTML = items + (more > 0 ? `<li class="muted">and ${more} more</li>` : "");
+}
+
+async function editBarClick(row, button) {
+  if (!button || !activeGame) return;
+  const version = row.version;
+  const picked = saveEdits.get(version.id);
+  const action = button.dataset.edit;
+  if (action === "start") saveEdits.set(version.id, new Set());
+  else if (action === "done") saveEdits.delete(version.id);
+  else if (action === "all") {
+    if (picked.size === version.manifest.length) picked.clear();
+    else version.manifest.forEach((f) => picked.add(f.path));
+  } else if (picked && picked.size) {
+    const paths = [...picked];
+    await saveRulesAction(async () => {
+      if (action === "blacklist") {
+        for (let i = 0; i < paths.length; i += 500) await sendSaveRules("", { kind: "blacklist", paths: paths.slice(i, i + 500) });
+        setSavesStatus(`${paths.length} file${paths.length === 1 ? "" : "s"} blacklisted: they are not synced any more (the copies already saved stay until deleted).`, "success");
+      } else if (action === "unblacklist") {
+        const rules = [...new Set(paths.flatMap(blacklistRulesFor))];
+        if (!rules.length) {
+          setSavesStatus("None of the selected files is blacklisted.");
+          return;
+        }
+        await sendSaveRules("/remove", { paths: rules });
+        setSavesStatus(`${rules.length} rule${rules.length === 1 ? "" : "s"} removed: the files are synced again.`, "success");
+      } else if (action === "delete") {
+        const ok = await confirmDanger({
+          title: "Delete files from this saved version?",
+          lines: [
+            `${paths.length} file${paths.length === 1 ? "" : "s"} will be taken out of this version's archive on the server.`,
+            "This cannot be undone; the files on your machines are not touched.",
+            "They are synced again unless you blacklist them.",
+          ],
+          confirmLabel: "Delete",
+        });
+        if (!ok) return;
+        for (let i = 0; i < paths.length; i += 500) {
+          const result = await api(`/api/saves/${version.id}/remove-files`, { method: "POST", body: JSON.stringify({ paths: paths.slice(i, i + 500) }) });
+          if (result === null) break;
+        }
+        saveEdits.delete(version.id);
+        setSavesStatus(`${paths.length} file${paths.length === 1 ? "" : "s"} deleted from the version.`, "success");
+        await loadSaves(activeGame.id);
+      }
+    });
+    return;
+  }
+  renderVersionFiles(row);
 }
 
 // Uploads from the browser are attributed to one device of its own, created on first use.

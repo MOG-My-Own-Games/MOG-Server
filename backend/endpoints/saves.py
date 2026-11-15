@@ -10,6 +10,7 @@ from endpoints.responses.save import (
     DeviceSavesSchema,
     DeviceSchema,
     GameSavesSchema,
+    SavePathsForm,
     SaveUploadSchema,
     SaveVersionDetailSchema,
     SaveVersionSchema,
@@ -18,9 +19,10 @@ from handler.auth import CurrentUser
 from handler import titles
 from handler.database import db_device_handler, db_game_handler, db_saves_handler, db_settings_handler
 from handler.notifications import notify_save_restored, notify_save_synced
-from handler.saves import UploadTooLarge, keep_versions, receive_upload, remove_version, resolve_path, run_on_saves_channel, store_version
+from handler.saves import UploadTooLarge, keep_versions, receive_upload, remove_files, remove_version, resolve_path, run_on_saves_channel, store_version
 from models.device import Device
 from models.game import Game
+from models.game_save_rule import clean_path
 from models.save_version import SaveVersion
 from models.user import User
 from utils.archive_safety import ArchiveError
@@ -42,6 +44,13 @@ def _own_device(user: User, device_id: int) -> Device:
     if device is None or device.user_id != user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown device")
     return device
+
+
+def clean_paths(paths: list[str]) -> list[str]:
+    try:
+        return [clean_path(p) for p in paths]
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e)) from e
 
 
 def _own_version(user: User, version_id: int) -> SaveVersion:
@@ -143,6 +152,18 @@ async def save_restored(
     await run_on_saves_channel(
         notify_save_restored, user.id, version.game_id, device.name, source.name if source else None, files
     )
+
+
+@router.post("/saves/{id}/remove-files")
+async def remove_save_files(user: CurrentUser, id: Annotated[int, Path(ge=1)], form: SavePathsForm) -> SaveVersionDetailSchema | None:
+    """Take files (or folders, with what is in them) out of one version's archive, to free the space of what was never a
+    save. The version itself is deleted when nothing is left of it (the answer is then null)."""
+    version = _own_version(user, id)
+    try:
+        updated = await run_on_saves_channel(remove_files, version, clean_paths(form.paths))
+    except ArchiveError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e)) from e
+    return None if updated is None else SaveVersionDetailSchema.model_validate(updated)
 
 
 @router.delete("/saves/{id}")

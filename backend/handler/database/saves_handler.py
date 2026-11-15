@@ -101,6 +101,20 @@ class DBSavesHandler(DBBaseHandler):
         return stale
 
     @begin_session
+    def update_contents(
+        self, id: int, size_bytes: int, content_hash: str, file_count: int, manifest: list, session: Session = None  # type: ignore
+    ) -> SaveVersion | None:
+        """What a version holds after files were taken out of its archive."""
+        version = session.get(SaveVersion, id)
+        if version is None:
+            return None
+        version.size_bytes, version.content_hash, version.file_count = size_bytes, content_hash, file_count
+        version.manifest = manifest
+        session.flush()
+        session.refresh(version)
+        return version
+
+    @begin_session
     def delete_version(self, id: int, session: Session = None) -> None:  # type: ignore
         version = session.get(SaveVersion, id)
         if version is not None:

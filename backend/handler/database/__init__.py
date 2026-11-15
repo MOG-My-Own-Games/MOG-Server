@@ -7,6 +7,7 @@ from .launch_settings_handler import DBLaunchSettingsHandler
 from .libraries_handler import DBLibrariesHandler
 from .notifications_handler import DBNotificationsHandler
 from .playtime_handler import DBPlaytimeHandler
+from .save_rules_handler import DBSaveRulesHandler
 from .saves_handler import DBSavesHandler
 from .settings_handler import DBSettingsHandler
 from .users_handler import DBUsersHandler
@@ -20,6 +21,7 @@ db_launch_settings_handler = DBLaunchSettingsHandler()
 db_library_handler = DBLibrariesHandler()
 db_notification_handler = DBNotificationsHandler()
 db_playtime_handler = DBPlaytimeHandler()
+db_save_rules_handler = DBSaveRulesHandler()
 db_saves_handler = DBSavesHandler()
 db_settings_handler = DBSettingsHandler()
 db_user_handler = DBUsersHandler()

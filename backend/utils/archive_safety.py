@@ -89,3 +89,25 @@ def inspect_archive(path: Path) -> ArchiveInfo:
         raise ArchiveError("archive holds no files")
     info.content_hash = hashlib.sha256("\n".join(sorted(lines)).encode()).hexdigest()
     return info
+
+
+def rewrite_without(source: Path, target: Path, covered) -> tuple[int, int]:
+    """Copy the zip `source` to `target` without the members `covered(name)` is true for (a folder's entry goes with its files).
+    Returns (files kept, files left out). Members keep their dates, permissions and compression."""
+    kept = dropped = 0
+    with zipfile.ZipFile(source) as archive, zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as out:
+        for member in archive.infolist():
+            if covered(member.filename.rstrip("/")):
+                dropped += 0 if member.is_dir() else 1
+                continue
+            copy = zipfile.ZipInfo(member.filename, member.date_time)
+            copy.compress_type = member.compress_type
+            copy.external_attr = member.external_attr
+            if member.is_dir():
+                out.writestr(copy, b"")
+                continue
+            with archive.open(member) as src, out.open(copy, "w") as dest:
+                while chunk := src.read(_READ_CHUNK):
+                    dest.write(chunk)
+            kept += 1
+    return kept, dropped

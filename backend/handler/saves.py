@@ -13,12 +13,13 @@ from anyio import CapacityLimiter, to_thread
 from fastapi import UploadFile
 
 from config import MAX_SAVE_UPLOAD_BYTES, SAVES_BASE_PATH, SAVES_KEEP_VERSIONS
-from handler.database import db_device_handler, db_saves_handler, db_settings_handler
+from handler.database import db_device_handler, db_save_rules_handler, db_saves_handler, db_settings_handler
 from logger.logger import log
 from models.base import utc_now
+from models.game_save_rule import BLACKLIST, WHITELIST, covers, is_left_out
 from models.save_version import MANIFEST_MAX_ENTRIES, SaveVersion
 from models.settings import SAVES_KEEP_MAX, SAVES_KEEP_MIN
-from utils.archive_safety import inspect_archive
+from utils.archive_safety import ArchiveError, inspect_archive, rewrite_without
 
 _CHUNK = 1024 * 1024
 _INCOMING_DIR = ".incoming"
@@ -85,6 +86,20 @@ def keep_versions(settings) -> int:
     return SAVES_KEEP_VERSIONS if value is None else min(max(value, SAVES_KEEP_MIN), SAVES_KEEP_MAX)
 
 
+def rules_for(game_ids: list[int]) -> tuple[list[str], list[str]]:
+    """(blacklisted, whitelisted) paths of a title, from the rules of all its versions."""
+    rows = db_save_rules_handler.get_for_games(game_ids)
+    return [r.path for r in rows if r.kind == BLACKLIST], [r.path for r in rows if r.kind == WHITELIST]
+
+
+def _drop_covered(source: Path, rules: list[str], target: Path, keep: list[str] | None = None) -> tuple[int, int]:
+    """Copy an archive without the files the rules name, except the ones `keep` (the whitelist) names."""
+    keep = keep or []
+    return rewrite_without(
+        source, target, lambda name: any(covers(rule, name) for rule in rules) and not any(covers(k, name) for k in keep)
+    )
+
+
 def store_version(
     user_id: int, game_id: int, device_id: int, trigger: str, incoming: Path, title_ids: list[int] | None = None
 ) -> tuple[SaveVersion, bool]:
@@ -96,6 +111,19 @@ def store_version(
     stay. Raises ArchiveError (and discards the upload) when the archive is not acceptable."""
     try:
         info = inspect_archive(incoming)
+        blacklist, whitelist = rules_for(title_ids or [game_id])
+        if any(is_left_out(name, blacklist, whitelist) for name, _size in info.files):
+            # An older client, or one that has not read the rules yet: the archive is stored without what is blacklisted.
+            cleaned = incoming.with_suffix(".clean.zip")
+            try:
+                kept, dropped = _drop_covered(incoming, blacklist, cleaned, whitelist)
+                if not kept:
+                    raise ArchiveError("every file of the archive is blacklisted")
+                log.debug(f"Saves: game {game_id} upload had {dropped} blacklisted files, left out")
+                cleaned.replace(incoming)
+            finally:
+                cleaned.unlink(missing_ok=True)
+            info = inspect_archive(incoming)
     except BaseException:
         incoming.unlink(missing_ok=True)
         raise
@@ -154,3 +182,72 @@ def _remove_tree(relative: str) -> None:
 def remove_version(version: SaveVersion) -> None:
     db_saves_handler.delete_version(version.id)
     _remove_file(version.file_path)
+
+
+def remove_files(version: SaveVersion, paths: list[str], keep: list[str] | None = None) -> SaveVersion | None:
+    """Take the files at `paths` (a file or a folder with all that is in it) out of a version's archive and update what the row
+    says it holds. The version goes when nothing is left (None). The archive is rewritten beside the old one and replaces it
+    only when it is complete. What `keep` names (paths, as `paths`) stays whatever `paths` says."""
+    archive = resolve_path(version.file_path)
+    if not archive.is_file():
+        raise ArchiveError("The archive is gone from disk")
+    target = archive.with_suffix(".edit.zip")
+    try:
+        kept, dropped = _drop_covered(archive, paths, target, keep)
+        if not dropped:
+            return version
+        if not kept:
+            remove_version(version)
+            return None
+        info = inspect_archive(target)
+        size = target.stat().st_size
+        target.replace(archive)
+    finally:
+        target.unlink(missing_ok=True)
+    return db_saves_handler.update_contents(
+        version.id,
+        size,
+        info.content_hash,
+        info.file_count,
+        [{"path": p, "size": s} for p, s in info.files[:MANIFEST_MAX_ENTRIES]],
+    )
+
+
+def blacklisted_in_versions(versions: list[SaveVersion], blacklist: list[str], whitelist: list[str] | None = None) -> dict:
+    """What the blacklist leaves in the stored versions, from their file lists (which hold up to MANIFEST_MAX_ENTRIES files: a bigger
+    version may hold more, `truncated` says so): each file once, with the versions it is in and what they hold of it."""
+    found: dict[str, dict] = {}
+    truncated = False
+    touched = 0
+    for version in versions:
+        hits = [f for f in version.manifest or [] if is_left_out(f["path"], blacklist, whitelist or [])]
+        truncated = truncated or version.file_count > len(version.manifest or [])
+        touched += bool(hits)
+        for f in hits:
+            entry = found.setdefault(f["path"], {"path": f["path"], "size": 0, "versions": 0})
+            entry["size"] += f["size"]
+            entry["versions"] += 1
+    files = sorted(found.values(), key=lambda e: (-e["size"], e["path"]))
+    return {"files": files, "versions": touched, "bytes": sum(e["size"] for e in files), "truncated": truncated}
+
+
+def purge_blacklisted(versions: list[SaveVersion], blacklist: list[str], whitelist: list[str] | None = None) -> dict:
+    """Take every blacklisted file out of the stored versions (see `remove_files`). A version too big for its file list is rewritten
+    too, since the list cannot say whether it has any. Returns how many versions changed, how many went (nothing was left)
+    and how many files were taken out."""
+    changed = deleted = removed = 0
+    if not blacklist:
+        return {"versions_changed": 0, "versions_deleted": 0, "files_removed": 0}
+    for version in versions:
+        listed = version.manifest or []
+        if not any(is_left_out(f["path"], blacklist, whitelist or []) for f in listed) and version.file_count <= len(listed):
+            continue
+        before = version.file_count
+        after = remove_files(version, blacklist, whitelist)
+        left = 0 if after is None else after.file_count
+        if left == before:
+            continue
+        changed += after is not None
+        deleted += after is None
+        removed += before - left
+    return {"versions_changed": changed, "versions_deleted": deleted, "files_removed": removed}

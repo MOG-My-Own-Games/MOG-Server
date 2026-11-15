@@ -8,6 +8,7 @@ from models.game import Game
 from models.game_addon import GameAddon
 from models.game_launch_settings import GameLaunchSettings
 from models.game_play_session import GamePlaySession
+from models.game_save_rule import GameSaveRule
 from models.install_session import InstallSession, InstallSessionState
 from models.install_step import InstallStep
 from models.notification import Notification
@@ -161,7 +162,7 @@ class DBGamesHandler(DBBaseHandler):
         steps_from_drop: bool, session: Session = None,
     ) -> Game:
         """Everything of the game `drop_id` goes to `keep_id` and the row goes: saves (`save_paths` has their new file
-        paths), time played (`playtime`: sum, this or other), launch settings (the kept game's win where both have one),
+        paths), time played (`playtime`: sum, this or other), launch settings (the kept game's win where both have one), save rules (the kept game's win for a path both have),
         installs, add-ons, install steps (those of the game whose folder is kept, `steps_from_drop`) and notifications.
         `values` are the columns the kept game ends with. One transaction: it is all done or nothing."""
         for version_id, path in save_paths.items():
@@ -190,6 +191,14 @@ class DBGamesHandler(DBBaseHandler):
                 session.delete(row)
             else:
                 row.game_id = keep_id
+        session.flush()
+
+        ruled = {r.path for r in session.scalars(select(GameSaveRule).where(GameSaveRule.game_id == keep_id))}
+        for rule in session.scalars(select(GameSaveRule).where(GameSaveRule.game_id == drop_id)).all():
+            if rule.path in ruled:
+                session.delete(rule)
+            else:
+                rule.game_id = keep_id
         session.flush()
 
         session.execute(update(InstallSession).where(InstallSession.game_id == drop_id).values(game_id=keep_id))

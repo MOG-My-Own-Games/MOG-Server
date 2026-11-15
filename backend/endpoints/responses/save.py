@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
@@ -84,3 +84,39 @@ class SaveUploadSchema(BaseModel):
     version: SaveVersionSchema
     # False when the archive matched the device's newest version and nothing was stored.
     created: bool
+
+
+class SaveRulesSchema(BaseModel):
+    # Archive keys (files or folders) the clients leave out of a save, and ones they take as saves though they would not find them.
+    blacklist: list[str]
+    whitelist: list[str]
+
+
+class SaveRulesAddForm(BaseModel):
+    kind: Literal["blacklist", "whitelist"]
+    paths: list[str] = Field(min_length=1, max_length=500)
+
+
+class SavePathsForm(BaseModel):
+    paths: list[str] = Field(min_length=1, max_length=500)
+
+
+class BlacklistedFileSchema(BaseModel):
+    path: str
+    # What the stored versions hold of it together, and in how many of them.
+    size: int
+    versions: int
+
+
+class BlacklistedSavesSchema(BaseModel):
+    files: list[BlacklistedFileSchema]
+    versions: int
+    bytes: int
+    # A version has more files than its list holds, so there may be more than `files` says.
+    truncated: bool
+
+
+class PurgeSavesSchema(BaseModel):
+    versions_changed: int
+    versions_deleted: int
+    files_removed: int

@@ -193,7 +193,7 @@ changes nothing: both games, `mode`, `conflict` and what hangs on each (`counts`
 `{"other_id": 5, "name": "...", "summary": "...", "igdb_id": "this|other", "sgdb_id": "this|other", "media": {"cover":
 "this|other|none"}, "playtime": "sum|this|other"}` (everything but `other_id` optional). When at most one of the two has a
 folder of its own (`mode: "merge"`), game `{id}` stays and `other_id` is deleted, with its saves (the files move to the
-kept game's folder), time played, launch settings, installs, add-ons and notifications moved to it. When both have files
+kept game's folder), time played, launch settings, save rules (the kept game's kind wins for a path both have), installs, add-ons and notifications moved to it. When both have files
 (`mode: "link"`) they are two versions of one game: both stay and share one title. `409` with `detail.code`
 `install_in_progress` when an install of either is running. A client that has a record of the deleted game finds it gone from the
 list, as for any deleted game. It cannot be undone.
@@ -577,6 +577,29 @@ answers `404`: treat that as "not supported" and carry on, the log is never a re
 | `GET /api/saves/{version_id}` | One version with a (capped) list of the files in it. |
 | `GET /api/saves/{version_id}/download` | The zip. |
 | `DELETE /api/saves/{version_id}` | Remove one. |
+| `POST /api/saves/{version_id}/remove-files` | Body `{"paths": ["game/cache", ...]}` (1 to 500 keys, each a file or a folder with all that is in it). Takes those files out of the version's archive, to free the space of files that were never saves, and answers the version as `GET /api/saves/{version_id}` does (new `file_count`, `size_bytes`, `content_hash`, `manifest`). When nothing is left of the version it is deleted and the answer is `null`. Only the version's own user. `422` for an unsafe key. |
+| `GET /api/games/{id}/save-rules` | `{"blacklist": [...], "whitelist": [...]}`: the keys a game's clients leave out of its saves, and the ones they add to them. For the game's whole title, the same for every user and device (a game is the same for everyone). An older server answers `404`: treat it as no rules. |
+| `POST /api/games/{id}/save-rules` | Body `{"kind": "blacklist" \| "whitelist", "paths": [...]}` (1 to 500 keys). Puts the keys on that list; one that is on the other list moves. Answers the lists as `GET` does. Any user who can see the game may change them. |
+| `GET /api/games/{id}/save-rules/blacklisted` | What the blacklist still leaves in the caller's stored versions of the game (every version of its title): `files` (`path`, `size` and `versions` it is in, biggest first), `versions` that hold any, `bytes`, and `truncated` when a version has more files than its list holds (up to 1000), so there may be more. |
+| `POST /api/games/{id}/save-rules/purge` | Takes every blacklisted file out of the caller's stored versions of the game (as `remove-files` does, rewriting their archives) and deletes a version left empty. Answers `versions_changed`, `versions_deleted` and `files_removed`. Other users' versions are not touched. |
+| `POST /api/games/{id}/save-rules/remove` | Body `{"paths": [...]}`. Takes the keys off whichever list they are on, for every version of the title. Answers the lists. |
+
+**Save rules.** A rule is a key as in 8.3 (a file, or a folder with all that is in it: `game/cache` covers `game/cache/a.bin`,
+not `game/cache2/a.bin`) or a pattern:
+
+- A **glob**, when the rule has `*`, `?` or a `[...]` class. `*` and `?` stay inside one folder name, `**` crosses folders
+  (`**/` also matches none), `[abc]` is one of the characters and `[!abc]` none of them; letter case does not count. A glob
+  without a `/` is matched against each name in the key, so `*.png` is every png wherever it is and `cache*` is a folder and
+  all that is in it. One with a `/` is matched against the key from its start and each folder above it: `game/*/shaders`.
+- A **regular expression**: `re:` and a Python regular expression, searched anywhere in the key (`re:\.(png|jpg)$`),
+  case sensitive unless it says `(?i)`. At most 200 characters, and it must compile.
+
+A key or glob is relative, without a leading `/`, `..`, `\`, an empty part or a drive letter, or the call is refused with
+`422` (so is a regular expression that does not compile). A client that builds the list of files to leave out reads them
+the same way. A pattern on the whitelist only keeps what the client's own scan already found (it cannot be looked for on
+disk); a path on it is also searched for. The same rules name the files of `remove-files`, so `{"paths": ["*.png"]}` takes
+every png out of a version. **The whitelist is stronger than the blacklist**: a key covered by a whitelist rule is kept whatever the blacklist says, whichever rule is more specific (blacklist `game/thisgame` and whitelist `game/thisgame/saves` leave out all of the game but its saves). A client leaves out a key only when a blacklist rule covers it and no whitelist rule does; the server does the same with an upload and with `purge`. Removing a rule never touches the versions already stored. Blacklisting a path stops it being
+synced; taking it out of what is stored is `remove-files`, a separate step.
 
 An archive that is too large is refused with `413` (default cap 512 MiB), and one that is not a valid zip, or has
 unsafe member names, with `422`.
@@ -603,6 +626,10 @@ manifest knows (`placeholders` such as `<xdgConfig>`, `<home>` and `<base>` are 
   nothing changed here, it takes that version, after copying every file it is about to replace into a backup
   archive. If both sides changed, it does neither and tells the user ("conflict"): each device keeps its own
   history, so nothing is lost.
+- Before a backup or a restore it reads the game's save rules. It leaves a blacklisted key out of the archive (and out
+  of what it tracks, and does not restore one) and backs up a whitelisted key even when its own scan would not take it.
+  An upload that still has blacklisted files is stored without them (a client that has not read the rules cannot bloat the
+  server); one made only of them is refused with `422`. Without a server answer, it uses the rules it read last.
 - When a game closes, it uploads what changed (`trigger=quit`).
 - It remembers which version it has already applied or declined, so it never asks twice.
 - A restore never replaces a file without a backup first.

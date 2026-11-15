@@ -27,7 +27,7 @@ damage: the software is provided as is, without warranty of any kind.
 - Keeps each machine's save files per game (the client uploads them) and lets them follow the
   player: a newer save from another machine is offered, or brought over, when a game starts. The
   last three versions of every device are kept by default (1 to 20, set in Settings > Backups), listed under the game's Files > Saves tab (so you
-  can tell where a save came from), and a version can be downloaded or a zip uploaded by hand. Machines are named after their hostname, asking when a name is already
+  can tell where a save came from), and a version can be downloaded or a zip uploaded by hand. Per game, files, folders and patterns (`*.png`, a regular expression) can be blacklisted (never synced: the shader and build caches of ports) or added by hand, and files can be taken out of a stored version, or all the blacklisted ones at once after a list to confirm (Files > Saves > Save rules, and Edit in a version's file list). Machines are named after their hostname, asking when a name is already
   taken (a reinstall, or a second system on the same computer). A game that is gone from disk but
   still has saves is not "missing": it stays, marked "Saves only" (amber corner with a floppy disk),
   and clearing the missing games leaves it alone; deleting it asks whether to keep the saves (the default, the game then stays listed) or delete

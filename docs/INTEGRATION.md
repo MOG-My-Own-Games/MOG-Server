@@ -233,6 +233,10 @@ done" is only one of the two conditions for finishing (see [6.5](#65-when-is-it-
 | `proton_build` | Which Proton build to use; left out, the server's default. |
 | `ttl_seconds` | How long the install cache lives; left out, the server's default (7 days unless an admin changed it in Settings; a default of `0` means never); `0` or less means never. An admin who sets a default of days gives every cache that never expires that expiry, counted from then; `POST /api/games/install/cache/{session_id}/reset` (admin) starts one cache's expiry over from the default in force at that moment. The admin cache listing, `GET /api/games/install/cache`, carries each cache's `expires_at` (`null`: never). |
 
+The installer's network is a server-wide setting, not a field of the request: `enable_network` in `GET /api/games/install/defaults`
+(on unless an admin turned it off in Settings > Install) says whether an installer can reach the network, which some need to
+download extra files. With it off such an installer stops at its own "cannot connect" page.
+
 The call is **idempotent while it runs**: if a session for the game is already `queued`, `installing` or `streaming`,
 it is returned as it is, so a second client of the same user asking for the same game finds the first one's work.
 When that session belongs to another user the answer is `409` and nothing of it is shown: its record carries the
@@ -368,7 +372,7 @@ off for a running session.
 | `done` | Finished; the final list is available. | Finish the download, verify. |
 | `failed` | Something went wrong: read `error` (a cancelled session also ends here, with `error: "Cancelled"`). | Show `error`. |
 
-An installer that stops before its install (it exits with a non-zero code after writing next to nothing, or leaves only empty files) is never `done`: an auto mode session is run again by the server, up to 3 runs in all, with `bytes_written`/`bytes_total` back to `0` for each; after the last one the session is `failed` and `error` says the installer stopped before its install. A client must still not trust a `done` session without checking that the final list has files with content.
+An installer that stops before its install is never `done`: it exits with a non-zero code after writing next to nothing, or leaves only empty files, or leaves **no program to launch** whatever its exit code and however much it wrote. A program is an executable of any of the systems a game runs on: a Windows or DOS one (`.exe`, `.bat`, `.cmd`, `.com`, `.lnk`), a Linux one (`.sh`, `.x86`, `.x86_64`, `.AppImage`, an ELF binary or a script with no extension), a macOS one (the program inside a `.app` bundle, `.command`, a Mach-O binary), or a Java archive, a Python script or a `.love` file. An uninstaller, a redistributable's own setup and a library do not count. An auto mode session is run again by the server, up to 3 runs in all, with `bytes_written`/`bytes_total` back to `0` for each, and a notification of kind `install_retry` says why; after the last one the session is `failed`, `error` says the installer stopped before its install and an auto mode session also gets an `auto_mode_failed` notification with the reason in its title. A client must still not trust a `done` session without checking that the final list has files with content. (An extraction as it is, with no installer run, is not checked this way: it holds the game's own files.)
 | `expired` | The cache's time ran out and was deleted. | Start again. |
 
 `bytes_written` and `bytes_total` are the server-side progress where it knows one (unpacking, hashing the result), and are
@@ -548,7 +552,7 @@ A device is a machine. Register it once and keep the answer:
 
 ```http
 POST /api/devices/register
-{ "client_uid": "<a random id your client keeps>", "hostname": "karasu", "platform": "linux", "os_id": "fedora" }
+{ "client_uid": "<a random id your client keeps>", "hostname": "desktop", "platform": "linux", "os_id": "fedora" }
 ```
 
 The answer is the device (`id`, `name`, ...). Send the same `client_uid` later and you get the same device back.
@@ -699,7 +703,10 @@ resolution and no enabling or disabling. Use dedicated software for that.
 a `body`, optionally the `game_id` and `session_id` it is about, `read` and `created_at`. The server writes them
 for things a person should hear about even if the client was not looking: an installer that needs a person, a
 finished install, an install smaller than what it came from (`kind` `install_small`, a warning only: the install
-stays done, but the installer may have stopped on the way), a mod that is zipped or downloaded, a save that was synced. `POST /api/notifications/read` and
+stays done, but the installer may have stopped on the way), an install that is run again (`kind` `install_retry`: the installer
+stopped before its install, and the body says why in a few words), an auto mode install that failed (`kind` `auto_mode_failed`:
+the reason in a few words is in the title, in brackets, and the whole error is the body), a mod that is zipped or downloaded,
+a save that was synced. `POST /api/notifications/read` and
 `POST /api/notifications/{id}/read` mark them read; `DELETE /api/notifications` and `DELETE /api/notifications/{id}`
 remove them. MOG Client polls every 15 seconds and shows the unread count on the user's picture.
 

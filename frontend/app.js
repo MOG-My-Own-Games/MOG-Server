@@ -601,9 +601,9 @@ document.getElementById("avatar-upload-input").addEventListener("change", async 
 async function getInstallDefaults() {
   try {
     const d = await api("/api/games/install/defaults");
-    return { autoMode: d.auto_mode, downloadWorkers: d.download_workers };
+    return { autoMode: d.auto_mode, enableNetwork: d.enable_network !== false, downloadWorkers: d.download_workers };
   } catch (_) {
-    return { autoMode: false, downloadWorkers: 4 };
+    return { autoMode: false, enableNetwork: true, downloadWorkers: 4 };
   }
 }
 
@@ -698,6 +698,8 @@ async function openSettingsPage(subTab) {
   document.getElementById("setting-auto-mode").checked = s.autoMode;
   document.getElementById("setting-download-workers").value = s.downloadWorkers;
   document.getElementById("setting-auto-mode").onchange = saveInstallDefaults;
+  document.getElementById("setting-enable-network").checked = s.enableNetwork;
+  document.getElementById("setting-enable-network").onchange = saveInstallDefaults;
   const groupToggle = document.getElementById("setting-group-games");
   groupToggle.checked = groupGamesEnabled();
   groupToggle.onchange = () => {
@@ -1208,6 +1210,7 @@ async function saveInstallDefaults() {
       method: "PUT",
       body: JSON.stringify({
         install_default_auto_mode: document.getElementById("setting-auto-mode").checked,
+        install_enable_network: document.getElementById("setting-enable-network").checked,
       }),
     });
   } catch (_) {
@@ -2497,7 +2500,7 @@ function suggestWinetricksValues() {
   });
 })();
 
-// "Played 3h 20m · Last played: 8 Oct 2026, 01:40 on karasu": the time this user played the game (what their clients reported),
+// "Played 3h 20m · Last played: 8 Oct 2026, 01:40 on desktop": the time this user played the game (what their clients reported),
 // and the newest saved version with the machine that made it. Nothing for a game never played.
 function formatPlayed(seconds) {
   const minutes = Math.round(seconds / 60);
@@ -3294,8 +3297,8 @@ function hasOwnFiles(game) {
   return game.library_id != null && !game.imported && !game.missing_from_fs;
 }
 
-// The games that match what was typed: a game id, or the title (letters and digits only, so "Pocket Campfire" finds
-// "PocketCampfire_v2"). The game being edited is not offered.
+// The games that match what was typed: a game id, or the title (letters and digits only, so "Pocket Meadow" finds
+// "PocketMeadow_v2"). The game being edited is not offered.
 function renderMergeResults() {
   const typed = mergeSearchInput.value.trim();
   const wanted = normalizedName(typed);
@@ -3613,7 +3616,7 @@ const PROVIDER_ROWS = [
 ];
 const PROVIDER_HINTS = {
   itch: "itch.io's search leaves out adult games: type the game's page address instead.",
-  dlsite: "A product code (RJ155385) or the product page's address finds that work alone.",
+  dlsite: "A product code (RJ000123) or the product page's address finds that work alone.",
   steam: "The store page's address or the app id finds that game alone.",
   vndb: "The novel's address or its id (v17) finds it alone.",
   sgdb: "The game's address on steamgriddb.com or its id finds it alone.",

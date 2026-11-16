@@ -1180,6 +1180,33 @@ def _exclude_known_inodes(known: list[Path], candidates: list[Path]) -> list[Pat
     return result
 
 
+def _drop_deleted(linked: dict[Path, Path], present: set[Path] | None = None) -> list[Path]:
+    """Take out of the cache the files the installer has deleted since `_live_manifest_loop` linked them.
+
+    The link is a second name for the installer's file, so it outlives the installer's own: a temporary file made and
+    removed during the install (a decompressor's scratch space can be gigabytes) would stay in the cache, in the manifest
+    and in every client's download. `linked` maps each cache path to where the installer wrote it; those whose
+    original is gone are unlinked, forgotten, and returned. Only links this loop made are touched.
+
+    `present` is what the scan under way has just listed under the prefix: those originals are there and are not asked
+    about again (a stat of every file, every second, for nothing). A walk can miss a file that is being renamed, so the
+    ones it did not list are looked at before they are given up."""
+    gone = []
+    for dest, source in list(linked.items()):
+        if (present is not None and source in present) or source.exists():
+            continue
+        del linked[dest]
+        try:
+            dest.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError as e:
+            log.warning(f"Could not drop {dest}, which the installer deleted: {e}")
+            continue
+        gone.append(dest)
+    return gone
+
+
 def _live_manifest_loop(
     work_dir: Path, prefix_dir: Path, windows_baseline: frozenset[Path], stop: threading.Event
 ) -> None:
@@ -1207,9 +1234,13 @@ def _live_manifest_loop(
     # mid-session and silently resetting every already-sealed file's
     # continuity key (see resolve_install_root's own docstring).
     root: Path | None = None
+    linked: dict[Path, Path] = {}  # cache path -> where the installer wrote it, for the files this loop linked
+    removed: set[str] = set()  # cache paths of linked files the installer deleted since: clients are told to drop them
     while True:
         try:
             candidates = collect_windows_install_files(prefix_dir, windows_baseline)
+            for gone in _drop_deleted(linked, set(candidates)):
+                removed.add(gone.relative_to(work_dir).as_posix())
             if root is None and candidates:
                 root = resolve_install_root(drive_c, candidates)
             live_paths = []
@@ -1223,16 +1254,19 @@ def _live_manifest_loop(
                         except OSError:
                             continue  # transient (e.g. not sealed onto disk
                             # yet) - retry next scan
+                        linked[dest] = f
+                        removed.discard(dest.relative_to(work_dir).as_posix())  # written again: it is a file once more
                     live_paths.append(dest)
             live_paths += _exclude_known_inodes(live_paths, collect_extra_work_dir_files(work_dir))
             if live_paths:
                 state = scan_live_manifest(
                     work_dir, live_paths, state, aggressive=stream_uncompleted_files_enabled()
                 )
-                write_live_manifest(work_dir, state)
+                write_live_manifest(work_dir, state, removed)
         except OSError as e:
             log.warning(f"Live manifest scan failed, will retry: {e}")
         if stop.wait(LIVE_MANIFEST_INTERVAL):
+            _drop_deleted(linked)  # what went just before the installer exited must not reach the final manifest either
             return
 
 

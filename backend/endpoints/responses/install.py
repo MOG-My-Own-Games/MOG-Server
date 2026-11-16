@@ -122,6 +122,9 @@ class InstallStreamFileSchema(BaseModel):
 class InstallStreamManifestSchema(BaseModel):
     game_id: int
     files: list[InstallStreamFileSchema]
+    # Paths the installer deleted after listing them (a temporary file it cleaned up): not in `files` any more, and a
+    # client deletes what it has of them, whole or partial, before anything else. Only while the install runs.
+    removed: list[str] = []
 
 
 class InstallFileSchema(BaseModel):

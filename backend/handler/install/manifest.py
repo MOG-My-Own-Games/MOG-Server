@@ -228,10 +228,15 @@ def live_view_of_final_manifest(entries: list[ManifestEntry]) -> dict[str, LiveM
     }
 
 
-def write_live_manifest(cache_dir: Path, entries: Mapping[str, LiveManifestEntry]) -> None:
+def write_live_manifest(
+    cache_dir: Path, entries: Mapping[str, LiveManifestEntry], removed: Iterable[str] = ()
+) -> None:
     """Write the live manifest atomically - it's read concurrently by request
     handlers while this keeps overwriting it every scan interval, so a plain
-    in-place write could hand a reader a half-written JSON body."""
+    in-place write could hand a reader a half-written JSON body.
+
+    `removed` lists the paths the installer deleted after they were listed (a temporary file it made and cleaned up):
+    they are no longer in `files`, and a client that already has them, whole or in part, deletes them."""
     payload = {
         "files": [
             {
@@ -241,7 +246,8 @@ def write_live_manifest(cache_dir: Path, entries: Mapping[str, LiveManifestEntry
                 "complete": e.complete,
             }
             for e in entries.values()
-        ]
+        ],
+        "removed": sorted(removed),
     }
     tmp_path = cache_dir / f"{LIVE_MANIFEST_FILENAME}.tmp"
     tmp_path.write_text(json.dumps(payload), encoding="utf-8")
@@ -268,6 +274,17 @@ def read_live_manifest(cache_dir: Path) -> dict[str, LiveManifestEntry] | None:
             complete=f.get("complete", False),
         )
     return entries
+
+
+def read_live_removed(cache_dir: Path) -> list[str]:
+    """The paths the live manifest says the installer deleted (see `write_live_manifest`); none when there is no live
+    manifest."""
+    try:
+        payload = json.loads((cache_dir / LIVE_MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    removed = payload.get("removed", [])
+    return [p for p in removed if isinstance(p, str)] if isinstance(removed, list) else []
 
 
 def delete_live_manifest(cache_dir: Path) -> None:

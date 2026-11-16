@@ -404,6 +404,13 @@ While the installer runs, `size_bytes` is what the file has now and may grow, `s
 safe to read (it will not change any more), and `complete` is false. After the install is done every file is
 complete and `sealed_bytes == size_bytes`. A `404` just means the list does not exist yet: wait.
 
+While the installer runs the answer also has `"removed": ["Game/scratch.tmp", ...]`: files the installer made and
+then deleted (a decompressor's scratch space, for instance, which can be gigabytes). They are no longer in `files`.
+**Delete what you have of them, whole or partial, and stop fetching them, before anything else**: they would only take
+disk space and bandwidth from the files that matter. A path can come back in `files` if the installer writes it again.
+The field is absent from the final list, where such files are simply not there; older clients ignore it. Fetching a
+removed path answers `404`.
+
 Paths use `/` and are relative to the install folder. Percent-encode each segment when you put one in a URL.
 **The list can change between the live view and the final one**: an installer may write a file in one place and
 move it later. When the server is done and the list is final, drop any local file that is no longer in it (MOG

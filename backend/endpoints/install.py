@@ -64,6 +64,7 @@ from handler.install.manifest import (
     regular_file_in,
     live_view_of_final_manifest,
     read_live_manifest,
+    read_live_removed,
     read_manifest,
 )
 from handler.install.proton_builds import (
@@ -513,6 +514,7 @@ async def get_install_stream_manifest(
             InstallStreamFileSchema(path=e.path, size_bytes=e.size_bytes, sealed_bytes=e.sealed_bytes, complete=e.complete)
             for e in live_entries.values()
         ],
+        removed=read_live_removed(cache_dir),
     )
 
 

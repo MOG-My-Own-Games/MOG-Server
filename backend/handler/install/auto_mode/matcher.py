@@ -24,6 +24,8 @@ LONG_FINISH_TYPOS = 2
 # the same OCR line exceeds this many times the text height.
 ISOLATION_GAP_FACTOR = 2.0
 MIN_WORD_CONF = 30
+# What the frame of a button is read as when it is in focus (the dotted border): a lone letter that is a stroke.
+FRAME_GLYPHS = frozenset("il1Ij|!")
 # Button and checkbox labels are UI-font sized; a taller match is a page
 # title ("Installation") or artwork text, and clicking it does nothing.
 MAX_LABEL_HEIGHT = 30
@@ -140,14 +142,26 @@ def screen_text(words: list[Word]) -> list[str]:
     return [" ".join(w.text for w in ws) for ws in _group_lines(words)]
 
 
+def _is_frame_glyph(word: Word) -> bool:
+    """A lone character that is the frame of a button read as a letter: the dotted border of the button that has the focus
+    comes out as "i" or "l" on either side of its text."""
+    return len(word.text.strip()) == 1 and word.text.strip() in FRAME_GLYPHS
+
+
 def _is_isolated(line: list[Word], start: int, end: int) -> bool:
     if start == 0 and end == len(line):
         return True
     height = max(w.height for w in line[start:end])
     limit = ISOLATION_GAP_FACTOR * height
-    if start > 0 and line[start].left - line[start - 1].right <= limit:
+    before = start - 1
+    while before >= 0 and _is_frame_glyph(line[before]):
+        before -= 1
+    after = end
+    while after < len(line) and _is_frame_glyph(line[after]):
+        after += 1
+    if before >= 0 and line[start].left - line[before].right <= limit:
         return False
-    if end < len(line) and line[end].left - line[end - 1].right <= limit:
+    if after < len(line) and line[after].left - line[end - 1].right <= limit:
         return False
     return True
 

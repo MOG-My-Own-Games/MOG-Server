@@ -126,7 +126,7 @@ class TestStoreMedia:
         assert ok is False and saved == {}
 
     def test_a_game_with_no_art_at_all_is_given_a_poster_with_its_name(self):
-        ok, saved = self._store(_game(name="Ryona no Mori"), {}, replace=True)
+        ok, saved = self._store(_game(name="Tsuki no Mori"), {}, replace=True)
         cover = saved["media"]["cover"]
         assert ok is False  # no provider gave anything: it is a poster, not a scrape that found something
         assert cover["source"] == "generated" and cover["from"] is None and saved["cover_path"] == cover["url"]
@@ -136,7 +136,7 @@ class TestStoreMedia:
         from handler import scrape_handler
 
         monkeypatch.setattr(scrape_handler, "_image_bytes", lambda entry: _png((460, 215)))
-        game = _game(name="Lustful Apocalypse")
+        game = _game(name="Gentle Apocalypse")
         chosen = {"cover": {"url": "https://shared.steamstatic.com/h.jpg", "source": "steam"}}
         ok, saved = self._store(game, chosen, replace=False)
         cover = saved["media"]["cover"]

@@ -29,7 +29,7 @@ def listing(*paths):
 
 def test_an_archive_with_the_game_buried_in_folders_suggests_extracting_it():
     found = listing(
-        "Hearthlands.v1/Hearthlands.v1/Hearthlands.exe", "Hearthlands.v1/Hearthlands.v1/bin/java.exe"
+        "Mossglen.v1/Mossglen.v1/Mossglen.exe", "Mossglen.v1/Mossglen.v1/bin/java.exe"
     )
     assert archive_prescan.extract_suggested(found) is True
 
@@ -87,7 +87,7 @@ def env(monkeypatch, tmp_path):
     db = FakeDb()
     work = tmp_path / "cache" / "1"
     work.mkdir(parents=True)
-    source = tmp_path / "library" / "Hearthlands.rar"
+    source = tmp_path / "library" / "Mossglen.rar"
     source.parent.mkdir()
     source.write_bytes(b"rar")
     monkeypatch.setattr(runner, "db_install_session_handler", db)
@@ -114,19 +114,19 @@ def test_the_archive_is_extracted_into_the_cache_and_becomes_the_install(env, mo
     monkeypatch.setattr(
         runner,
         "extract_archive",
-        extractor({"Hearthlands/Hearthlands.exe": b"x" * 10, "Hearthlands/data/a.bin": b"y" * 5}),
+        extractor({"Mossglen/Mossglen.exe": b"x" * 10, "Mossglen/data/a.bin": b"y" * 5}),
     )
-    runner._run_extract_only(1, object(), "Hearthlands.rar")
+    runner._run_extract_only(1, object(), "Mossglen.rar")
     assert env.db.session.state == InstallSessionState.DONE
     manifest = read_manifest(env.work)
     assert {e.path: e.size_bytes for e in manifest} == {
-        "Hearthlands/Hearthlands.exe": 10,
-        "Hearthlands/data/a.bin": 5,
+        "Mossglen/Mossglen.exe": 10,
+        "Mossglen/data/a.bin": 5,
     }
     assert env.db.session.bytes_total == 15 and env.db.session.cache_path == str(env.work)
     states = [u["state"] for u in env.db.updates if "state" in u]
     assert states == [InstallSessionState.INSTALLING, InstallSessionState.STREAMING, InstallSessionState.DONE]
-    assert env.db.updates[0]["phase_detail"] == "Hearthlands.rar"
+    assert env.db.updates[0]["phase_detail"] == "Mossglen.rar"
     assert not any(e.path == MANIFEST_FILENAME for e in manifest)
 
 
@@ -136,17 +136,17 @@ def test_a_link_inside_the_archive_is_removed_not_followed(env, monkeypatch, tmp
     monkeypatch.setattr(
         runner, "extract_archive", extractor({"game.exe": b"x"}, links=[("leak.txt", outside)])
     )
-    runner._run_extract_only(1, object(), "Hearthlands.rar")
+    runner._run_extract_only(1, object(), "Mossglen.rar")
     assert [e.path for e in read_manifest(env.work)] == ["game.exe"]
     assert not (env.work / "leak.txt").exists() and outside.exists()
 
 
 def test_a_failed_extraction_fails_the_session_with_the_reason(env, monkeypatch):
     monkeypatch.setattr(runner, "extract_archive", lambda archive, dest: "7-Zip: ERROR: Unsupported Method")
-    runner._run_extract_only(1, object(), "Hearthlands.rar")
+    runner._run_extract_only(1, object(), "Mossglen.rar")
     assert (
         env.db.session.state == InstallSessionState.FAILED
-        and "Could not extract Hearthlands.rar" in env.db.session.error
+        and "Could not extract Mossglen.rar" in env.db.session.error
     )
 
 
@@ -156,7 +156,7 @@ def test_an_archive_with_no_files_fails(env, monkeypatch):
         return None
 
     monkeypatch.setattr(runner, "extract_archive", only_dirs)
-    runner._run_extract_only(1, object(), "Hearthlands.rar")
+    runner._run_extract_only(1, object(), "Mossglen.rar")
     assert env.db.session.state == InstallSessionState.FAILED and "no files" in env.db.session.error
 
 
@@ -168,7 +168,7 @@ def test_a_session_cancelled_while_unpacking_is_left_cancelled(env, monkeypatch)
         return None
 
     monkeypatch.setattr(runner, "extract_archive", cancelled_midway)
-    runner._run_extract_only(1, object(), "Hearthlands.rar")
+    runner._run_extract_only(1, object(), "Mossglen.rar")
     assert env.db.session.state == InstallSessionState.FAILED and env.db.session.error == "Cancelled"
     assert read_manifest(env.work) is None
 
@@ -233,10 +233,10 @@ def test_a_game_whose_files_are_gone_fails_cleanly(env, monkeypatch, tmp_path):
 
 def test_a_missing_source_file_fails_cleanly(env, monkeypatch):
     def gone(game, rel):
-        raise FileNotFoundError("Hearthlands.rar is not there")
+        raise FileNotFoundError("Mossglen.rar is not there")
 
     monkeypatch.setattr(runner.fs_game_handler, "resolve_installer_abs_path", gone)
-    runner._run_extract_only(1, object(), "Hearthlands.rar")
+    runner._run_extract_only(1, object(), "Mossglen.rar")
     assert env.db.session.state == InstallSessionState.FAILED and "not there" in env.db.session.error
 
 
@@ -244,24 +244,24 @@ def test_an_archive_with_nothing_runnable_is_extracted_as_it_is_instead_of_faili
     """Regression test: a zip holding only a CD image 7-Zip cannot open (a .bin/.cue of raw sectors) listed as a disc
     image to unpack, the unpacking found nothing, and the session failed telling the person to start again and pick
     "extract as it is". With no installer asked for, that is now done at once."""
-    env.db.session.source_path = "Hearthlands.rar"
+    env.db.session.source_path = "Mossglen.rar"
     env.db.session.installer_path = None
     env.db.session.extract_only = False
-    monkeypatch.setattr(runner.db_game_handler, "get_game", lambda _id: SimpleNamespace(fs_name="Hearthlands"))
+    monkeypatch.setattr(runner.db_game_handler, "get_game", lambda _id: SimpleNamespace(fs_name="Mossglen"))
     env.db.session.game_id = 1
     monkeypatch.setattr(runner, "extract_and_rescan", lambda source, inner: None)
-    monkeypatch.setattr(runner, "extract_archive", extractor({"Hearthlands.bin": b"x" * 4}))
+    monkeypatch.setattr(runner, "extract_archive", extractor({"Mossglen.bin": b"x" * 4}))
     assert runner._run_install(1) is False
     assert env.db.session.state == InstallSessionState.DONE and env.db.session.extract_only is True
-    assert [e.path for e in read_manifest(env.work)] == ["Hearthlands.bin"]
+    assert [e.path for e in read_manifest(env.work)] == ["Mossglen.bin"]
 
 
 def test_a_named_installer_that_is_not_in_the_archive_still_fails(env, monkeypatch):
-    env.db.session.source_path = "Hearthlands.rar"
+    env.db.session.source_path = "Mossglen.rar"
     env.db.session.installer_path = "setup.exe"
     env.db.session.extract_only = False
     env.db.session.game_id = 1
-    monkeypatch.setattr(runner.db_game_handler, "get_game", lambda _id: SimpleNamespace(fs_name="Hearthlands"))
+    monkeypatch.setattr(runner.db_game_handler, "get_game", lambda _id: SimpleNamespace(fs_name="Mossglen"))
     monkeypatch.setattr(runner, "extract_and_rescan", lambda source, inner: None)
     assert runner._run_install(1) is False
     assert env.db.session.state == InstallSessionState.FAILED and "Nothing recognizable" in env.db.session.error
@@ -272,7 +272,7 @@ def test_a_named_installer_that_is_not_in_the_archive_still_fails(env, monkeypat
 
 @pytest.fixture
 def start(monkeypatch, tmp_path):
-    archive = tmp_path / "Hearthlands.rar"
+    archive = tmp_path / "Mossglen.rar"
     archive.write_bytes(b"rar")
     plain = tmp_path / "setup.exe"
     plain.write_bytes(b"MZ")
@@ -302,10 +302,10 @@ def start(monkeypatch, tmp_path):
         def delete_session(self, _id):
             pass
 
-    paths = {"Hearthlands.rar": archive, "setup.exe": plain}
+    paths = {"Mossglen.rar": archive, "setup.exe": plain}
     monkeypatch.setattr(endpoint, "db_install_session_handler", Handler())
     monkeypatch.setattr(
-        endpoint.db_game_handler, "get_game", lambda _id: SimpleNamespace(id=1, name="Hearthlands", library_id=1)
+        endpoint.db_game_handler, "get_game", lambda _id: SimpleNamespace(id=1, name="Mossglen", library_id=1)
     )
     monkeypatch.setattr(
         endpoint.fs_game_handler, "resolve_installer_abs_path", lambda game, rel: str(paths[rel])
@@ -313,7 +313,7 @@ def start(monkeypatch, tmp_path):
     monkeypatch.setattr(
         endpoint.fs_game_handler,
         "get_installer_candidates",
-        lambda game: [cand("Hearthlands.rar", 4, "archive")],
+        lambda game: [cand("Mossglen.rar", 4, "archive")],
     )
     monkeypatch.setattr(endpoint, "list_source_candidates", lambda path: [cand("setup.exe", 0, "known installer")])
     monkeypatch.setattr(endpoint, "purge_superseded_sessions", lambda *a: None)
@@ -340,16 +340,16 @@ def test_extracting_the_default_archive_as_it_is(start):
     session = start.go(extract_only=True)
     assert (
         session.extract_only is True
-        and session.source_path == "Hearthlands.rar"
+        and session.source_path == "Mossglen.rar"
         and session.installer_path is None
     )
     assert session.state == InstallSessionState.INSTALLING and start.enqueued == [7]
 
 
 def test_extracting_a_named_archive_given_as_the_installer(start):
-    session = start.go(extract_only=True, installer_path="Hearthlands.rar")
+    session = start.go(extract_only=True, installer_path="Mossglen.rar")
     assert (
-        session.source_path == "Hearthlands.rar" and session.installer_path is None and session.extract_only
+        session.source_path == "Mossglen.rar" and session.installer_path is None and session.extract_only
     )
 
 
@@ -405,8 +405,8 @@ def test_a_copy_step_alone_is_the_extraction_of_the_games_own_files(start):
 
 
 def test_a_copy_step_alone_with_an_archive_extracts_that_archive(start):
-    session = start.go(steps=[{"path": "mog:copy", "source_path": "Hearthlands.rar"}])
-    assert session.extract_only and start.made[-1].steps is None and session.source_path == "Hearthlands.rar"
+    session = start.go(steps=[{"path": "mog:copy", "source_path": "Mossglen.rar"}])
+    assert session.extract_only and start.made[-1].steps is None and session.source_path == "Mossglen.rar"
 
 
 def test_a_copy_step_before_installers_makes_a_chain_whose_first_step_is_the_copy(start):
@@ -473,19 +473,19 @@ def test_a_top_level_executable_named_like_an_installer_still_means_there_is_one
 def test_nobody_deciding_an_archive_with_no_installer_is_extracted_not_run(start, monkeypatch):
     monkeypatch.setattr(endpoint, "list_source_candidates", lambda path: [cand("Game.exe", 1, "executable (top level)")])
     session = start.go()
-    assert session.extract_only is True and session.source_path == "Hearthlands.rar" and session.installer_path is None
+    assert session.extract_only is True and session.source_path == "Mossglen.rar" and session.installer_path is None
     assert session.state == InstallSessionState.INSTALLING and start.enqueued == [7]
 
 
 def test_saying_no_to_extracting_runs_the_installer_found_inside_as_before(start, monkeypatch):
     monkeypatch.setattr(endpoint, "list_source_candidates", lambda path: [cand("Game.exe", 1, "executable (top level)")])
     session = start.go(extract_only=False)
-    assert session.extract_only is False and session.source_path == "Hearthlands.rar"
+    assert session.extract_only is False and session.source_path == "Mossglen.rar"
 
 
 def test_an_archive_with_an_installer_inside_is_still_run(start):
     session = start.go()
-    assert session.extract_only is False and session.source_path == "Hearthlands.rar"
+    assert session.extract_only is False and session.source_path == "Mossglen.rar"
 
 
 def test_an_archive_that_cannot_be_listed_is_run_as_before(start, monkeypatch):

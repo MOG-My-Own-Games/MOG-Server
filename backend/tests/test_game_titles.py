@@ -46,7 +46,7 @@ def world(db, monkeypatch, tmp_path):
     lib = db_library_handler.add_library(Library(name="L", root_path=str(tmp_path / "lib")))
     other_lib = db_library_handler.add_library(Library(name="Hidden", root_path=str(tmp_path / "lib2")))
     client = TestClient(app)
-    device = client.post("/api/devices/register", json={"client_uid": "uid-aaaaaaaa", "hostname": "karasu"}).json()
+    device = client.post("/api/devices/register", json={"client_uid": "uid-aaaaaaaa", "hostname": "desktop"}).json()
     return SimpleNamespace(client=client, lib=lib, other_lib=other_lib, who=who, admin=admin, device=device)
 
 
@@ -100,7 +100,7 @@ def test_the_time_played_is_the_titles_not_a_versions(world):
 
 
 def test_a_wrong_igdb_match_corrected_gives_the_time_back_to_where_it_was_played(world):
-    keeper, keepher = _game(world, "Dungeon Keeper", 7), _game(world, "Dungeon KeepHer", 7)
+    keeper, keepher = _game(world, "Castle Warden", 7), _game(world, "Castle WardHer", 7)
     _play(world, keeper, START, 3600)
     _play(world, keepher, START + timedelta(days=1), 600)
     assert world.client.get(f"/api/games/{keeper.id}").json()["playtime_seconds"] == 4200
@@ -170,7 +170,7 @@ def test_matching_a_version_by_hand_to_another_igdb_id_takes_it_out_of_the_title
 
 
 def test_splitting_a_version_off_gives_each_game_back_its_own_time_and_saves(world):
-    keeper, keepher = _game(world, "Dungeon Keeper", 7), _game(world, "Dungeon KeepHer", 7)
+    keeper, keepher = _game(world, "Castle Warden", 7), _game(world, "Castle WardHer", 7)
     _play(world, keeper, START, 3600)
     _play(world, keepher, START + timedelta(days=1), 600)
     _save(world, keepher)

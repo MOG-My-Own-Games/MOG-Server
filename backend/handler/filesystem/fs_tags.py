@@ -1,6 +1,6 @@
 """Tags from a game's file/folder name: every `(...)` or `[...]` chunk, split on commas, and the name that is left without them
-(what RomM calls the name without tags): "Ryona no Mori [Black Megane Laboratory] [English Translation]" is the game
-"Ryona no Mori" with two tags."""
+(what RomM calls the name without tags): "Tsuki no Mori [Violet Lab] [English Translation]" is the game
+"Tsuki no Mori" with two tags."""
 
 from __future__ import annotations
 

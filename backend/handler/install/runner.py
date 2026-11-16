@@ -46,9 +46,11 @@ from handler.database import db_game_handler, db_install_session_handler
 from handler.filesystem import fs_game_handler
 from handler.install.archive_prescan import extract_and_rescan, is_archive_candidate, source_phase, unwrap_platform_builds
 from handler.install.copy_step import is_copy_step
+from handler.install.defaults import default_enable_network
+from handler.install.executables import has_game_program
 from utils.archives import extract_archive
 from handler.install.auto_mode.runtime import start_auto_mode
-from handler.notifications import notify_auto_mode_failed, notify_install_small
+from handler.notifications import notify_auto_mode_failed, notify_install_retry, notify_install_small
 from handler.install.manifest import (
     LIVE_MANIFEST_FILENAME,
     MANIFEST_FILENAME,
@@ -507,8 +509,14 @@ def _mark_d_drive_as_cdrom(
 
 
 class InstallStoppedEarly(RuntimeError):
-    """The installer exited before its install: it wrote nothing, or only empty files. Not a finished install, whatever its
-    exit code says; the first run in a fresh prefix often does this, and running it again usually works."""
+    """The installer exited before its install: it wrote nothing, only empty files, or no program to launch. Not a finished
+    install, whatever its exit code says; the first run in a fresh prefix often does this, and running it again usually works.
+
+    `short` is the reason in a few words, for the notification a person reads."""
+
+    def __init__(self, message: str, short: str | None = None):
+        super().__init__(message)
+        self.short = short or message
 
 
 # How often a run is made for one session (its first and the repeats after it stopped early).
@@ -995,11 +1003,12 @@ def _run_install(install_session_id: int, attempt: int = 1) -> bool:
         session = db_install_session_handler.get_session(install_session_id)
         if attempt < INSTALL_ATTEMPTS and session is not None and session.auto_mode:
             log.warning(f"Install session {install_session_id}: {e} Running it again ({attempt + 1} of {INSTALL_ATTEMPTS}).")
+            notify_install_retry(install_session_id, attempt + 1, INSTALL_ATTEMPTS, e.short)
             _reset_for_another_run(install_session_id)
             retry = True
         else:
             log.error(f"Install session {install_session_id} failed: {e}")
-            _fail(install_session_id, str(e))
+            _fail(install_session_id, str(e), e.short)
     except Exception as e:  # noqa: BLE001 - surface any runner failure to the UI
         log.error(f"Install session {install_session_id} failed: {e}")
         _fail(install_session_id, str(e))
@@ -1083,6 +1092,7 @@ def _finalize_native_install(
     top = {f.relative_to(home).parts[0] for f in files}
     root = home / next(iter(top)) if len(top) == 1 and next(iter(top)) in KNOWN_VENDOR_DIR_NAMES else home
     files = _relocate_under([f for f in files if not _is_installer_leftover(f)], root, work_dir)
+    check_not_stopped_early(files, exit_code)
     for leftover in (home, work_dir / NATIVE_TMP):
         shutil.rmtree(leftover, ignore_errors=True)  # its config, shortcuts and temporary extraction
 
@@ -1420,9 +1430,11 @@ def _warn_if_smaller_than_installer(
 
 
 def check_not_stopped_early(files: list[Path], exit_code: int | None) -> None:
-    """Raise InstallStoppedEarly when what the installer left is not an install: only empty files, or next to nothing from
-    a run that ended with a non-zero code. (Caught live: an installer exited with 253 seconds after "Install", leaving one
-    empty file, and the session was marked done, so the client downloaded it and asked for an executable in an empty folder.)"""
+    """Raise InstallStoppedEarly when what the installer left is not an install: only empty files, next to nothing from a run
+    that ended with a non-zero code, or no program to launch for any system (Windows, Linux or macOS) whatever its exit code
+    and however much it wrote: a payload that was never unpacked can be gigabytes. (Caught live: an installer exited with 253
+    seconds after "Install", leaving one empty file, and the session was marked done, so the client downloaded it and asked
+    for an executable in an empty folder; another left its 3.8 GB payload and an uninstaller.)"""
     sizes = []
     for path in files:
         try:
@@ -1430,11 +1442,19 @@ def check_not_stopped_early(files: list[Path], exit_code: int | None) -> None:
         except OSError:
             continue
     total = sum(sizes)
-    how = f"exited with code {exit_code}" if exit_code not in (None, 0) else "ended"
+    failed_exit = exit_code not in (None, 0)
+    how = f"exited with code {exit_code}" if failed_exit else "ended"
+    closed = f"the installer closed itself before installing anything (exit {exit_code})" if failed_exit else "the installer wrote nothing"
     if total == 0:
-        raise InstallStoppedEarly(f"The installer {how} having written only empty files ({len(sizes)}): it stopped before its install.")
-    if exit_code not in (None, 0) and total < EARLY_STOP_BYTES:
-        raise InstallStoppedEarly(f"The installer {how} after writing only {total} bytes in {len(sizes)} files: it stopped before its install.")
+        raise InstallStoppedEarly(f"The installer {how} having written only empty files ({len(sizes)}): it stopped before its install.", closed)
+    if failed_exit and total < EARLY_STOP_BYTES:
+        raise InstallStoppedEarly(f"The installer {how} after writing only {total} bytes in {len(sizes)} files: it stopped before its install.", closed)
+    if not has_game_program(files):
+        short = "no program to launch in the install" + (f" (the installer exited with code {exit_code})" if failed_exit else "")
+        raise InstallStoppedEarly(
+            f"The installer {how} leaving no program to launch ({total} bytes in {len(sizes)} files): it stopped before it unpacked its install.",
+            short,
+        )
 
 
 def _wrap_for_sandbox(
@@ -1475,6 +1495,7 @@ def _wrap_for_sandbox(
         extra_env=extra_env,
         games_fallback_dir=games_fallback_dir,
         chdir=chdir,
+        network=default_enable_network(),
     )
     argv = build_bwrap_command(spec, inner)
     log.debug(f"Sandbox command: {shlex.join(argv)}")
@@ -1734,7 +1755,7 @@ def _focus_installer_window(env: dict, state: _FocusState) -> None:
     )
 
 
-def _fail(install_session_id: int, error: str) -> None:
+def _fail(install_session_id: int, error: str, reason: str | None = None) -> None:
     if _cancelled(install_session_id):
         return  # cancelled: the process was killed, so whatever it left is not an error to report
     db_install_session_handler.update_session(
@@ -1749,4 +1770,4 @@ def _fail(install_session_id: int, error: str) -> None:
             "phase_detail": None,
         },
     )
-    notify_auto_mode_failed(install_session_id, error)
+    notify_auto_mode_failed(install_session_id, error, reason)

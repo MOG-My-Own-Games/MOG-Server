@@ -91,9 +91,30 @@ def scan_library(library: Library) -> ScanResult:
         return _scan_library(library)
 
 
+# What a download manager leaves while it is still fetching a file: not a game, whatever is inside.
+PARTIAL_DOWNLOAD_SUFFIXES = (".part", ".parts")
+
+
+def is_partial_download(name: str) -> bool:
+    return name.lower().endswith(PARTIAL_DOWNLOAD_SUFFIXES)
+
+
+def _entries_on_disk(root: Path, library: Library) -> set[str]:
+    """The top-level entries of the library that can be a game: not empty folders, not unfinished downloads."""
+    if not root.is_dir():
+        return set()
+    names = set()
+    for entry in root.iterdir():
+        if is_partial_download(entry.name):
+            log.info(f"Library '{library.name}': ignoring {entry.name}, an unfinished download (.part/.parts), not a game")
+        elif has_files(entry):
+            names.add(entry.name)
+    return names
+
+
 def _scan_library(library: Library) -> ScanResult:
     root = Path(library.root_path)
-    on_disk = {p.name for p in root.iterdir() if has_files(p)} if root.is_dir() else set()
+    on_disk = _entries_on_disk(root, library)
 
     existing = {g.fs_name: g for g in db_game_handler.get_games_for_library(library.id)}
 

@@ -11,6 +11,7 @@ from models.notification import (
     KIND_AUTO_MODE_STUCK,
     KIND_GAMES_ADDED,
     KIND_INSTALL_CACHE,
+    KIND_INSTALL_RETRY,
     KIND_INSTALL_SMALL,
     KIND_MOD_DOWNLOADED,
     KIND_MOD_FAILED,
@@ -96,22 +97,42 @@ def notify_install_cache(install_session_id: int, warning: str) -> None:
     )
 
 
-def notify_auto_mode_failed(install_session_id: int, error: str) -> None:
-    """The install failed while auto mode was driving it."""
+def notify_auto_mode_failed(install_session_id: int, error: str, reason: str | None = None) -> None:
+    """The install failed while auto mode was driving it. `reason` is why in a few words, put in the title so a list of
+    notifications says it without opening one; the body keeps the whole error."""
     session = db_install_session_handler.get_session(install_session_id)
     if session is None or not session.auto_mode:
         return
+    title = f"Auto mode install failed: {_game_name(session.game_id)}"
     try:
         notify(
             session.user_id,
             KIND_AUTO_MODE_FAILED,
-            f"Auto mode install failed: {_game_name(session.game_id)}",
+            f"{title} ({reason})" if reason else title,
             error,
             game_id=session.game_id,
             session_id=session.id,
         )
     except Exception as e:  # noqa: BLE001 - a failed notification must not hide the install failure
         log.warning(f"Could not create the auto mode failure notification: {e}")
+
+
+def notify_install_retry(install_session_id: int, attempt: int, attempts: int, reason: str) -> None:
+    """The installer stopped before its install and the server runs it again (auto mode only): say why, in a few words."""
+    session = db_install_session_handler.get_session(install_session_id)
+    if session is None:
+        return
+    try:
+        notify(
+            session.user_id,
+            KIND_INSTALL_RETRY,
+            f"Install trying again ({attempt} of {attempts}): {_game_name(session.game_id)}",
+            f"Why: {reason}.",
+            game_id=session.game_id,
+            session_id=session.id,
+        )
+    except Exception as e:  # noqa: BLE001 - a failed notification must not stop the install
+        log.warning(f"Could not create the install retry notification: {e}")
 
 
 NAMES_LISTED = 10  # games named in the body of a "games added" notification; the rest are counted

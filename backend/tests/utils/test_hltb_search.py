@@ -25,9 +25,9 @@ class TestSearchRequest:
         assert "x-hp-key" not in search_headers(HLTBSession("t"))
 
     def test_the_honeypot_goes_on_a_copy_of_the_body(self):
-        payload = build_search_payload("doom")
+        payload = build_search_payload("ember")
         body = search_body(payload, HLTBSession("t", "k", "v"))
         assert body["k"] == "v" and "k" not in payload
 
     def test_the_search_terms_are_the_words_of_the_name(self):
-        assert build_search_payload("half life 2")["searchTerms"] == ["half", "life", "2"]
+        assert build_search_payload("star harbor 2")["searchTerms"] == ["star", "harbor", "2"]

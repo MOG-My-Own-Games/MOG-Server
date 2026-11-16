@@ -4,7 +4,7 @@ from handler.install.windows_output import _is_blacklisted, collect_windows_inst
 
 
 def test_installer_shortcuts_are_not_install_content():
-    assert _is_blacklisted(("users", "Public", "Desktop", "Jazz Jackrabbit 2.lnk"))
+    assert _is_blacklisted(("users", "Public", "Desktop", "Zippy Rabbit 2.lnk"))
     assert _is_blacklisted(("Users", "steamuser", "Start Menu", "Programs", "x.lnk"))
     assert not _is_blacklisted(("users", "steamuser", "Documents", "My Games", "save.dat"))
     assert not _is_blacklisted(("GOG Games", "Game", "desktop.ini"))

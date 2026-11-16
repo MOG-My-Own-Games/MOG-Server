@@ -45,7 +45,7 @@ def test_requests_to_one_site_are_spaced_by_its_interval(net):
 def test_every_subdomain_of_itch_shares_one_pace_and_a_site_that_is_not_listed_is_not_paced(net):
     net.answers += [Reply(), Reply(), Reply(), Reply()]
     web.request("GET", "https://itch.io/search")
-    web.request("GET", "https://ill.itch.io/portal-panic")
+    web.request("GET", "https://someauthor.itch.io/cave-panic")
     assert net.clock["slept"] == [pytest.approx(1.0)]
     web.request("GET", "https://romm.example/api/roms")
     web.request("GET", "https://romm.example/api/roms")

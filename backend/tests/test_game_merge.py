@@ -62,16 +62,16 @@ def world(db, monkeypatch, tmp_path):
     app.dependency_overrides[require_admin] = lambda: who["user"]
     lib = db_library_handler.add_library(Library(name="L", root_path=str(tmp_path / "lib")))
     client = TestClient(app)
-    device = client.post("/api/devices/register", json={"client_uid": "uid-aaaaaaaa", "hostname": "karasu"}).json()
+    device = client.post("/api/devices/register", json={"client_uid": "uid-aaaaaaaa", "hostname": "desktop"}).json()
     return SimpleNamespace(client=client, lib=lib, who=who, admin=admin, kid=kid, device=device, tmp=tmp_path)
 
 
-def _placeholder(world, name="Pocket Campfire"):
+def _placeholder(world, name="Pocket Meadow"):
     """A game a client imported: no folder, with the saves and time of the machine that told the server."""
     return db_game_handler.add_game(Game(library_id=None, fs_name=name, name=name, imported=True, missing_from_fs=True))
 
 
-def _scanned(world, name="PocketCampfire_v2_WindowsInstaller.exe", **extra):
+def _scanned(world, name="PocketMeadow_v2_WindowsInstaller.exe", **extra):
     return db_game_handler.add_game(Game(library_id=world.lib.id, fs_name=name, name=name, size_bytes=450, **extra))
 
 
@@ -109,7 +109,7 @@ def test_a_game_cannot_be_merged_with_itself_nor_by_a_plain_user(world):
     assert world.client.get(f"/api/games/{game.id}/merge/9999").status_code == 404
 
 
-def test_merging_pocket_campfire_brings_the_saves_the_time_and_the_settings_to_the_game_with_the_installer(world):
+def test_merging_pocket_meadow_brings_the_saves_the_time_and_the_settings_to_the_game_with_the_installer(world):
     """The client's entry (saves, time, settings) and the scan's (installer) were two games the server never put together."""
     placeholder, scanned = _placeholder(world), _scanned(world)
     version = _save(world, placeholder)
@@ -118,11 +118,11 @@ def test_merging_pocket_campfire_brings_the_saves_the_time_and_the_settings_to_t
     old_file = Path(saves.resolve_path(db_saves_handler.get_version(version["id"]).file_path))
     assert old_file.is_file()
 
-    response = _merge(world, scanned, placeholder, name="Pocket Campfire")
+    response = _merge(world, scanned, placeholder, name="Pocket Meadow")
 
     assert response.status_code == 200
     body = response.json()
-    assert (body["id"], body["name"], body["imported"]) == (scanned.id, "Pocket Campfire", False)
+    assert (body["id"], body["name"], body["imported"]) == (scanned.id, "Pocket Meadow", False)
     assert db_game_handler.get_game(placeholder.id) is None
     assert merge_handler.merged_into[placeholder.id] == scanned.id
     moved = db_saves_handler.get_version(version["id"])
@@ -141,7 +141,7 @@ def test_the_game_the_merge_started_from_keeps_its_folder_and_takes_the_others_w
 
     assert merged["id"] == placeholder.id and merged["library_id"] == world.lib.id
     assert (merged["fs_name"], merged["size_bytes"], merged["missing_from_fs"]) == (
-        "PocketCampfire_v2_WindowsInstaller.exe", 450, False,
+        "PocketMeadow_v2_WindowsInstaller.exe", 450, False,
     )
 
 

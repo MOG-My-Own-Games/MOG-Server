@@ -82,9 +82,9 @@ def world(db, monkeypatch, tmp_path):
     admin = db_user_handler.add_user(User(username="admin", hashed_password="x", role=Role.ADMIN))
     app.dependency_overrides[get_current_user] = lambda: admin
     lib = db_library_handler.add_library(Library(name="L", root_path=str(tmp_path / "lib")))
-    folder = tmp_path / "lib" / "Zero Zone"
+    folder = tmp_path / "lib" / "Null Garden"
     folder.mkdir(parents=True)
-    game = db_game_handler.add_game(Game(library_id=lib.id, fs_name="Zero Zone", name="Zero Zone", sgdb_id=5))
+    game = db_game_handler.add_game(Game(library_id=lib.id, fs_name="Null Garden", name="Null Garden", sgdb_id=5))
     return SimpleNamespace(client=TestClient(app), game=game, folder=folder, root=tmp_path / "resources" / "media")
 
 
@@ -127,7 +127,7 @@ def test_uninstallers_crash_reporters_and_prerequisites_are_not_looked_at(tmp_pa
 
 
 def test_the_scrape_offers_the_icons_of_the_games_files_after_the_providers_and_never_picks_one_itself(world):
-    (world.folder / "Zero Zone.exe").write_bytes(make_exe(_png((64, 64)), width=64))
+    (world.folder / "Null Garden.exe").write_bytes(make_exe(_png((64, 64)), width=64))
     (world.folder / "app.ico").write_bytes(_ico((32, 32), (64, 64), color=(10, 10, 200)))
     (world.folder / "again.ico").write_bytes((world.folder / "app.ico").read_bytes())  # the same picture counts once
 
@@ -135,7 +135,7 @@ def test_the_scrape_offers_the_icons_of_the_games_files_after_the_providers_and_
 
     icons = data["candidates"]["icon"]
     assert [i["source"] for i in icons] == ["steamgriddb", "local", "local"]
-    assert [i["label"] for i in icons[1:]] == ["again.ico", "Zero Zone.exe"]  # by name, the same picture once
+    assert [i["label"] for i in icons[1:]] == ["again.ico", "Null Garden.exe"]  # by name, the same picture once
     assert all(i["url"].startswith(f"/resources/media/{world.game.id}/found/") for i in icons[1:])
     assert data["defaults"]["icon"]["source"] == "steamgriddb"  # the providers' own pick, not a file's
 

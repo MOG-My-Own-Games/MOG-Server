@@ -195,4 +195,5 @@ class InstallDefaultsSchema(BaseModel):
 
     auto_mode: bool
     manual_mode: bool
+    enable_network: bool
     download_workers: int

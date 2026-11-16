@@ -32,6 +32,7 @@ class SettingsSchema(BaseModel):
     install_default_proton_build: str | None
     install_default_auto_mode: bool | None
     install_default_manual_mode: bool | None
+    install_enable_network: bool
     download_workers: int | None
 
 
@@ -68,4 +69,5 @@ class SettingsUpdateForm(BaseModel):
     install_default_proton_build: str | None = None
     install_default_auto_mode: bool | None = None
     install_default_manual_mode: bool | None = None
+    install_enable_network: bool | None = None
     download_workers: int | None = Field(default=None, ge=DOWNLOAD_WORKERS_MIN, le=DOWNLOAD_WORKERS_MAX)

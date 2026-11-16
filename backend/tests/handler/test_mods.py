@@ -145,10 +145,10 @@ def test_a_folder_is_zipped_on_request_then_downloaded_and_the_user_is_told(api)
 
 
 def test_a_finished_download_is_told_in_the_notifications_with_the_machine(api):
-    assert api.post("/api/games/5/mods/mod2.zip/downloaded", params={"machine": "karasu"}).status_code == 200
+    assert api.post("/api/games/5/mods/mod2.zip/downloaded", params={"machine": "desktop"}).status_code == 200
     assert api.post("/api/games/5/mods/mod2.zip/downloaded").status_code == 200
     assert api.post("/api/games/5/mods/nope/downloaded").status_code == 404
-    assert api.notices == [("downloaded", 1, 5, "mod2.zip", "karasu"), ("downloaded", 1, 5, "mod2.zip", None)]
+    assert api.notices == [("downloaded", 1, 5, "mod2.zip", "desktop"), ("downloaded", 1, 5, "mod2.zip", None)]
 
 
 def test_an_unknown_mod_or_game_is_a_404(api):

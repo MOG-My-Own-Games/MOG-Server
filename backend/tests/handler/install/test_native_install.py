@@ -13,7 +13,7 @@ class FakeDb:
             id=1,
             game_id=3,
             state=InstallSessionState.INSTALLING,
-            installer_path="lost_ruins.sh",
+            installer_path="zelmoor_ruins.sh",
             source_path=None,
             extract_only=False,
             steps=None,
@@ -38,7 +38,7 @@ def native(monkeypatch, tmp_path):
     db = FakeDb()
     library = tmp_path / "library"
     library.mkdir()
-    installer = library / "lost_ruins.sh"
+    installer = library / "zelmoor_ruins.sh"
     installer.write_text("#!/bin/sh\n")
     work = tmp_path / "cache" / "1"
     work.mkdir(parents=True)
@@ -57,25 +57,25 @@ def native(monkeypatch, tmp_path):
         ran["argv"] = argv
         flat = argv
         home = Path(next(flat[i + 2] for i in range(len(flat)) if flat[i : i + 2] == ["--setenv", "HOME"]))
-        game = home / "GOG Games" / "Lost Ruins"
+        game = home / "GOG Games" / "Zelmoor Ruins"
         (game / "bin").mkdir(parents=True)
-        (game / "Lost Ruins").write_bytes(b"x" * 100)
+        (game / "Zelmoor Ruins").write_bytes(b"x" * 100)
         (game / "bin" / "data.pak").write_bytes(b"y" * 50)
         (game / "start.sh").write_text("source support/gog_com.shlib\n")
-        (game / "gameinfo").write_text("Lost Ruins\n")
+        (game / "gameinfo").write_text("Zelmoor Ruins\n")
         (game / "support").mkdir()
         (game / "support" / "gog_com.shlib").write_text("lib")
         (game / "support" / "yad").mkdir()
         (game / ".mojosetup" / "meta").mkdir(parents=True)
         (game / ".mojosetup" / "mojosetup").write_bytes(b"m" * 7)
         (game / ".mojosetup" / "meta" / "x").write_text("m")
-        (game / "uninstall-Lost Ruins.sh").write_text("exec .mojosetup/mojosetup uninstall")
+        (game / "uninstall-Zelmoor Ruins.sh").write_text("exec .mojosetup/mojosetup uninstall")
         (home / ".config").mkdir()
         (home / ".config" / "mojosetup.cfg").write_text("noise")
         (home / ".local" / "share" / "applications").mkdir(parents=True)
-        (home / ".local" / "share" / "applications" / "lost-ruins.desktop").write_text("noise")
+        (home / ".local" / "share" / "applications" / "zelmoor-ruins.desktop").write_text("noise")
         (home / "Desktop").mkdir()
-        (home / "Desktop" / "Lost Ruins.desktop").write_text("noise")
+        (home / "Desktop" / "Zelmoor Ruins.desktop").write_text("noise")
         tmp = Path(next(flat[i + 2] for i in range(len(flat)) if flat[i : i + 2] == ["--setenv", "TMPDIR"]))
         (tmp / "selfgz1234").mkdir()
         (tmp / "selfgz1234" / "mojosetup").write_bytes(b"z" * 10)
@@ -124,15 +124,15 @@ def test_the_game_folder_becomes_the_install_and_the_noise_is_left_out(native):
     assert native.db.session.state == InstallSessionState.DONE
     manifest = {e.path: e.size_bytes for e in read_manifest(native.work)}
     assert manifest == {  # from "GOG Games" up
-        "Lost Ruins/Lost Ruins": 100,
-        "Lost Ruins/bin/data.pak": 50,
-        "Lost Ruins/start.sh": 29,
-        "Lost Ruins/gameinfo": 11,
-        "Lost Ruins/support/gog_com.shlib": 3,  # start.sh sources it: the support folder stays
+        "Zelmoor Ruins/Zelmoor Ruins": 100,
+        "Zelmoor Ruins/bin/data.pak": 50,
+        "Zelmoor Ruins/start.sh": 29,
+        "Zelmoor Ruins/gameinfo": 14,
+        "Zelmoor Ruins/support/gog_com.shlib": 3,  # start.sh sources it: the support folder stays
     }
-    assert (native.work / "Lost Ruins" / "bin" / "data.pak").is_file()
+    assert (native.work / "Zelmoor Ruins" / "bin" / "data.pak").is_file()
     assert not (native.work / "home").exists() and not (native.work / "tmp").exists()
-    assert native.db.session.bytes_total == 193 and native.ran["vnc_stopped"] is True
+    assert native.db.session.bytes_total == 196 and native.ran["vnc_stopped"] is True
 
 
 def test_an_installer_that_wrote_nothing_fails_the_session(native, monkeypatch):
@@ -145,14 +145,14 @@ def test_an_installer_that_wrote_nothing_fails_the_session(native, monkeypatch):
 def test_only_hidden_folders_and_shortcuts_are_noise(tmp_path):
     for noisy in (".config/x", ".local/share/y", ".cache/z", "Desktop/a.desktop"):
         assert runner._is_user_noise(Path(noisy))
-    for game in ("GOG Games/Lost Ruins/bin", "Games/x", "Lost Ruins/x"):
+    for game in ("GOG Games/Zelmoor Ruins/bin", "Games/x", "Zelmoor Ruins/x"):
         assert not runner._is_user_noise(Path(game))
 
 
 def test_files_that_are_not_under_gog_games_keep_their_own_top_level(tmp_path, monkeypatch):
     work = tmp_path / "w"
     (work / "home" / "Games" / "Cool").mkdir(parents=True)
-    (work / "home" / "Games" / "Cool" / "run").write_bytes(b"x")
+    (work / "home" / "Games" / "Cool" / "run").write_bytes(b"#!/bin/sh\n")
     (work / "home" / "Other").mkdir()
     (work / "home" / "Other" / "f").write_bytes(b"y")
     monkeypatch.setattr(runner, "db_install_session_handler", FakeDb())
@@ -196,11 +196,11 @@ def test_the_screen_sizes_come_from_the_environment_when_they_are_sound(monkeypa
 
 
 def test_mojosetups_own_folder_and_its_uninstaller_are_not_part_of_the_game(tmp_path):
-    game = tmp_path / "Lost Ruins"
+    game = tmp_path / "Zelmoor Ruins"
     (game / ".mojosetup" / "meta").mkdir(parents=True)
     (game / "support").mkdir()
     for name in (
-        "uninstall-Lost Ruins.sh",
+        "uninstall-Zelmoor Ruins.sh",
         "start.sh",
         "support/gog_com.shlib",
         ".mojosetup/mojosetup",

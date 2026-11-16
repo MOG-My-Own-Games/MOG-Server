@@ -30,7 +30,7 @@ from utils import image_cache
 from models.library import Library
 
 _BRACKETED = re.compile(r"[\[(\{][^\])}]*[\])}]")
-# A year in parentheses, "(1997)": kept as written, since it tells apart games that share a name (two Dooms).
+# A year in parentheses, "(1997)": kept as written, since it tells apart games that share a name (two Embers).
 _YEAR_TAG = re.compile(r"\(\s*(19\d{2}|20[0-2]\d)\s*\)")
 _VERSION = re.compile(r"[\s_.-]+v?\d+(\.\d+)+\b.*$", re.IGNORECASE)
 # Release/packaging words that start the noise after the title; everything after one is dropped.
@@ -43,13 +43,13 @@ _TAGS = re.compile(
 _LEADING_SETUP = re.compile(r"^(setup|install(er)?)[\s_.-]+(?=\S)", re.IGNORECASE)
 # A piece of a version or build number left behind: "1", "0", "9a", "v2", "48364".
 _VERSION_PART = re.compile(r"^v?\d+[a-z]?$", re.IGNORECASE)
-# What marks such a trailing run as a version and not part of the title ("Cyberpunk 2077", "Jazz Jackrabbit 2"
+# What marks such a trailing run as a version and not part of the title ("Neon Skyline 2077", "Zippy Rabbit 2"
 # keep their number): three parts or more ("1 0 9a"), or one that is a build id (five digits or more).
 _VERSION_RUN_LENGTH = 3
 _BUILD_ID_DIGITS = 5
-# A scene release group: the last hyphen-joined token, shaped like a tag rather than a word
-# (all caps, several capitals as in "TiNYiSO", or letters mixed with digits as in "razor1911").
-_SCENE_GROUP = re.compile(r"(?<=\S)-((?=[A-Za-z0-9]*([A-Z].*[A-Z]|\d))[A-Za-z0-9]{2,})$")
+# A trailing release tag: the last hyphen-joined token, shaped like a tag rather than a word
+# (all caps, several capitals as in "TaGSeT", or letters mixed with digits as in "tag1911").
+_TRAILING_TAG = re.compile(r"(?<=\S)-((?=[A-Za-z0-9]*([A-Z].*[A-Z]|\d))[A-Za-z0-9]{2,})$")
 _SPACED_GROUP = re.compile(r"\s+-\s+[A-Z0-9]{3,}$")
 # A provider that found nothing for a game is left alone by the automatic passes for this long: an adult title or a
 # new release is still missing next week, but a search that failed (provider down) must not stick.
@@ -57,8 +57,8 @@ MISS_RETRY = timedelta(days=7)
 
 
 def _drop_version_tail(name: str) -> str:
-    """The title without the version and build numbers a release name ends with ("lost ruins 1 0 9a 48364" is
-    "lost ruins"). A single trailing number stays: it is usually a sequel or a year in the title."""
+    """The title without the version and build numbers a release name ends with ("zelmoor ruins 1 0 9a 48364" is
+    "zelmoor ruins"). A single trailing number stays: it is usually a sequel or a year in the title."""
     words = name.split()
     start = len(words)
     while start > 1 and _VERSION_PART.match(words[start - 1]):
@@ -79,20 +79,20 @@ def search_names(raw: str) -> list[str]:
     name = ARCHIVE_EXT.sub("", raw)
     # Underscores read as spaces from the start: to the patterns below an underscore is part of a word, so
     # "_goty_" or "_setup_" would not be seen as a tag.
-    scene = " " not in name.strip() and len(re.findall(r"[._]", name)) >= 1
+    dotted = " " not in name.strip() and len(re.findall(r"[._]", name)) >= 1
     name = _LEADING_SETUP.sub("", re.sub(r"_+", " ", name))
     year = (_YEAR_TAG.findall(name) or [""])[0]
     name = _BRACKETED.sub(" ", _YEAR_TAG.sub(" ", name))
     name = _VERSION.sub("", name)
     name = _TAGS.sub("", name)
-    if " " not in name.strip() or scene:
+    if " " not in name.strip() or dotted:
         name = re.sub(r"[.]+", " ", name)
     name = re.sub(r"\s+", " ", name).strip()
-    stripped = _SPACED_GROUP.sub("", _SCENE_GROUP.sub("", name)) if scene else _SPACED_GROUP.sub("", name)
+    stripped = _SPACED_GROUP.sub("", _TRAILING_TAG.sub("", name)) if dotted else _SPACED_GROUP.sub("", name)
     titles = [_drop_version_tail(stripped) if stripped else raw]
     if name != stripped and name:
         titles.append(_drop_version_tail(re.sub(r"\s+", " ", name.replace("-", " ")).strip()))
-    # A folder named "SamuraiSacrament" is "Samurai Sacrament" to a provider: tried after the name as it is.
+    # A folder named "WillowGarden" is "Willow Garden" to a provider: tried after the name as it is.
     for title in list(titles):
         spaced = _CAMEL_JOIN.sub(" ", title)
         if " " not in title and spaced != title and spaced not in titles and all(len(word) >= _CAMEL_WORD_MIN for word in spaced.split()):
@@ -108,7 +108,7 @@ def _has_default_name(game: Game) -> bool:
 
 
 _CAMEL_JOIN = re.compile(r"(?<=[a-z])(?=[A-Z])")
-_CAMEL_WORD_MIN = 3  # "TiNYiSO" is a tag-like word, not "Ti NYi SO"
+_CAMEL_WORD_MIN = 3  # "TaGSeT" is a tag-like word, not "Ta GSe T"
 
 
 def search_name(raw: str) -> str:

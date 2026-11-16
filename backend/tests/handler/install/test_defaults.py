@@ -30,6 +30,12 @@ def test_default_manual_mode(monkeypatch, configured, expected):
     assert defaults.default_manual_mode() is expected
 
 
+@pytest.mark.parametrize("configured,expected", [(None, True), (True, True), (False, False)])
+def test_enable_network_is_on_unless_switched_off(monkeypatch, configured, expected):
+    _settings(monkeypatch, install_enable_network=configured)
+    assert defaults.default_enable_network() is expected
+
+
 @pytest.mark.parametrize("configured,env,expected", [(8, 4, 8), (None, 6, 6), (0, 4, 1), (99, 4, 16)])
 def test_download_workers_prefers_db_setting_and_stays_in_range(monkeypatch, configured, env, expected):
     row = _settings(monkeypatch, download_workers=configured)

@@ -69,8 +69,6 @@ context_keywords:
     [
       "elapsed time",
       "remaining time",
-      # The older GOG installer has no clock, only this caption over its bar; OCR reads the start of it as "instal".
-      "installation progress",
       "tempo trascorso",
       "tempo rimanente",
       "verstrichene zeit",
@@ -84,6 +82,11 @@ context_keywords:
       "已用时间",
       "剩余时间",
     ]
+
+  # Captions over a progress bar with no clock (the older GOG installer's, which OCR reads the start of as "instal"). Only
+  # a line that starts with one counts: the same words sit mid-sentence on a welcome page ("... interfere with the
+  # installation progress."), which is not a screen to leave alone.
+  progress_caption: ["installation progress"]
 
   # The wizard's last page. Files are written by then, so the "late" Finish may be pressed even when the install wrote
   # outside the folder the driver watches.

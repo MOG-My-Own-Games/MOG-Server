@@ -48,6 +48,7 @@ def _schema(row: Settings) -> SettingsSchema:
     fields["backup_daily"] = backups.daily_enabled(row)
     fields["backup_saves"] = backups.saves_in_daily(row)
     fields["saves_keep_versions"] = saves.keep_versions(row)
+    fields["install_enable_network"] = row.install_enable_network is not False
     return SettingsSchema(**fields)
 
 

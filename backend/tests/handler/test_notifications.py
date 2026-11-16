@@ -7,6 +7,7 @@ from models.notification import (
     KIND_AUTO_MODE_FAILED,
     KIND_AUTO_MODE_STUCK,
     KIND_GAMES_ADDED,
+    KIND_INSTALL_RETRY,
     KIND_MOD_FAILED,
     KIND_MOD_READY,
     KIND_SAVE_SYNCED,
@@ -42,6 +43,34 @@ class TestAutoModeNotifications:
         notifications.notify_auto_mode_failed(7, "boom")
         note = store.add_notification.call_args.args[0]
         assert (note.kind, note.body) == (KIND_AUTO_MODE_FAILED, "boom")
+
+    def test_the_failure_says_why_in_its_title_and_keeps_the_whole_error_in_the_body(self, sessions, games, store):
+        sessions.get_session.return_value = _session()
+        games.get_game.return_value = SimpleNamespace(name="Some Game")
+
+        notifications.notify_auto_mode_failed(7, "The installer exited with code 253 ... long text", "no program to launch")
+
+        note = store.add_notification.call_args.args[0]
+        assert note.title == "Auto mode install failed: Some Game (no program to launch)"
+        assert note.body == "The installer exited with code 253 ... long text"
+
+    def test_a_retry_says_which_run_it_is_and_why(self, sessions, games, store):
+        sessions.get_session.return_value = _session()
+        games.get_game.return_value = SimpleNamespace(name="Some Game")
+
+        notifications.notify_install_retry(7, 2, 3, "the installer closed itself before installing anything (exit 253)")
+
+        note = store.add_notification.call_args.args[0]
+        assert (note.user_id, note.kind, note.game_id, note.session_id) == (3, KIND_INSTALL_RETRY, 5, 7)
+        assert note.title == "Install trying again (2 of 3): Some Game"
+        assert note.body == "Why: the installer closed itself before installing anything (exit 253)."
+
+    def test_a_storage_error_does_not_escape_the_retry_path(self, sessions, games, store):
+        sessions.get_session.return_value = _session()
+        games.get_game.return_value = None
+        store.add_notification.side_effect = RuntimeError("db down")
+
+        notifications.notify_install_retry(7, 2, 3, "boom")
 
     def test_a_storage_error_does_not_escape_the_failure_path(self, sessions, games, store):
         sessions.get_session.return_value = _session()
@@ -106,11 +135,11 @@ class TestGamesAdded:
 def test_a_backed_up_save_notifies_its_user(games, store):
     games.get_game.return_value = SimpleNamespace(name="Some Game")
 
-    notifications.notify_save_synced(3, 5, "karasu", "quit", 2)
+    notifications.notify_save_synced(3, 5, "desktop", "quit", 2)
 
     note = store.add_notification.call_args.args[0]
     assert (note.user_id, note.kind, note.game_id) == (3, KIND_SAVE_SYNCED, 5)
-    assert note.title == "Saves backed up: Some Game" and note.body == "From karasu (quit), 2 files."
+    assert note.title == "Saves backed up: Some Game" and note.body == "From desktop (quit), 2 files."
 
 
 @patch("handler.notifications.db_notification_handler")
@@ -118,7 +147,7 @@ def test_a_backed_up_save_notifies_its_user(games, store):
 def test_a_failing_notification_does_not_fail_the_upload(games, store):
     games.get_game.return_value = None
     store.add_notification.side_effect = RuntimeError("db down")
-    notifications.notify_save_synced(3, 5, "karasu", "quit", 1)
+    notifications.notify_save_synced(3, 5, "desktop", "quit", 1)
 
 
 @patch("handler.notifications.db_notification_handler")
@@ -142,10 +171,10 @@ def test_a_restored_save_notifies_its_user_and_says_where_it_came_from(games, st
 
     games.get_game.return_value = SimpleNamespace(name="Some Game")
 
-    notifications.notify_save_restored(3, 5, "deck", "karasu", 2)
+    notifications.notify_save_restored(3, 5, "deck", "desktop", 2)
     note = store.add_notification.call_args.args[0]
     assert (note.user_id, note.kind, note.game_id) == (3, KIND_SAVE_RESTORED, 5)
-    assert note.title == "Saves restored: Some Game" and note.body == "On deck from karasu, 2 files."
+    assert note.title == "Saves restored: Some Game" and note.body == "On deck from desktop, 2 files."
 
     notifications.notify_save_restored(3, 5, "deck", None, 1)
     assert store.add_notification.call_args.args[0].body == "On deck, 1 file."

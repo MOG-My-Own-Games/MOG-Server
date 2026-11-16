@@ -14,7 +14,7 @@ from handler.metadata import record, web
 KEY = "itch"
 _SEARCH = "https://itch.io/search"
 _RESULT = re.compile(r'class="game_title"><a[^>]*href="(https://[^"]+)"[^>]*>(.*?)</a>', re.DOTALL)
-_GAME = re.compile(r"^([a-z0-9-]+)\.([a-z0-9_-]+)$")  # a game's id: its developer's subdomain and its slug, as "ill.portal-panic"
+_GAME = re.compile(r"^([a-z0-9-]+)\.([a-z0-9_-]+)$")  # a game's id: its developer's subdomain and its slug, as "someauthor.cave-panic"
 _SEARCH_RESULTS = 10
 
 
@@ -27,7 +27,7 @@ def is_configured() -> bool:
 
 
 def _name_and_developer(title: str) -> tuple[str, list[str]]:
-    """itch titles read "Portal Panic by ill omens": the name, and the developer after "by"."""
+    """itch titles read "Cave Panic by Some Author": the name, and the developer after "by"."""
     name, sep, developer = title.rpartition(" by ")
     return (name, [developer]) if sep else (title, [])
 

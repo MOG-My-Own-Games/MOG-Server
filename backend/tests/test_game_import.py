@@ -29,16 +29,16 @@ def api(db, monkeypatch):
 
 
 def test_importing_a_game_makes_an_entry_with_no_library_a_second_machine_shares(api):
-    first = api.post("/api/games/import", json={"name": "Hollow  Knight"})
+    first = api.post("/api/games/import", json={"name": "Silent  Beetle"})
 
     assert first.status_code == 200
     body = first.json()
     assert (body["imported"], body["library_id"], body["missing_from_fs"]) == (True, None, True)
-    assert body["name"] == "Hollow Knight"
+    assert body["name"] == "Silent Beetle"
     assert api.scraped == [body["id"]]
 
     # the other machine, typed a bit differently
-    again = api.post("/api/games/import", json={"name": "hollow knight!"})
+    again = api.post("/api/games/import", json={"name": "silent beetle!"})
 
     assert again.json()["id"] == body["id"]
     assert len(api.get("/api/games").json()) == 1
@@ -51,7 +51,7 @@ def test_a_name_without_letters_or_digits_is_refused(api):
 
 def test_an_imported_game_is_found_again_by_the_name_it_was_given_after_a_rename(api):
     game = api.post("/api/games/import", json={"name": "hk"}).json()
-    db_game_handler.update_game(game["id"], {"name": "Hollow Knight"})
+    db_game_handler.update_game(game["id"], {"name": "Silent Beetle"})
 
     assert api.post("/api/games/import", json={"name": "HK"}).json()["id"] == game["id"]
 
@@ -103,12 +103,12 @@ def test_a_scan_that_finds_a_folder_named_like_an_imported_game_takes_it_over(db
     library = db_library_handler.add_library(Library(name="games", root_path=str(root)))
     imported = db_game_handler.add_game(
         Game(
-            library_id=None, fs_name="Hollow Knight", name="Hollow Knight",
+            library_id=None, fs_name="Silent Beetle", name="Silent Beetle",
             imported=True, missing_from_fs=True,
         )
     )
-    (root / "Hollow_Knight").mkdir()
-    (root / "Hollow_Knight" / "setup.exe").write_bytes(b"x")
+    (root / "Silent_Beetle").mkdir()
+    (root / "Silent_Beetle" / "setup.exe").write_bytes(b"x")
     (root / "Other").mkdir()
     (root / "Other" / "setup.exe").write_bytes(b"x")
 
@@ -116,10 +116,10 @@ def test_a_scan_that_finds_a_folder_named_like_an_imported_game_takes_it_over(db
 
     taken = db_game_handler.get_game(imported.id)
     assert (taken.library_id, taken.fs_name, taken.imported, taken.missing_from_fs) == (
-        library.id, "Hollow_Knight", False, False,
+        library.id, "Silent_Beetle", False, False,
     )  # fmt: skip
-    assert result.added == 2 and (imported.id, "Hollow_Knight") in result.new_games
-    assert sorted(g.fs_name for g in db_game_handler.get_all_games()) == ["Hollow_Knight", "Other"]
+    assert result.added == 2 and (imported.id, "Silent_Beetle") in result.new_games
+    assert sorted(g.fs_name for g in db_game_handler.get_all_games()) == ["Other", "Silent_Beetle"]
 
 
 def test_one_imported_game_is_taken_by_one_folder_only(db, tmp_path, monkeypatch):
@@ -128,9 +128,9 @@ def test_one_imported_game_is_taken_by_one_folder_only(db, tmp_path, monkeypatch
     root.mkdir()
     library = db_library_handler.add_library(Library(name="games", root_path=str(root)))
     db_game_handler.add_game(
-        Game(library_id=None, fs_name="Doom", name="Doom", imported=True, missing_from_fs=True)
+        Game(library_id=None, fs_name="Ember", name="Ember", imported=True, missing_from_fs=True)
     )
-    for folder in ("Doom", "DOOM!"):
+    for folder in ("Ember", "EMBER!"):
         (root / folder).mkdir()
         (root / folder / "setup.exe").write_bytes(b"x")
 
@@ -208,17 +208,17 @@ def test_a_folder_of_the_same_name_makes_a_filed_imported_game_a_normal_one(db, 
 def test_a_folder_named_a_little_differently_takes_a_filed_imported_game_over(db, tmp_path, monkeypatch):
     monkeypatch.setattr("handler.scan_handler.has_mods", lambda path: False)
     root = tmp_path / "games"
-    (root / "Hollow_Knight").mkdir(parents=True)
-    (root / "Hollow_Knight" / "setup.exe").write_bytes(b"x")
+    (root / "Silent_Beetle").mkdir(parents=True)
+    (root / "Silent_Beetle" / "setup.exe").write_bytes(b"x")
     library = db_library_handler.add_library(Library(name="games", root_path=str(root)))
     filed = db_game_handler.add_game(
-        Game(library_id=library.id, fs_name="Hollow Knight", name="Hollow Knight", imported=True, missing_from_fs=True)
+        Game(library_id=library.id, fs_name="Silent Beetle", name="Silent Beetle", imported=True, missing_from_fs=True)
     )
 
     result = scan_library(library)
 
     game = db_game_handler.get_game(filed.id)
-    assert (game.fs_name, game.imported, game.missing_from_fs) == ("Hollow_Knight", False, False)
+    assert (game.fs_name, game.imported, game.missing_from_fs) == ("Silent_Beetle", False, False)
     assert len(db_game_handler.get_all_games()) == 1 and result.missing == 0
 
 
@@ -259,19 +259,19 @@ def _library_with(db, tmp_path, *names):
 
 
 def test_a_game_the_scrape_names_like_an_imported_one_becomes_that_game(db, tmp_path, monkeypatch):
-    """Pocket Campfire: a client imported it, then the scan found `PocketCampfire_v2_WindowsInstaller.exe`, which is named like it only
+    """Pocket Meadow: a client imported it, then the scan found `PocketMeadow_v2_WindowsInstaller.exe`, which is named like it only
     after the match. They stayed two entries (one with the saves, one with the installer) until the scrape merged them."""
     monkeypatch.setattr("handler.scan_handler.has_mods", lambda path: False)
     monkeypatch.setattr(scrape_handler, "warm_videos", lambda games: None)
-    library = _library_with(db, tmp_path, "PocketCampfire_v2_WindowsInstaller.exe")
+    library = _library_with(db, tmp_path, "PocketMeadow_v2_WindowsInstaller.exe")
     imported = db_game_handler.add_game(
-        Game(library_id=library.id, fs_name="Pocket Campfire", name="Pocket Campfire", imported=True, missing_from_fs=True, sgdb_id=5)
+        Game(library_id=library.id, fs_name="Pocket Meadow", name="Pocket Meadow", imported=True, missing_from_fs=True, sgdb_id=5)
     )
     scan_library(library)
     assert len(db_game_handler.get_all_games()) == 2  # the scan alone cannot tell
 
     def match(game):
-        db_game_handler.update_game(game.id, {"name": "Pocket Campfire", "igdb_id": 77, "summary": "camp"})
+        db_game_handler.update_game(game.id, {"name": "Pocket Meadow", "igdb_id": 77, "summary": "camp"})
         return True
 
     monkeypatch.setattr(scrape_handler, "scrape_game", match)
@@ -279,7 +279,7 @@ def test_a_game_the_scrape_names_like_an_imported_one_becomes_that_game(db, tmp_
 
     (game,) = db_game_handler.get_all_games()
     assert game.id == imported.id  # the saves and the clients' records are on this id
-    assert (game.fs_name, game.library_id, game.imported, game.missing_from_fs) == ("PocketCampfire_v2_WindowsInstaller.exe", library.id, False, False)
+    assert (game.fs_name, game.library_id, game.imported, game.missing_from_fs) == ("PocketMeadow_v2_WindowsInstaller.exe", library.id, False, False)
     assert (game.igdb_id, game.summary, game.sgdb_id, game.size_bytes) == (77, "camp", 5, 1)  # what it lacked, from the other
 
 

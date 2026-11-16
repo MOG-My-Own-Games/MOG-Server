@@ -17,6 +17,24 @@ class TestIsProgressPage:
         lines = ["elapsedtime4sec", "remainingtime1min"]
         assert is_progress_page(lines, CATALOG) is True
 
+    def test_the_caption_over_a_bar_without_a_clock_is_progress(self):
+        assert is_progress_page(["installationprogress", "45"], CATALOG) is True
+        assert is_progress_page(["installationprogress:"], CATALOG) is True
+
+    def test_a_welcome_page_that_says_installation_progress_mid_sentence_is_not_progress(self):
+        """Caught live (a skinned installer): "... that may interfere with the installation progress." made the welcome page a
+        progress screen, so Proceed, read on it, was never pressed and auto mode gave up asking for help."""
+        lines = [
+            "youareinstallingexamplegameonyourcomputerit",
+            "recommendedthatyoucloseallprogramsthatmayinterferewi",
+            "theinstallationprogress.",
+            "whenreadyclickproceedtocontinuewithinstallationorclosetoexitinstallation.",
+            "close",
+            "about",
+            "proceed",
+        ]
+        assert is_progress_page(lines, CATALOG) is False
+
     def test_plain_installer_page_is_not_progress(self):
         lines = ["welcome to the setup wizard", "next", "cancel"]
         assert is_progress_page(lines, CATALOG) is False
@@ -30,7 +48,7 @@ class TestPlanAction:
         assert action.match.entry.category == "next"
 
     def test_progress_screen_is_never_touched(self):
-        """Regression test for the Olden Era bug: a stray OCR match for
+        """Regression test for a bug: a stray OCR match for
         "Install" (already clicked once, now on its second-attempt/mnemonic
         retry) landing on the just-appeared extraction/progress screen used
         to fire an Alt+I keypress against it and abort a real install within
@@ -207,7 +225,7 @@ class TestReadmeQuestion:
 
 
 def test_a_sliver_of_artwork_read_as_a_short_word_is_not_pressed_instead_of_the_real_button():
-    """Caught live (Sacrifice's license page): a 15x5 px blob on the window's edge was read as "ja" (yes) and clicked at its
+    """Caught live (Example's license page): a 15x5 px blob on the window's edge was read as "ja" (yes) and clicked at its
     own spot, which does nothing, while the real Yes button is 18x11. Every attempt on the blob was one less for the button."""
     from handler.install.auto_mode.matcher import find_matches
 
@@ -224,7 +242,7 @@ def test_a_sliver_of_artwork_read_as_a_short_word_is_not_pressed_instead_of_the_
 
 
 def test_yes_on_a_license_page_is_answered_with_return_the_default_button_not_a_click():
-    """Caught live (Sacrifice): clicks on the license page's Yes did nothing, but Return accepted it."""
+    """Caught live (Example): clicks on the license page's Yes did nothing, but Return accepted it."""
     page = [
         Word(text="Do you accept all the terms of the preceding License Agreement?", left=178, top=368, width=400, height=10, conf=95.0, line_id=(3, 0, 0)),
         Word(text="Yes", left=501, top=437, width=18, height=11, conf=95.0, line_id=(2, 0, 0)),
@@ -237,7 +255,7 @@ def test_yes_on_a_license_page_is_answered_with_return_the_default_button_not_a_
 
 
 def test_yes_on_a_license_page_comes_before_an_ok_read_off_its_text():
-    """Caught live (Sacrifice): the license page's text had an "Ok" that auto mode pressed (and Alt+n'd) again and again before
+    """Caught live (Example): the license page's text had an "Ok" that auto mode pressed (and Alt+n'd) again and again before
     it tried the real Yes, and an installer that is answered No on a license closes."""
     page = [
         Word(text="Do you accept all the terms of the preceding License Agreement?", left=178, top=368, width=400, height=10, conf=95.0, line_id=(3, 0, 0)),
@@ -261,7 +279,7 @@ def _read(left, top, width, height, conf, line, *texts):
 
 
 class TestOlderGogInstaller:
-    """The GOG.com installer of the older games (Sacrifice-GoG): a welcome page with the EULA checkbox and a green "Start
+    """The GOG.com installer of the older games (Example-GoG): a welcome page with the EULA checkbox and a green "Start
     installation", a bar captioned "Installation progress:" and a last page with Exit Installer and Launch. The words are what
     OCR read on the real screens, 800x600, typos included."""
 
@@ -305,7 +323,7 @@ class TestOlderGogInstaller:
             *_read(374, 310, 0, 16, 94, 1, ("Your", 29), ("installation", 67), ("is", 10), ("complete!", 59)),
             *_read(307, 317, 0, 10, 60, 2, ("Install", 32)),
             *_read(177, 538, 0, 9, 52, 3, ("Exitlnstallet,", 65)),
-            *_read(668, 538, 0, 10, 95, 4, ("Sacrifice", 48), ("(eit", 49)),
+            *_read(668, 538, 0, 10, 95, 4, ("Example", 48), ("(eit", 49)),
             *_read(730, 528, 0, 22, 36, 5, ("‘launch,", 46)),
         ]
 
@@ -316,7 +334,7 @@ class TestOlderGogInstaller:
         assert action.x < 260  # the grey button on the left, never the green Launch on the right
 
     def test_launch_is_not_a_button_the_catalog_knows(self):
-        page = [*_read(668, 538, 0, 10, 95, 1, ("Sacrifice", 48)), *_read(733, 529, 0, 12, 86, 2, ("Launch", 41))]
+        page = [*_read(668, 538, 0, 10, 95, 1, ("Example", 48)), *_read(733, 529, 0, 12, 86, 2, ("Launch", 41))]
 
         assert plan_action(page, CATALOG, ScreenMemory(), installing=True) == (None, [])
 
@@ -333,3 +351,29 @@ class TestOlderGogInstaller:
         page = _read(300, 300, 0, 14, 90, 1, ("Finis", 40))
 
         assert plan_action(page, CATALOG, ScreenMemory(), installing=True) == (None, [])
+
+
+class TestButtonInFocus:
+    """The GOG.com installer's welcome page after the EULA is ticked: the Install button has the focus, and its dotted border
+    is read as an "i" on each side of the word, so "Install" was no longer alone on its line and auto mode sat there asking for help."""
+
+    def test_a_button_framed_by_stray_letters_is_still_a_button(self):
+        page = [
+            *_read(80, 470, 50, 14, 90, 1, ("Options", 50)),
+            *_read(665, 464, 60, 15, 80, 2, ("i", 5), ("Install", 36), ("i", 5)),
+        ]
+
+        action, matches = plan_action(page, CATALOG, ScreenMemory(), installing=False)
+
+        assert any(m.entry.category == "install" for m in matches)
+        install = next(w for w in page if w.text == "Install")
+        assert action is not None and action.kind == "click" and action.match.entry.category == "install"
+        assert install.left <= action.x <= install.right and install.top <= action.y <= install.bottom  # on the button
+
+    def test_stray_letters_are_not_a_reason_to_take_a_word_of_a_sentence_for_a_button(self):
+        sentence = _read(100, 300, 400, 15, 90, 1, ("Click", 40), ("Install", 40), ("to", 20), ("continue", 60))
+        framed_sentence = _read(100, 300, 400, 15, 90, 2, ("Click", 40), ("Install", 40), ("i", 5))
+
+        for words in (sentence, framed_sentence):
+            _action, matches = plan_action(words, CATALOG, ScreenMemory(), installing=False)
+            assert not any(m.entry.category == "install" for m in matches)

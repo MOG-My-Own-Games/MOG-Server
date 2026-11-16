@@ -37,12 +37,12 @@ class TestDetectInstallerCandidates:
     def test_bundled_redistributable_is_excluded(self):
         """A VC++/DirectX/.NET redistributable bundled alongside the real
         installer must never be picked as *the* installer - running it does
-        nothing for the game itself (caught live: Hearthlands' own
+        nothing for the game itself (caught live: Mossglen' own
         .../Steamworks Shared/_CommonRedist/vcredist/2010/vcredist_x64.exe,
-        at 14MB, outranked the real 1MB Hearthlands.exe purely because
+        at 14MB, outranked the real 1MB Mossglen.exe purely because
         same-rank ties break by descending file size)."""
         files = [
-            DetectedFile(path="Hearthlands.exe", size_bytes=1_000_000),
+            DetectedFile(path="Mossglen.exe", size_bytes=1_000_000),
             DetectedFile(
                 path="Steamworks Shared/_CommonRedist/vcredist/2010/vcredist_x64.exe",
                 size_bytes=14_000_000,
@@ -50,7 +50,7 @@ class TestDetectInstallerCandidates:
         ]
         candidates = detect_installer_candidates(files)
         assert len(candidates) == 1
-        assert candidates[0].path == "Hearthlands.exe"
+        assert candidates[0].path == "Mossglen.exe"
 
     def test_redistributable_dir_match_is_case_insensitive(self):
         files = [DetectedFile(path="Game/REDIST/dxsetup.exe", size_bytes=5000)]
@@ -135,7 +135,7 @@ class TestLooksPortable:
         assert looks_portable(_found("uninstall.exe", "game.exe"))
 
     def test_an_updater_script_in_a_ready_game_is_not_an_installer(self):
-        """Pokemon Infinite Fusion ships ready to play with `INSTALL_OR_UPDATE.bat` for its updater: the "install" in
+        """Critter Infinite Fusion ships ready to play with `INSTALL_OR_UPDATE.bat` for its updater: the "install" in
         its name made the zip look like it held an installer, so it was never offered for extraction."""
         from handler.filesystem.installer_detection import looks_portable
 

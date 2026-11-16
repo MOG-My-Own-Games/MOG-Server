@@ -54,12 +54,12 @@ def R(video_id, title, seconds=None):
 
 
 def test_results_are_read_out_of_the_page_with_titles_and_lengths():
-    page = renderer(A, "Little Big Adventure 2 \\u2013 Intro", "3:05") + renderer(
+    page = renderer(A, "Small Grand Quest 2 \\u2013 Intro", "3:05") + renderer(
         B, 'Quote \\"x\\" here', "1:02:03"
     )
     page += renderer(C, "Live one")
     assert vh.results_in(page) == [
-        R(A, "Little Big Adventure 2 \u2013 Intro", 185),
+        R(A, "Small Grand Quest 2 \u2013 Intro", 185),
         R(B, 'Quote "x" here', 3723),
         R(C, "Live one", None),
     ]
@@ -67,78 +67,78 @@ def test_results_are_read_out_of_the_page_with_titles_and_lengths():
 
 
 def test_a_result_has_to_be_about_the_game():
-    results = [R(A, "Unrelated Game intro"), R(B, "Little Big Adventure 2 - Intro (1997)")]
-    classic = "Twinsen's Little Big Adventure 2 Classic"
+    results = [R(A, "Unrelated Game intro"), R(B, "Small Grand Quest 2 - Intro (1997)")]
+    classic = "Bram's Small Grand Quest 2 Classic"
     assert vh._pick(classic, "intro", results) == results[1]
-    odyssey = "Little Big Adventure 2: Twinsen's Odyssey"
+    odyssey = "Small Grand Quest 2: Bram's Odyssey"
     assert vh._pick(odyssey, "intro", results) == results[1]  # a subtitle is not needed
     assert vh._pick("Something Else Entirely", "intro", results) is None
 
 
 def test_a_title_that_shares_only_part_of_the_name_is_not_taken():
-    assert vh._pick("Jazz Jackrabbit 2", "intro", [R(A, "Jazz Jackrabbit trailer")]) is None  # no 2
+    assert vh._pick("Zippy Rabbit 2", "intro", [R(A, "Zippy Rabbit trailer")]) is None  # no 2
     # The known limit of a short name: a sequel with the same words passes.
-    assert vh._pick("Doom", "intro", [R(A, "Doom Eternal trailer")]) == R(A, "Doom Eternal trailer")
+    assert vh._pick("Ember", "intro", [R(A, "Ember Eternal trailer")]) == R(A, "Ember Eternal trailer")
 
 
 def test_an_intro_has_to_say_so_and_music_is_not_one():
     results = [
-        R(A, "Jazz Jackrabbit Collection Soundtrack - Medley", 600),
-        R(B, "Jazz Jackrabbit 2 OST", 240),
-        R(C, "Jazz Jackrabbit main theme", 120),
-        R(D, "Jazz Jackrabbit review", 300),
-        R("eeeeeeeeeee", "Jazz Jackrabbit Intro", 95),
+        R(A, "Zippy Rabbit Collection Soundtrack - Medley", 600),
+        R(B, "Zippy Rabbit 2 OST", 240),
+        R(C, "Zippy Rabbit main theme", 120),
+        R(D, "Zippy Rabbit review", 300),
+        R("eeeeeeeeeee", "Zippy Rabbit Intro", 95),
     ]
-    assert vh._pick("Jazz Jackrabbit Collection", "intro", results) == results[-1]
-    assert vh._pick("Jazz Jackrabbit Collection", "intro", results[:4]) is None
+    assert vh._pick("Zippy Rabbit Collection", "intro", results) == results[-1]
+    assert vh._pick("Zippy Rabbit Collection", "intro", results[:4]) is None
 
 
 def test_music_and_compilations_are_not_intros_by_length_either():
-    assert vh._pick("Doom", "intro", [R(A, "Doom intro 10 hours", 36000)]) is None
-    assert vh._pick("Doom", "intro", [R(A, "Doom intro", 90)]) == R(A, "Doom intro", 90)
+    assert vh._pick("Ember", "intro", [R(A, "Ember intro 10 hours", 36000)]) is None
+    assert vh._pick("Ember", "intro", [R(A, "Ember intro", 90)]) == R(A, "Ember intro", 90)
 
 
 def test_gameplay_is_not_a_commented_or_foreign_or_lets_play_video():
     results = [
-        R(A, "Jazz Jackrabbit 2 Gameplay ITA", 1500),
-        R(B, "Jazz Jackrabbit 2 - Let's Play #1 gameplay", 1500),
-        R(C, "Jazz Jackrabbit 2 gameplay con commento", 1500),
+        R(A, "Zippy Rabbit 2 Gameplay ITA", 1500),
+        R(B, "Zippy Rabbit 2 - Let's Play #1 gameplay", 1500),
+        R(C, "Zippy Rabbit 2 gameplay con commento", 1500),
         R(
             D,
-            "Jazz Jackrabbit 2 \u043f\u0440\u043e\u0445\u043e\u0436\u0434\u0435\u043d\u0438\u0435 gameplay",
+            "Zippy Rabbit 2 \u043f\u0440\u043e\u0445\u043e\u0436\u0434\u0435\u043d\u0438\u0435 gameplay",
             1500,
         ),
-        R("eeeeeeeeeee", "Jazz Jackrabbit 2 gameplay with commentary", 1500),
-        R("fffffffffff", "Jazz Jackrabbit 2 gameplay clip", 20),
-        R("ggggggggggg", "Jazz Jackrabbit 2 gameplay", 1500),
+        R("eeeeeeeeeee", "Zippy Rabbit 2 gameplay with commentary", 1500),
+        R("fffffffffff", "Zippy Rabbit 2 gameplay clip", 20),
+        R("ggggggggggg", "Zippy Rabbit 2 gameplay", 1500),
     ]
-    assert vh._pick("Jazz Jackrabbit 2", "gameplay", results) == results[-1]
+    assert vh._pick("Zippy Rabbit 2", "gameplay", results) == results[-1]
 
 
 def test_first_impressions_and_previews_are_commentary_too():
     results = [
-        R(A, "Hearthlands | First Impressions Gameplay!", 900),
-        R(B, "Hearthlands hands-on preview gameplay", 900),
+        R(A, "Mossglen | First Impressions Gameplay!", 900),
+        R(B, "Mossglen hands-on preview gameplay", 900),
     ]
-    assert vh._pick("Hearthlands", "gameplay", results) is None
+    assert vh._pick("Mossglen", "gameplay", results) is None
 
 
 def test_a_video_that_says_it_has_no_commentary_is_welcome_and_comes_first():
     results = [
-        R(A, "Jazz Jackrabbit 2 gameplay", 900),
-        R(B, "Jazz Jackrabbit 2 gameplay (no commentary)", 900),
+        R(A, "Zippy Rabbit 2 gameplay", 900),
+        R(B, "Zippy Rabbit 2 gameplay (no commentary)", 900),
     ]
-    assert vh._pick("Jazz Jackrabbit 2", "gameplay", results) == results[1]
-    assert vh._pick("Jazz Jackrabbit 2", "gameplay", [R(A, "Jazz Jackrabbit 2 gameplay", 900)]) == R(
-        A, "Jazz Jackrabbit 2 gameplay", 900
+    assert vh._pick("Zippy Rabbit 2", "gameplay", results) == results[1]
+    assert vh._pick("Zippy Rabbit 2", "gameplay", [R(A, "Zippy Rabbit 2 gameplay", 900)]) == R(
+        A, "Zippy Rabbit 2 gameplay", 900
     )
 
 
 def test_a_banned_word_in_the_games_own_name_does_not_ban_its_videos():
-    assert vh._pick("Theme Hospital", "intro", [R(A, "Theme Hospital Intro", 120)]) == R(
-        A, "Theme Hospital Intro", 120
+    assert vh._pick("Quiet Clinic", "intro", [R(A, "Quiet Clinic Intro", 120)]) == R(
+        A, "Quiet Clinic Intro", 120
     )
-    assert vh._pick("Theme Hospital", "intro", [R(A, "Theme Hospital Intro Soundtrack", 120)]) is None
+    assert vh._pick("Quiet Clinic", "intro", [R(A, "Quiet Clinic Intro Soundtrack", 120)]) is None
 
 
 def test_igdb_videos_are_filtered_too():

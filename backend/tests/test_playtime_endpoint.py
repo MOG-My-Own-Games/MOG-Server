@@ -71,7 +71,7 @@ def test_an_unknown_game_is_a_404(api):
 
 def test_the_device_has_to_be_the_users_own(api):
     assert _post(api, device_id=999).status_code == 404
-    device = api.post("/api/devices/register", json={"client_uid": "uid-aaaaaaaa", "hostname": "karasu"}).json()["id"]
+    device = api.post("/api/devices/register", json={"client_uid": "uid-aaaaaaaa", "hostname": "desktop"}).json()["id"]
 
     assert _post(api, device_id=device).status_code == 200
 

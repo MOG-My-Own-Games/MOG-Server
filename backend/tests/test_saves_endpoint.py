@@ -41,7 +41,7 @@ def api(db, monkeypatch, tmp_path):
     return client
 
 
-def _register(api, uid=UID_A, hostname="karasu", **extra):
+def _register(api, uid=UID_A, hostname="desktop", **extra):
     return api.post("/api/devices/register", json={"client_uid": uid, "hostname": hostname, **extra})
 
 
@@ -62,20 +62,20 @@ def test_registering_a_second_machine_with_the_same_hostname_is_a_conflict_that_
     assert clash.status_code == 409
     detail = clash.json()["detail"]
     assert detail["code"] == "hostname_taken" and [d["id"] for d in detail["devices"]] == [first["id"]]
-    assert detail["suggested_names"] == ["karasu-fedora", "karasu-2"]
+    assert detail["suggested_names"] == ["desktop-fedora", "desktop-2"]
 
     adopted = _register(api, UID_B, adopt_device_id=first["id"])
     assert adopted.status_code == 200 and adopted.json()["id"] == first["id"]
-    assert _register(api, UID_B, "karasu", name="karasu-2").json()["id"] == first["id"]  # known uid wins
+    assert _register(api, UID_B, "desktop", name="desktop-2").json()["id"] == first["id"]  # known uid wins
 
 
 def test_devices_can_be_listed_and_renamed(api):
     a = _register(api).json()
-    b = _register(api, UID_B, name="karasu-2").json()
-    assert [d["name"] for d in api.get("/api/devices").json()] == ["karasu", "karasu-2"]
+    b = _register(api, UID_B, name="desktop-2").json()
+    assert [d["name"] for d in api.get("/api/devices").json()] == ["desktop", "desktop-2"]
 
     assert api.patch(f"/api/devices/{a['id']}", json={"name": "salotto"}).json()["name"] == "salotto"
-    assert api.patch(f"/api/devices/{a['id']}", json={"name": "karasu-2"}).status_code == 409
+    assert api.patch(f"/api/devices/{a['id']}", json={"name": "desktop-2"}).status_code == 409
     assert api.patch(f"/api/devices/{b['id'] + 99}", json={"name": "x"}).status_code == 404
 
 
@@ -91,7 +91,7 @@ def test_an_uploaded_save_is_listed_downloadable_and_deletable(api):
     listing = api.get("/api/games/5/saves").json()
     assert listing["keep_versions"] == 3
     assert [(d["device"]["name"], [v["id"] for v in d["versions"]]) for d in listing["devices"]] == [
-        ("karasu", [version["id"]])
+        ("desktop", [version["id"]])
     ]
 
     detail = api.get(f"/api/saves/{version['id']}").json()
@@ -99,7 +99,7 @@ def test_an_uploaded_save_is_listed_downloadable_and_deletable(api):
 
     download = api.get(f"/api/saves/{version['id']}/download")
     assert download.status_code == 200 and download.headers["content-type"] == "application/zip"
-    assert "Some Game - karasu" in unquote(download.headers["content-disposition"])
+    assert "Some Game - desktop" in unquote(download.headers["content-disposition"])
     assert zipfile.ZipFile(io.BytesIO(download.content)).read("users/USER/Saved Games/a.sav") == b"one"
 
     assert api.delete(f"/api/saves/{version['id']}").status_code == 200
@@ -116,7 +116,7 @@ def test_the_same_content_twice_reports_nothing_new(api):
 
 def test_each_machine_keeps_its_own_newest_versions(api):
     a = _register(api).json()
-    b = _register(api, UID_B, name="karasu-2").json()
+    b = _register(api, UID_B, name="desktop-2").json()
     for n in range(5):
         _upload(api, a["id"], {"s.sav": str(n).encode()})
     _upload(api, b["id"], {"s.sav": b"b"})
@@ -124,7 +124,7 @@ def test_each_machine_keeps_its_own_newest_versions(api):
     by_device = {
         d["device"]["name"]: len(d["versions"]) for d in api.get("/api/games/5/saves").json()["devices"]
     }
-    assert by_device == {"karasu": 3, "karasu-2": 1}
+    assert by_device == {"desktop": 3, "desktop-2": 1}
 
 
 def test_bad_uploads_are_refused(api, monkeypatch):
@@ -188,7 +188,7 @@ def test_a_game_was_last_played_on_the_machine_that_made_the_newest_version(api)
     assert db_saves_handler.last_saved_on_by_game(1) == {}
 
     _upload(api, a["id"])
-    assert db_saves_handler.last_saved_on_by_game(1) == {5: "karasu"}
+    assert db_saves_handler.last_saved_on_by_game(1) == {5: "desktop"}
     _upload(api, b["id"], {"s.sav": b"later, on the other machine"})
     assert db_saves_handler.last_saved_on_by_game(1) == {5: "deck"}
     assert db_saves_handler.last_saved_on_by_game(2) == {}
@@ -202,7 +202,7 @@ def test_a_new_version_notifies_but_the_same_content_again_does_not(api, monkeyp
     _upload(api, device["id"], trigger="quit")
     _upload(api, device["id"], trigger="quit")  # nothing new: no second notification
 
-    assert sent == [(1, 5, "karasu", "quit", 1)]
+    assert sent == [(1, 5, "desktop", "quit", 1)]
 
 
 def test_a_client_that_put_a_version_back_notifies_the_user(api, monkeypatch):
@@ -214,6 +214,6 @@ def test_a_client_that_put_a_version_back_notifies_the_user(api, monkeypatch):
 
     done = api.post(f"/api/saves/{version['id']}/restored", params={"device_id": b["id"], "files": 3})
 
-    assert done.status_code == 200 and sent == [(1, 5, "deck", "karasu", 3)]
+    assert done.status_code == 200 and sent == [(1, 5, "deck", "desktop", 3)]
     assert api.post("/api/saves/999/restored", params={"device_id": b["id"]}).status_code == 404
     assert api.post(f"/api/saves/{version['id']}/restored", params={"device_id": 999}).status_code == 404

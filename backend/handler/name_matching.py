@@ -23,7 +23,7 @@ def tokens(text: str) -> list[str]:
 def title_score(query: str, title: str) -> float:
     """0..1 similarity: the better of token-set F1 (extra words on either side
     cost a little, a missing title word costs a lot) and character similarity.
-    A year the query ends with ("Doom 1993") counts for a result that has it and costs nothing
+    A year the query ends with ("Ember 1993") counts for a result that has it and costs nothing
     to one that does not: a provider's title rarely carries the year."""
     q = tokens(query)
     score = _title_score(q, tokens(title))
@@ -45,10 +45,10 @@ _FILLER = {"the", "a", "an", "of", "and", "edition", "version"}
 
 
 def is_other_title(query: str, title: str) -> bool:
-    """Whether each of the two has a word the other lacks ("Streets of Ryona" and "Streets of Fortuna"): a different game
+    """Whether each of the two has a word the other lacks ("Streets of Aurora" and "Streets of Quillon"): a different game
     that only reads alike. A name with extra words on one side only (a subtitle, a leftover tag) is not."""
     q, t = [w for w in tokens(query) if w not in _FILLER], [w for w in tokens(title) if w not in _FILLER]
-    if "".join(q) == "".join(t):  # the same letters, spaced differently ("SamuraiSacrament", "Samurai Sacrament")
+    if "".join(q) == "".join(t):  # the same letters, spaced differently ("WillowGarden", "Willow Garden")
         return False
     return bool(set(q) - set(t)) and bool(set(t) - set(q))
 

@@ -211,10 +211,10 @@ class TestDLsite:
         assert [(item["id"], item["name"]) for item in found] == [("RJ01660384", "Sweet & Game"), ("RJ01673544", "Other")]
 
     def test_a_space_in_the_search_is_a_plus_and_the_search_is_for_games_in_english(self, monkeypatch):
-        """The site answers 403 to "%20" in a keyword, which left "Samurai Sacrament" (RJ155385) unfound."""
+        """The site answers 403 to "%20" in a keyword, which left "Willow Garden" (RJ000123) unfound."""
         calls = _answers(monkeypatch, Answer(text=""))
-        dlsite_handler.search("Samurai Sacrament")
-        assert calls[0][1] == "https://www.dlsite.com/maniax/fsr/=/keyword/Samurai+Sacrament/work_type_category%5B0%5D/game"
+        dlsite_handler.search("Willow Garden")
+        assert calls[0][1] == "https://www.dlsite.com/maniax/fsr/=/keyword/Willow+Garden/work_type_category%5B0%5D/game"
         assert calls[0][2]["params"] == {"locale": "en_US"}
 
 
@@ -246,26 +246,26 @@ class TestSteam:
 class TestItch:
     def test_search_reads_the_game_links_of_the_page(self, monkeypatch):
         page = (
-            '<div class="game_title"><a data-action="game_grid" href="https://ill.itch.io/portal-panic" '
-            'class="title game_link">Portal Panic</a></div>'
+            '<div class="game_title"><a data-action="game_grid" href="https://someauthor.itch.io/cave-panic" '
+            'class="title game_link">Cave Panic</a></div>'
             '<div class="game_title"><a href="https://evil.example/x" class="title game_link">Not itch</a></div>'
         )
         _answers(monkeypatch, Answer(text=page))
-        assert [item["id"] for item in itch_handler.search("portal")] == ["ill.portal-panic"]
+        assert [item["id"] for item in itch_handler.search("cave")] == ["someauthor.cave-panic"]
 
     def test_get_splits_the_developer_off_the_title(self, monkeypatch):
-        page = '<title>Portal Panic by ill omens</title><meta content="Toad" property="og:description">'
+        page = '<title>Cave Panic by Some Author</title><meta content="Frog" property="og:description">'
         _answers(monkeypatch, Answer(text=page))
-        found = itch_handler.get("ill.portal-panic")
-        assert found["url"] == "https://ill.itch.io/portal-panic"
-        assert found["name"] == "Portal Panic"
-        assert found["developers"] == [{"name": "ill omens"}]
-        assert found["summary"] == "Toad"
+        found = itch_handler.get("someauthor.cave-panic")
+        assert found["url"] == "https://someauthor.itch.io/cave-panic"
+        assert found["name"] == "Cave Panic"
+        assert found["developers"] == [{"name": "Some Author"}]
+        assert found["summary"] == "Frog"
 
     def test_only_an_itch_game_id_is_read(self, monkeypatch):
         calls = _answers(monkeypatch)
         assert itch_handler.get("https://evil.example/portal") is None
-        assert itch_handler.get("ill.portal/../admin") is None
+        assert itch_handler.get("someauthor.cave/../admin") is None
         assert calls == []
 
 
@@ -293,56 +293,56 @@ class TestFind:
 
     def test_a_name_matches_a_result_under_any_of_its_aliases(self, monkeypatch):
         """VNDB lists a novel by its romanised title; the English name a folder carries is one of its aliases."""
-        item = {"id": "v32016", "name": "Inkai Jinchuu Araka", "aliases": ["Lewd Realm Sacrifice Araka"], "summary": "whole"}
+        item = {"id": "v32016", "name": "Moon Garden Arcana", "aliases": ["Velvet Realm Offering Arcana"], "summary": "whole"}
         monkeypatch.setattr(vndb_handler, "search", lambda name: [item])
-        assert providers.find(vndb_handler, ["Lewd Realm Sacrifice Araka"]) == item
+        assert providers.find(vndb_handler, ["Velvet Realm Offering Arcana"]) == item
 
     def test_a_result_that_is_not_the_game_is_no_match(self, monkeypatch):
         monkeypatch.setattr(vndb_handler, "search", lambda name: [{"id": "v9", "name": "Completely Different"}])
         assert providers.find(vndb_handler, ["Clannad"]) is None
 
     def test_a_title_that_only_reads_alike_is_no_match(self, monkeypatch):
-        """Steam's "Streets of Fortuna" was taken for the folder "Streets of Ryona": 2 of 3 words are the same."""
-        monkeypatch.setattr(steam_handler, "search", lambda name: [{"id": 2946850, "name": "Streets of Fortuna"}])
+        """Steam's "Streets of Quillon" was taken for the folder "Streets of Aurora": 2 of 3 words are the same."""
+        monkeypatch.setattr(steam_handler, "search", lambda name: [{"id": 1999999, "name": "Streets of Quillon"}])
         monkeypatch.setattr(steam_handler, "get", lambda ref: pytest.fail("not the game"))
-        assert providers.find(steam_handler, ["Streets of Ryona", "Streets of"]) is None
+        assert providers.find(steam_handler, ["Streets of Aurora", "Streets of"]) is None
 
 
 class TestTypedAddressOrId:
     """The match box of Edit metadata takes a name, a page address or an id. itch.io leaves its adult games out of its search,
-    so the address is how Ryona Fighter 2 is matched."""
+    so the address is how Arena Fighter 2 is matched."""
 
     def test_each_provider_reads_its_own_addresses_and_ids_and_leaves_names_alone(self):
-        assert itch_handler.ref_from_input(" https://lilcoffee.itch.io/ryona-fighter-2/ ") == "lilcoffee.ryona-fighter-2"
-        assert itch_handler.ref_from_input("lilcoffee.ryona-fighter-2") == "lilcoffee.ryona-fighter-2"
-        assert itch_handler.ref_from_input("https://evil.example/x") is None and itch_handler.ref_from_input("Ryona Fighter 2") is None
-        assert dlsite_handler.ref_from_input("https://www.dlsite.com/maniax/work/=/product_id/RJ155385.html/?locale=en_US") == "RJ155385"
-        assert dlsite_handler.ref_from_input("rj155385") == "RJ155385" and dlsite_handler.ref_from_input("Samurai") is None
-        assert steam_handler.ref_from_input("https://store.steampowered.com/app/220/HalfLife_2/") == "220"
-        assert steam_handler.ref_from_input("220") == "220" and steam_handler.ref_from_input("Half Life") is None
+        assert itch_handler.ref_from_input(" https://someauthor.itch.io/arena-fighter-2/ ") == "someauthor.arena-fighter-2"
+        assert itch_handler.ref_from_input("someauthor.arena-fighter-2") == "someauthor.arena-fighter-2"
+        assert itch_handler.ref_from_input("https://evil.example/x") is None and itch_handler.ref_from_input("Arena Fighter 2") is None
+        assert dlsite_handler.ref_from_input("https://www.dlsite.com/maniax/work/=/product_id/RJ000123.html/?locale=en_US") == "RJ000123"
+        assert dlsite_handler.ref_from_input("rj000123") == "RJ000123" and dlsite_handler.ref_from_input("Willow") is None
+        assert steam_handler.ref_from_input("https://store.steampowered.com/app/1234/StarHarbor_2/") == "1234"
+        assert steam_handler.ref_from_input("1234") == "1234" and steam_handler.ref_from_input("Star Harbor") is None
         assert vndb_handler.ref_from_input("https://vndb.org/v17") == "v17" and vndb_handler.ref_from_input("V17") == "v17"
         assert vndb_handler.ref_from_input("Clannad") is None
         assert romm_handler.ref_from_input("https://romm.example/rom/12") == "12" and romm_handler.ref_from_input("12") == "12"
-        assert romm_handler.ref_from_input("Zelda") is None
+        assert romm_handler.ref_from_input("Quest") is None
 
     def test_an_address_finds_that_game_alone_and_a_name_is_left_to_the_search(self, monkeypatch):
-        game = {"id": "lilcoffee.ryona-fighter-2", "name": "Ryona Fighter 2"}
-        monkeypatch.setattr(itch_handler, "get", lambda ref: game if ref == "lilcoffee.ryona-fighter-2" else None)
-        assert providers.lookup(itch_handler, "https://lilcoffee.itch.io/ryona-fighter-2") == [game]
-        assert providers.lookup(itch_handler, "https://lilcoffee.itch.io/nothing-here") == []  # an address with no game behind it
-        assert providers.lookup(itch_handler, "ryona fighter 2") is None
+        game = {"id": "someauthor.arena-fighter-2", "name": "Arena Fighter 2"}
+        monkeypatch.setattr(itch_handler, "get", lambda ref: game if ref == "someauthor.arena-fighter-2" else None)
+        assert providers.lookup(itch_handler, "https://someauthor.itch.io/arena-fighter-2") == [game]
+        assert providers.lookup(itch_handler, "https://someauthor.itch.io/nothing-here") == []  # an address with no game behind it
+        assert providers.lookup(itch_handler, "arena fighter 2") is None
         assert providers.lookup(itch_handler, "some.name") is None  # looks like an id, is not one: searched as a name
 
     def test_igdb_takes_an_id_or_an_address_too(self, monkeypatch):
         from handler.metadata import igdb_handler
 
-        monkeypatch.setattr(igdb_handler, "get_game_by_id", lambda i: {"id": i, "name": "Portal 2"})
-        monkeypatch.setattr(igdb_handler, "_query", lambda body: [{"id": 72, "name": "Portal 2", "slug": "portal-2"}] if 'slug = "portal-2"' in body else [])
+        monkeypatch.setattr(igdb_handler, "get_game_by_id", lambda i: {"id": i, "name": "Orbit 2"})
+        monkeypatch.setattr(igdb_handler, "_query", lambda body: [{"id": 72, "name": "Orbit 2", "slug": "orbit-2"}] if 'slug = "orbit-2"' in body else [])
         monkeypatch.setattr(igdb_handler, "_resolve_media", lambda g: g)
         monkeypatch.setattr(igdb_handler, "search_games", lambda name: [{"id": 1, "name": name}])
-        assert igdb_handler.search_typed("72") == [{"id": 72, "name": "Portal 2"}]
-        assert igdb_handler.search_typed("https://www.igdb.com/games/portal-2")[0]["id"] == 72
-        assert igdb_handler.search_typed("Portal 2") == [{"id": 1, "name": "Portal 2"}]
+        assert igdb_handler.search_typed("72") == [{"id": 72, "name": "Orbit 2"}]
+        assert igdb_handler.search_typed("https://www.igdb.com/games/orbit-2")[0]["id"] == 72
+        assert igdb_handler.search_typed("Orbit 2") == [{"id": 1, "name": "Orbit 2"}]
 
 
 class TestMediaOfOtherProviders:

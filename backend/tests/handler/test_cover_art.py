@@ -36,10 +36,10 @@ def test_transparency_is_set_on_the_dark_of_the_cards_and_a_broken_file_gives_no
 
 
 def test_a_poster_is_the_size_of_a_cover_and_the_same_for_the_same_name():
-    first = cover_art.poster("Ryona no Mori")
+    first = cover_art.poster("Tsuki no Mori")
     assert cover_art.size_of(first) == (cover_art.WIDTH, cover_art.HEIGHT)
-    assert first == cover_art.poster("Ryona no Mori")
-    assert first != cover_art.poster("Samurai Sacrament")
+    assert first == cover_art.poster("Tsuki no Mori")
+    assert first != cover_art.poster("Willow Garden")
 
 
 def test_a_very_long_name_still_fits_its_poster():

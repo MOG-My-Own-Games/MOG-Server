@@ -172,13 +172,13 @@ def _name_words(game_name: str) -> set[str]:
 
 def _about(game_name: str, title: str) -> bool:
     """Whether a result is about this game: most of the words of its name, a subtitle after a colon aside,
-    are in the title (a video of "Little Big Adventure 2" is one of its "Twinsen's ... 2 Classic")."""
+    are in the title (a video of "Small Grand Quest 2" is one of its "Bram's ... 2 Classic")."""
     wanted = _name_words(game_name)
     return bool(wanted) and len(wanted & _words(title)) / len(wanted) >= _ENOUGH_OF_THE_NAME
 
 
 def _without_the_name(game_name: str, title: str) -> str:
-    """The title minus the game's own name, so that "Theme Hospital" is not banned for its word "theme"."""
+    """The title minus the game's own name, so that a game called "Theme Quest" is not banned for its word "theme"."""
     rest = title
     for word in sorted(_name_words(game_name), key=len, reverse=True):
         rest = re.sub(rf"\b{re.escape(word)}\b", " ", rest, flags=re.I)

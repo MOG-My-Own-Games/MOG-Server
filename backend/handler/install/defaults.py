@@ -23,6 +23,14 @@ def default_manual_mode() -> bool:
     return bool(db_settings_handler.get_settings().install_default_manual_mode)
 
 
+def default_enable_network() -> bool:
+    """Whether an installer can reach the network (some download extra files while installing). On unless switched off."""
+    from handler.database import db_settings_handler
+
+    configured = db_settings_handler.get_settings().install_enable_network
+    return configured is not False
+
+
 def default_download_workers() -> int:
     """How many files a client should download at once, kept within the allowed range."""
     from handler.database import db_settings_handler

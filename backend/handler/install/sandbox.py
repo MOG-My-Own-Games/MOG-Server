@@ -63,6 +63,13 @@ class SandboxSpec:
     # Where the installer starts, when that is not the work dir: a CD installer looks for its own files in the current
     # directory (as it is when the disc's setup is started from its drive), and the work dir has none of them.
     chdir: str | None = None
+    # Whether the installer shares the container's network (for the ones that download extra files while installing).
+    # Off unless asked: the sandbox is deny-by-default.
+    network: bool = False
+
+
+# What name resolution and TLS need from /etc once the sandbox has a network (the certificates themselves live under /usr).
+NETWORK_ETC_FILES = ("/etc/resolv.conf", "/etc/hosts", "/etc/nsswitch.conf", "/etc/host.conf", "/etc/ssl", "/etc/ca-certificates")
 
 
 def build_bwrap_command(
@@ -91,9 +98,9 @@ def build_bwrap_command(
         "--unshare-pid",
         "--unshare-uts",
         "--unshare-cgroup",
-        # No network needed: the X11 connection below goes over a unix socket,
-        # not loopback TCP (Xvfb runs with -nolisten tcp).
-        "--unshare-net",
+        # The X11 connection below goes over a unix socket, not loopback TCP (Xvfb runs with -nolisten tcp), so the
+        # network is only for installers that fetch something themselves: --unshare-net is left out when spec.network is on.
+        *([] if spec.network else ["--unshare-net"]),
         "--die-with-parent",
         "--new-session",
         # Nothing of the server's environment reaches the installer: the few variables it needs are set again below.
@@ -144,6 +151,10 @@ def build_bwrap_command(
         "/tmp/.X11-unix",
         "/tmp/.X11-unix",
     ]
+
+    if spec.network:
+        for etc in NETWORK_ETC_FILES:
+            args += ["--ro-bind-try", etc, etc]
 
     for ro in spec.ro_binds:
         args += ["--ro-bind", ro, ro]

@@ -35,7 +35,7 @@ def api(db, monkeypatch, tmp_path):
     user = SimpleNamespace(id=1, is_admin=False, hidden_library_ids=[])
     app.dependency_overrides[get_current_user] = lambda: user
     client = TestClient(app)
-    device = client.post("/api/devices/register", json={"client_uid": "uid-aaaaaaaa", "hostname": "karasu"}).json()
+    device = client.post("/api/devices/register", json={"client_uid": "uid-aaaaaaaa", "hostname": "desktop"}).json()
     client.device_id = device["id"]
     return client
 

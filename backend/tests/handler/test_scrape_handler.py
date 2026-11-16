@@ -182,28 +182,28 @@ class TestManualIds:
 
 class TestSearchName:
     def test_cleans_release_noise(self):
-        assert search_name("Half-Life 2 (GOG) [Multi]") == "Half-Life 2"
-        assert search_name("The_Witcher_3_v1.31.exe") == "The Witcher 3"
-        assert search_name("Portal 2 - GOG") == "Portal 2"
+        assert search_name("Star-Harbor 2 (GOG) [Multi]") == "Star-Harbor 2"
+        assert search_name("The_Hollow_Crown_3_v1.31.exe") == "The Hollow Crown 3"
+        assert search_name("Orbit 2 - GOG") == "Orbit 2"
 
-    def test_scene_name_dots_and_group(self):
-        assert search_name("FANTASY.LIFE.i.The.Girl.Who.Steals.Time-GRPTAG") == "FANTASY LIFE i The Girl Who Steals Time"
+    def test_dotted_name_and_trailing_tag(self):
+        assert search_name("GARDEN.TALES.i.The.Boy.Who.Mends.Clocks-TAGONE") == "GARDEN TALES i The Boy Who Mends Clocks"
 
-    def test_scene_group_with_mixed_case(self):
-        assert search_names("Broken.Reality-TiNYiSO") == ["Broken Reality", "Broken Reality TiNYiSO"]
-        assert search_name("Dark.Souls.III-CODEX") == "Dark Souls III"
-        assert search_name("Game.Name-razor1911") == "Game Name"
+    def test_trailing_tag_with_mixed_case(self):
+        assert search_names("Quiet.Harbor-TaGSeT") == ["Quiet Harbor", "Quiet Harbor TaGSeT"]
+        assert search_name("Iron.Citadel.III-TAGTWO") == "Iron Citadel III"
+        assert search_name("Game.Name-tag1911") == "Game Name"
 
-    def test_release_tags_and_versions_are_dropped(self):
+    def test_tags_and_versions_are_dropped(self):
         assert search_name("Some.Game.MULTi12.PROPER-GROUP") == "Some Game"
-        assert search_name("Game.Name.v1.2.3-RUNE") == "Game Name"
-        assert search_name("Game.Name.Build.12345-SKIDROW") == "Game Name"
-        assert search_name("Some Game - FLT") == "Some Game"
+        assert search_name("Game.Name.v1.2.3-TAGTHREE") == "Game Name"
+        assert search_name("Game.Name.Build.12345-TAGFOUR") == "Game Name"
+        assert search_name("Some Game - TAG") == "Some Game"
 
-    def test_the_stripped_group_is_kept_as_a_fallback_title(self):
-        assert search_names("Some Game - FLT") == ["Some Game", "Some Game FLT"]
-        assert search_names("SamuraiSacrament") == ["SamuraiSacrament", "Samurai Sacrament"]  # a folder with no spaces
-        assert search_names("TiNYiSO") == ["TiNYiSO"]  # a tag-like word is not split into "Ti NYi SO"
+    def test_the_stripped_tag_is_kept_as_a_fallback_title(self):
+        assert search_names("Some Game - TAG") == ["Some Game", "Some Game TAG"]
+        assert search_names("WillowGarden") == ["WillowGarden", "Willow Garden"]  # a folder with no spaces
+        assert search_names("TaGSeT") == ["TaGSeT"]  # a tag-like word is not split into "Ta GSe T"
 
     def test_a_cover_a_person_removed_does_not_keep_the_game_waiting_for_one(self, monkeypatch):
         _configured(monkeypatch)
@@ -219,31 +219,31 @@ class TestSearchName:
         assert not _has_default_name(_game(fs_name="Mori [Lab] [EN]", name="Mori no Mori"))
 
     def test_hyphenated_title_survives(self):
-        assert search_name("Half-Life") == "Half-Life"
-        assert search_name("Marvels.Spider-Man") == "Marvels Spider-Man"
+        assert search_name("Star-Harbor") == "Star-Harbor"
+        assert search_name("Tidal.Spark-Rider") == "Tidal Spark-Rider"
 
     def test_plain_name_untouched(self):
         assert search_name("Some Game") == "Some Game"
 
     def test_a_gog_linux_installer_name_is_cut_down_to_the_title(self):
-        assert search_name("lost_ruins_1_0_9a_48364.sh") == "lost ruins"
-        assert search_name("stardew_valley_1_5_6_54317.sh") == "stardew valley"
-        assert search_name("the_witcher_3_wild_hunt_goty_1_32_52_0_2023_04_14_48093.sh") == "the witcher 3 wild hunt"
+        assert search_name("zelmoor_ruins_1_0_9a_48364.sh") == "zelmoor ruins"
+        assert search_name("moonfield_valley_1_5_6_54317.sh") == "moonfield valley"
+        assert search_name("the_ravenwood_3_pale_hunt_goty_1_32_52_0_2023_04_14_48093.sh") == "the ravenwood 3 pale hunt"
 
     def test_a_gog_windows_installer_name_loses_its_setup_word_and_build(self):
-        assert search_name("setup_jazz_jackrabbit_collection_2.0_csv2_patch_2_gus_(77533).exe") == "jazz jackrabbit collection"
-        assert search_name("setup_tyrian_2000_2.1.0.4.exe") == "tyrian 2000"
+        assert search_name("setup_zippy_rabbit_collection_2.0_csv2_patch_2_gus_(77533).exe") == "zippy rabbit collection"
+        assert search_name("setup_stellar_drift_2000_2.1.0.4.exe") == "stellar drift 2000"
 
     def test_the_other_installer_extensions_are_dropped(self):
         for ext in (".sh", ".run", ".bin", ".msi", ".AppImage", ".iso"):
             assert search_name(f"cool_game{ext}") == "cool game"
 
     def test_a_number_that_belongs_to_the_title_stays(self):
-        assert search_name("Cyberpunk 2077") == "Cyberpunk 2077"
-        assert search_name("jazz_jackrabbit_2") == "jazz jackrabbit 2"
-        assert search_name("Doom 3 2004") == "Doom 3 2004"
-        assert search_name("half_life_2") == "half life 2"
-        assert search_name("Left 4 Dead 2") == "Left 4 Dead 2"
+        assert search_name("Neon Skyline 2077") == "Neon Skyline 2077"
+        assert search_name("zippy_rabbit_2") == "zippy rabbit 2"
+        assert search_name("Ember 3 2004") == "Ember 3 2004"
+        assert search_name("star_harbor_2") == "star harbor 2"
+        assert search_name("Dusk Squad 2") == "Dusk Squad 2"
 
     def test_a_long_run_of_version_parts_goes_even_without_a_build_id(self):
         assert search_name("some_game_1_2_3") == "some game"
@@ -258,14 +258,14 @@ class TestSearchName:
         assert search_name("setup.exe") == "setup"
 
     def test_a_year_in_parentheses_is_kept_as_written(self):
-        assert search_name("Doom (1993)") == "Doom (1993)"
-        assert search_name("Doom (2016) [GOG]") == "Doom (2016)"
-        assert search_name("Half-Life 2 (2004).iso") == "Half-Life 2 (2004)"
-        assert search_name("Doom_(1993).exe") == "Doom (1993)"
+        assert search_name("Ember (1993)") == "Ember (1993)"
+        assert search_name("Ember (2016) [GOG]") == "Ember (2016)"
+        assert search_name("Star-Harbor 2 (2004).iso") == "Star-Harbor 2 (2004)"
+        assert search_name("Ember_(1993).exe") == "Ember (1993)"
 
     def test_the_year_survives_a_version_run_that_is_cut(self):
-        assert search_name("lost_ruins_1_0_9a_(2019).sh") == "lost ruins (2019)"
-        assert search_name("Lost Ruins 1.0.9a (2019)") == "Lost Ruins (2019)"
+        assert search_name("zelmoor_ruins_1_0_9a_(2019).sh") == "zelmoor ruins (2019)"
+        assert search_name("Zelmoor Ruins 1.0.9a (2019)") == "Zelmoor Ruins (2019)"
 
     def test_brackets_that_are_not_a_year_in_parentheses_still_go(self):
         assert search_name("Game (1234)") == "Game"  # not a plausible year
@@ -277,14 +277,14 @@ class TestSearchName:
         assert search_name("setup_game_name_2.0_(77533).exe") == "game name"
 
     def test_a_year_already_in_the_title_is_not_added_twice(self):
-        assert search_name("Cyberpunk 2077 (2077)") == "Cyberpunk 2077"
-        assert search_name("Doom (1993) (1993)") == "Doom (1993)"
+        assert search_name("Neon Skyline 2077 (2077)") == "Neon Skyline 2077"
+        assert search_name("Ember (1993) (1993)") == "Ember (1993)"
 
     def test_a_year_comes_with_the_fallback_title_too(self):
         assert search_names("Some Game (1999) - FLT") == ["Some Game (1999)", "Some Game FLT (1999)"]
 
     def test_a_scene_name_with_a_version_run(self):
-        assert search_name("Lost.Ruins.1.0.9a.48364-GROUP") == "Lost Ruins"
+        assert search_name("Zelmoor.Ruins.1.0.9a.48364-GROUP") == "Zelmoor Ruins"
 
 
 class TestRefreshGame:
@@ -336,13 +336,13 @@ class TestFuzzyMatching:
     @patch("handler.scrape_handler.igdb_handler")
     def test_picks_best_scoring_result_not_the_first(self, igdb, sgdb, db):
         igdb.search_games.return_value = [
-            {"id": 1, "name": "Fantasy Life"},
-            {"id": 2, "name": "Fantasy Life i: The Girl Who Steals Time"},
+            {"id": 1, "name": "Garden Tales"},
+            {"id": 2, "name": "Garden Tales i: The Boy Who Mends Clocks"},
         ]
-        igdb.get_game_by_id.return_value = {"id": 2, "name": "Fantasy Life i: The Girl Who Steals Time"}
+        igdb.get_game_by_id.return_value = {"id": 2, "name": "Garden Tales i: The Boy Who Mends Clocks"}
         sgdb.search_games.return_value = []
 
-        scrape_game(_game(name="Fantasy.Life.i.The.Girl.Who.Steals.Time-GRPTAG", fs_name="x"))
+        scrape_game(_game(name="Garden.Tales.i.The.Boy.Who.Mends.Clocks-TAGONE", fs_name="x"))
 
         igdb.get_game_by_id.assert_called_once_with(2)
 
@@ -525,13 +525,13 @@ class TestAnnouncingAddedGames:
     def test_the_games_are_announced_once_the_scrape_has_named_them(self, monkeypatch):
         calls = []
         monkeypatch.setattr(scrape_handler, "scrape_library_in_background", lambda lib_id: calls.append(("scrape", lib_id)))
-        names = {10: "AI Shoujo", 11: "Hearthlands"}  # what the scrape renamed them to
+        names = {10: "Paper Harbor", 11: "Mossglen"}  # what the scrape renamed them to
         monkeypatch.setattr(scrape_handler.db_game_handler, "get_game", lambda gid: SimpleNamespace(name=names[gid]))
         monkeypatch.setattr(scrape_handler, "notify_games_added", lambda lib, added: calls.append(("notify", added)))
 
-        scrape_handler.scrape_and_announce(self._library(), ((10, "[Group] AI Shoujo R15"), (11, "Hearthlands [v26]")))
+        scrape_handler.scrape_and_announce(self._library(), ((10, "[Group] Paper Harbor R15"), (11, "Mossglen [v26]")))
 
-        assert calls == [("scrape", 3), ("notify", ((10, "AI Shoujo"), (11, "Hearthlands")))]
+        assert calls == [("scrape", 3), ("notify", ((10, "Paper Harbor"), (11, "Mossglen")))]
 
     def test_a_game_that_is_gone_keeps_its_folder_name(self, monkeypatch):
         sent = []
@@ -859,8 +859,8 @@ class TestOtherProviders:
     @patch("handler.scrape_handler.db_game_handler")
     def test_choosing_a_provider_again_replaces_only_its_own_id(self, db, store):
         db.get_game.return_value = _game(provider_ids={"steam": 1, "itch": "old.id"}, metadata_source="steam")
-        scrape_handler.set_match(_game(), "itch", self._record(id="mod-princess.streetsofryona"))
-        assert db.update_game.call_args.args[1]["provider_ids"] == {"steam": 1, "itch": "mod-princess.streetsofryona"}
+        scrape_handler.set_match(_game(), "itch", self._record(id="someauthor.streetsofaurora"))
+        assert db.update_game.call_args.args[1]["provider_ids"] == {"steam": 1, "itch": "someauthor.streetsofaurora"}
 
 
 class TestOtherProvidersRobustness:

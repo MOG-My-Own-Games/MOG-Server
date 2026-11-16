@@ -61,6 +61,7 @@ class Catalog:
     complete_keywords: tuple[str, ...] = ()
     abort_keywords: tuple[str, ...] = ()
     eula_save_keywords: tuple[str, ...] = ()
+    progress_caption_keywords: tuple[str, ...] = ()
 
     def entries(self, category: str) -> tuple[ButtonEntry, ...]:
         return tuple(b for b in self.buttons if b.category == category)
@@ -102,4 +103,5 @@ def load_catalog(extra_buttons: list[dict] | None = None) -> Catalog:
         complete_keywords=_keywords(context, "complete"),
         abort_keywords=_keywords(context, "abort"),
         eula_save_keywords=_keywords(context, "eula_save"),
+        progress_caption_keywords=_keywords(context, "progress_caption"),
     )

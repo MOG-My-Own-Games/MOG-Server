@@ -29,7 +29,7 @@ def api(db, monkeypatch):
     return client
 
 
-def _device(api, uid="uid-aaaaaaaa", hostname="karasu"):
+def _device(api, uid="uid-aaaaaaaa", hostname="desktop"):
     return api.post("/api/devices/register", json={"client_uid": uid, "hostname": hostname}).json()["id"]
 
 
@@ -42,13 +42,13 @@ def test_nothing_is_set_until_a_client_saves_something(api):
 
 
 def test_a_device_setting_is_kept_apart_from_the_one_shared_by_all(api):
-    karasu = _device(api)
+    desktop = _device(api)
     deck = _device(api, "uid-bbbbbbbb", "deck")
 
     api.put("/api/games/5/launch-settings", json={"scope": "all", "proton": "GE-Proton9-1"})
     api.put("/api/games/5/launch-settings", json={"scope": "device", "device_id": deck, "proton": "UMU-Proton-10.0-4"})
 
-    mine = api.get("/api/games/5/launch-settings", params={"device_id": karasu}).json()
+    mine = api.get("/api/games/5/launch-settings", params={"device_id": desktop}).json()
     theirs = api.get("/api/games/5/launch-settings", params={"device_id": deck}).json()
     assert mine["shared"]["proton"] == theirs["shared"]["proton"] == "GE-Proton9-1"
     assert mine["device"] is None and theirs["device"]["proton"] == "UMU-Proton-10.0-4"
@@ -135,7 +135,7 @@ def test_deleting_removes_only_the_chosen_scope(api):
 
 
 def test_the_answer_lists_each_of_the_users_devices_that_has_settings_for_the_web_ui(api):
-    karasu = _device(api)
+    desktop = _device(api)
     deck = _device(api, "uid-bbbbbbbb", "deck")
     _device(api, "uid-cccccccc", "silent")  # nothing set: not listed
     api.put("/api/games/5/launch-settings", json={"scope": "all", "proton": "GE-Proton9-1"})
@@ -145,7 +145,7 @@ def test_the_answer_lists_each_of_the_users_devices_that_has_settings_for_the_we
 
     assert body["shared"]["proton"] == "GE-Proton9-1"
     assert [(d["device"]["name"], d["proton"], d["winecfg_reg"]) for d in body["devices"]] == [("deck", None, REG)]
-    assert karasu != deck
+    assert desktop != deck
 
 
 def test_winetricks_verbs_are_kept_once_each_in_order_for_a_scope_and_listed_for_the_web_ui(api):

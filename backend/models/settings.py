@@ -67,6 +67,8 @@ class Settings(BaseModel):
     # mode (see handler/install/defaults.py).
     install_default_auto_mode: Mapped[bool | None] = mapped_column(Boolean, default=None)
     install_default_manual_mode: Mapped[bool | None] = mapped_column(Boolean, default=None)
+    # Whether an installer can reach the network (see handler/install/defaults.py). NULL means on.
+    install_enable_network: Mapped[bool | None] = mapped_column(Boolean, default=None)
     # Files a client downloads in parallel. NULL falls back to
     # config.INSTALL_DOWNLOAD_WORKERS_DEFAULT.
     download_workers: Mapped[int | None] = mapped_column(Integer, default=None)

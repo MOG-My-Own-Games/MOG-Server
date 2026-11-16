@@ -14,67 +14,67 @@ UID_A, UID_B, UID_C = "uid-aaaaaaaa", "uid-bbbbbbbb", "uid-cccccccc"
 
 
 def test_a_new_machine_is_named_after_its_hostname(db):
-    device = register_device(1, UID_A, "karasu", platform="linux")
-    assert (device.name, device.hostname, device.platform) == ("karasu", "karasu", "linux")
+    device = register_device(1, UID_A, "desktop", platform="linux")
+    assert (device.name, device.hostname, device.platform) == ("desktop", "desktop", "linux")
     assert device.last_seen is not None
 
 
 def test_the_same_client_is_the_same_device_and_its_details_follow(db):
-    first = register_device(1, UID_A, "karasu", platform="linux")
-    again = register_device(1, UID_A, "karasu-pc", platform="win32")
-    assert again.id == first.id and again.name == "karasu"
-    assert (again.hostname, again.platform) == ("karasu-pc", "win32")
+    first = register_device(1, UID_A, "desktop", platform="linux")
+    again = register_device(1, UID_A, "desktop-pc", platform="win32")
+    assert again.id == first.id and again.name == "desktop"
+    assert (again.hostname, again.platform) == ("desktop-pc", "win32")
 
 
 def test_the_same_hostname_on_a_new_client_asks_instead_of_duplicating(db):
-    existing = register_device(1, UID_A, "karasu", platform="linux")
+    existing = register_device(1, UID_A, "desktop", platform="linux")
 
     with pytest.raises(HostnameTaken) as asked:
-        register_device(1, UID_B, "Karasu", os_id="fedora")
+        register_device(1, UID_B, "Desktop", os_id="fedora")
 
     assert [d.id for d in asked.value.devices] == [existing.id]
-    assert asked.value.suggested_names == ["Karasu-fedora", "Karasu-2"]
+    assert asked.value.suggested_names == ["Desktop-fedora", "Desktop-2"]
     assert len(devices.db_device_handler.get_for_user(1)) == 1
 
 
 def test_it_can_be_the_same_machine_after_a_reinstall(db):
-    old = register_device(1, UID_A, "karasu")
-    adopted = register_device(1, UID_B, "karasu", adopt_device_id=old.id)
+    old = register_device(1, UID_A, "desktop")
+    adopted = register_device(1, UID_B, "desktop", adopt_device_id=old.id)
     assert adopted.id == old.id
-    assert register_device(1, UID_B, "karasu").id == old.id  # the new uid is now the device's
+    assert register_device(1, UID_B, "desktop").id == old.id  # the new uid is now the device's
     assert devices.db_device_handler.get_by_client_uid(1, UID_A) is None
 
 
 def test_it_can_be_a_new_machine_under_a_name_of_its_own(db):
-    register_device(1, UID_A, "karasu")
-    other = register_device(1, UID_B, "karasu", name="karasu-fedora")
-    assert other.name == "karasu-fedora"
+    register_device(1, UID_A, "desktop")
+    other = register_device(1, UID_B, "desktop", name="desktop-fedora")
+    assert other.name == "desktop-fedora"
     with pytest.raises(NameTaken):
-        register_device(1, UID_C, "karasu", name="KARASU-fedora")
+        register_device(1, UID_C, "desktop", name="DESKTOP-fedora")
 
 
 def test_another_users_device_cannot_be_adopted_and_names_do_not_clash_across_users(db):
-    theirs = register_device(2, UID_A, "karasu")
+    theirs = register_device(2, UID_A, "desktop")
     with pytest.raises(DeviceNotFound):
-        register_device(1, UID_B, "karasu", adopt_device_id=theirs.id)
-    assert register_device(1, UID_B, "karasu").name == "karasu"
+        register_device(1, UID_B, "desktop", adopt_device_id=theirs.id)
+    assert register_device(1, UID_B, "desktop").name == "desktop"
 
 
 def test_a_renamed_device_keeps_its_hostname_apart_from_its_name(db):
-    old = register_device(1, UID_A, "karasu")
+    old = register_device(1, UID_A, "desktop")
     rename_device(1, old.id, "  salotto   pc ")
     assert devices.db_device_handler.get_device(old.id).name == "salotto pc"
     # its hostname still identifies it as a candidate for the same machine
     with pytest.raises(HostnameTaken):
-        register_device(1, UID_B, "karasu")
+        register_device(1, UID_B, "desktop")
 
 
 def test_rename_refuses_a_name_in_use_and_a_foreign_device(db):
-    a = register_device(1, UID_A, "karasu")
-    register_device(1, UID_B, "karasu", name="other")
+    a = register_device(1, UID_A, "desktop")
+    register_device(1, UID_B, "desktop", name="other")
     with pytest.raises(NameTaken):
         rename_device(1, a.id, "other")
-    assert rename_device(1, a.id, "karasu").name == "karasu"  # its own name is not a clash
+    assert rename_device(1, a.id, "desktop").name == "desktop"  # its own name is not a clash
     with pytest.raises(DeviceNotFound):
         rename_device(2, a.id, "x")
 

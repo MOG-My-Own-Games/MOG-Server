@@ -9,9 +9,9 @@ from handler.metadata.hltb_handler import HLTBUnavailable
 from utils.hltb_search import HLTB_SEARCH_URL
 
 SESSION = {"token": "tok", "hpKey": "k", "hpVal": "v"}
-DOOM = {
+EMBER = {
     "game_id": 7,
-    "game_name": "Doom",
+    "game_name": "Ember",
     "comp_main": 36000,
     "comp_plus": 54000,
     "comp_100": 90000,
@@ -67,7 +67,7 @@ def healthy(games):
 
 class TestExtractMetadata:
     def test_times_are_kept_in_seconds_with_their_counts(self):
-        meta = hltb_handler.extract_metadata(DOOM)
+        meta = hltb_handler.extract_metadata(EMBER)
         assert meta["main_story"] == 36000 and meta["main_plus_extra"] == 54000
         assert meta["completionist"] == 90000 and meta["all_styles"] == 50000
         assert meta["main_story_count"] == 120 and "main_plus_extra_count" not in meta
@@ -85,23 +85,23 @@ class TestExtractMetadata:
 
 class TestSearchGames:
     def test_returns_games_with_a_time_and_skips_the_rest(self, monkeypatch):
-        site = serve(monkeypatch, healthy([DOOM, {"game_id": 8, "game_name": "Untimed", "comp_main": 0}]))
-        found = hltb_handler.search_games("doom")
-        assert [g["id"] for g in found] == [7] and found[0]["name"] == "Doom"
+        site = serve(monkeypatch, healthy([EMBER, {"game_id": 8, "game_name": "Untimed", "comp_main": 0}]))
+        found = hltb_handler.search_games("ember")
+        assert [g["id"] for g in found] == [7] and found[0]["name"] == "Ember"
         assert found[0]["metadata"]["main_story"] == 36000
         _, _, kwargs = site.calls[-1]
         assert kwargs["headers"]["x-auth-token"] == "tok" and kwargs["json"]["k"] == "v"
 
     def test_the_session_is_minted_once_for_several_searches(self, monkeypatch):
-        site = serve(monkeypatch, healthy([DOOM]))
-        hltb_handler.search_games("doom")
+        site = serve(monkeypatch, healthy([EMBER]))
+        hltb_handler.search_games("ember")
         hltb_handler.search_games("quake")
         assert len([u for u in site.urls("GET") if u.endswith("/init")]) == 1
 
     def test_switched_off_asks_nothing(self, monkeypatch):
         monkeypatch.setattr(config, "HLTB_ENABLED", False)
-        site = serve(monkeypatch, healthy([DOOM]))
-        assert hltb_handler.search_games("doom") == [] and hltb_handler.get_game_by_id(7) is None
+        site = serve(monkeypatch, healthy([EMBER]))
+        assert hltb_handler.search_games("ember") == [] and hltb_handler.get_game_by_id(7) is None
         assert site.calls == []
 
     def test_a_rejected_session_is_renewed_and_the_search_retried(self, monkeypatch):
@@ -111,10 +111,10 @@ class TestSearchGames:
             if url.endswith("/init"):
                 return 200, SESSION
             state["searches"] += 1
-            return (403, {}) if state["searches"] == 1 else (200, {"data": [DOOM]})
+            return (403, {}) if state["searches"] == 1 else (200, {"data": [EMBER]})
 
         site = serve(monkeypatch, reply)
-        assert [g["id"] for g in hltb_handler.search_games("doom")] == [7]
+        assert [g["id"] for g in hltb_handler.search_games("ember")] == [7]
         assert len([u for u in site.urls("GET") if u.endswith("/init")]) == 2
 
     def test_a_throttled_search_is_waited_out_and_retried(self, monkeypatch):
@@ -126,28 +126,28 @@ class TestSearchGames:
             if url.endswith("/init"):
                 return 200, SESSION
             state["searches"] += 1
-            return (429, {}) if state["searches"] == 1 else (200, {"data": [DOOM]})
+            return (429, {}) if state["searches"] == 1 else (200, {"data": [EMBER]})
 
         serve(monkeypatch, reply)
-        assert hltb_handler.search_games("doom")
+        assert hltb_handler.search_games("ember")
         assert hltb_handler.RATE_LIMIT_BACKOFF_SECONDS in waits
 
     def test_a_search_that_keeps_failing_is_unavailable(self, monkeypatch):
         serve(monkeypatch, lambda m, u, k: (200, SESSION) if u.endswith("/init") else (500, {}))
         with pytest.raises(HLTBUnavailable):
-            hltb_handler.search_games("doom")
+            hltb_handler.search_games("ember")
 
     def test_a_failed_mint_is_not_tried_again_at_once(self, monkeypatch):
         site = serve(monkeypatch, lambda m, u, k: (403, {}))
         for _ in range(2):
             with pytest.raises(HLTBUnavailable):
-                hltb_handler.search_games("doom")
+                hltb_handler.search_games("ember")
         assert len(site.calls) == 1
 
     def test_an_answer_without_a_result_list_is_unavailable(self, monkeypatch):
         serve(monkeypatch, lambda m, u, k: (200, SESSION) if u.endswith("/init") else (200, {"oops": 1}))
         with pytest.raises(HLTBUnavailable):
-            hltb_handler.search_games("doom")
+            hltb_handler.search_games("ember")
 
     def test_a_moved_search_route_is_found_again_on_a_404(self, monkeypatch):
         new_url = "https://howlongtobeat.com/api/lookup/abc"
@@ -156,10 +156,10 @@ class TestSearchGames:
         def reply(method, url, kwargs):
             if not url.startswith(new_url):
                 return 404, {}
-            return (200, SESSION) if url.endswith("/init") else (200, {"data": [DOOM]})
+            return (200, SESSION) if url.endswith("/init") else (200, {"data": [EMBER]})
 
         site = serve(monkeypatch, reply)
-        assert [g["id"] for g in hltb_handler.search_games("doom")] == [7]
+        assert [g["id"] for g in hltb_handler.search_games("ember")] == [7]
         assert site.urls("POST") == [new_url]
 
 
@@ -171,7 +171,7 @@ class TestGetGameById:
         )
 
     def test_reads_the_record_from_the_game_page(self, monkeypatch):
-        site = serve(monkeypatch, lambda m, u, k: (200, self.page([{**DOOM, "release_world": "1993-12-10"}])))
+        site = serve(monkeypatch, lambda m, u, k: (200, self.page([{**EMBER, "release_world": "1993-12-10"}])))
         found = hltb_handler.get_game_by_id(7)
         assert found["id"] == 7 and found["metadata"]["completionist"] == 90000 and found["metadata"]["release_year"] == 1993
         assert site.urls() == ["https://howlongtobeat.com/game/7"]
@@ -213,7 +213,7 @@ class TestManualMatchEndpoints:
         assert asked == ["Typed", "Some Game"]
 
     def test_apply_stores_the_id_and_the_times(self, monkeypatch):
-        monkeypatch.setattr(hltb_handler, "get_game_by_id", lambda i: {"id": i, "name": "Doom", "metadata": {"main_story": 3600}})
+        monkeypatch.setattr(hltb_handler, "get_game_by_id", lambda i: {"id": i, "name": "Ember", "metadata": {"main_story": 3600}})
         _, saved = self._run(monkeypatch, "apply_hltb_match", 7)
         assert saved == {"hltb_id": 7, "hltb_metadata": {"main_story": 3600}, "provider_misses": {}}
 

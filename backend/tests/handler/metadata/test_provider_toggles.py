@@ -21,10 +21,12 @@ def row(**over):
         install_default_proton_build=None,
         install_default_auto_mode=None,
         install_default_manual_mode=None,
+        install_enable_network=None,
         download_workers=None,
         debug_logging=None,
         backup_daily=None,
         backup_saves=None,
+        saves_keep_versions=None,
         install_cache_max_bytes=None,
         install_cache_auto_clean=None,
         romm_enabled=None,
@@ -68,7 +70,7 @@ def test_igdb_off_has_no_credentials_and_asks_nothing_but_keeps_what_is_saved(st
 
     assert igdb_handler.is_enabled() is False
     assert igdb_handler._credentials() == (None, None)
-    assert igdb_handler.search_games("Doom") == [] and igdb_handler.get_game_by_id(1) is None
+    assert igdb_handler.search_games("Ember") == [] and igdb_handler.get_game_by_id(1) is None
     assert stored["row"].igdb_client_id == "id" and stored["row"].igdb_client_secret == "secret"
 
 
@@ -76,7 +78,7 @@ def test_steamgriddb_off_finds_nothing_and_asks_nothing(stored, no_network):
     stored["row"] = row(steamgriddb_enabled=False)
 
     assert sgdb_handler._api_key() is None
-    assert sgdb_handler.search_games("Doom") == [] and sgdb_handler.get_media(1) == {}
+    assert sgdb_handler.search_games("Ember") == [] and sgdb_handler.get_media(1) == {}
     assert sgdb_handler.get_grids(1) == []
 
 
@@ -95,7 +97,7 @@ def test_howlongtobeat_follows_the_environment_until_the_switch_is_used(stored, 
     monkeypatch.setattr(config, "HLTB_ENABLED", True)
     stored["row"] = row(hltb_enabled=False)
     assert hltb_handler.is_enabled() is False
-    assert hltb_handler.search_games("Doom") == []
+    assert hltb_handler.search_games("Ember") == []
 
 
 def test_the_settings_answer_says_whether_each_provider_is_on(stored, monkeypatch):

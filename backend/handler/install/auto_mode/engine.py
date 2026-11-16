@@ -92,7 +92,10 @@ def is_progress_page(lines: list[str], catalog: Catalog) -> bool:
     """An active extraction/copy screen (an elapsed/remaining-time progress
     bar) - never safe to touch, see buttons.yml's own "progress" keyword
     list for why."""
-    return _phrase_present(lines, catalog.progress_keywords)
+    if _phrase_present(lines, catalog.progress_keywords):
+        return True
+    # A caption only counts as the start of its line: mid-sentence it is a welcome page talking about the install.
+    return any(line.startswith(k) for line in lines for k in catalog.progress_caption_keywords)
 
 
 def is_complete_page(lines: list[str], catalog: Catalog) -> bool:
@@ -178,7 +181,7 @@ def plan_action(
             matches,
         )
     if match.entry.category == "agree" and license_page and not match.entry.toggle and attempts == 0:
-        # Caught live (Sacrifice): a mouse click on Yes on the license page did nothing, while Return, which the page
+        # Caught live (a license page): a mouse click on Yes on the license page did nothing, while Return, which the page
         # makes the default button, accepted it. On a license page Yes is the default, so Return is that same answer.
         return Action("key", 0, 0, "Return", match, key, alt=False), matches
     if attempts >= 1 and match.entry.mnemonic:

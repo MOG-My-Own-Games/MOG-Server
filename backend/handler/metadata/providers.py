@@ -50,7 +50,7 @@ def find(module: ModuleType, names: list[str]) -> dict[str, Any] | None:
 
     def search(query: str) -> list[dict[str, Any]]:
         # A result is scored under each name it goes by, so a translated or original title can match. Unlike IGDB, a provider's
-        # catalogue has little around a title, so one that reads alike but swaps a word ("Streets of Fortuna" for "Streets of
+        # catalogue has little around a title, so one that reads alike but swaps a word ("Streets of Quillon" for "Streets of
         # Ryona") is another game, not a match.
         return [
             {"name": name, "result": item}

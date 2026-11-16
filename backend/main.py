@@ -74,10 +74,12 @@ async def log_requests(request, call_next):
 
 # The web UI loads its own script, the providers' pictures, YouTube's player and the release lookup of GitHub, nothing else.
 # Inline styles stay allowed: the UI sets a width on its progress bars. Not applied under /api: the installer display page
-# there is noVNC's own, with scripts of its own.
+# there is noVNC's own, with scripts of its own. `mog:` in frame-src is the link that opens the MOG client: the page opens
+# it in a hidden frame (see openClient in the frontend), and without the scheme here the browser refuses the frame before it
+# ever asks the system to open anything, so the client never started and the page said nothing answered.
 FRONTEND_CSP = (
     "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; "
-    "connect-src 'self' https://api.github.com; frame-src 'self' https://www.youtube-nocookie.com; "
+    "connect-src 'self' https://api.github.com; frame-src 'self' mog: https://www.youtube-nocookie.com; "
     "object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
 )
 

@@ -275,16 +275,16 @@ def test_a_copy_alone_in_a_chain_is_an_extraction(chain, monkeypatch):
 
 
 def test_the_copy_puts_the_games_files_under_program_files_in_a_folder_named_for_the_game(monkeypatch, tmp_path):
-    library = tmp_path / "library" / "Zero Zone"
-    (library / "ZZone").mkdir(parents=True)
-    (library / "ZZone" / "ZeroZone.exe").write_bytes(b"MZ")
+    library = tmp_path / "library" / "Null Garden"
+    (library / "NGarden").mkdir(parents=True)
+    (library / "NGarden" / "NullGarden.exe").write_bytes(b"MZ")
     monkeypatch.setattr(runner.fs_game_handler, "get_game_root_abs_path", lambda game: library)
     prefix = tmp_path / "prefix"
 
-    problem = runner._copy_into_prefix(SimpleNamespace(id=3, fs_name="Zero Zone"), None, prefix)
+    problem = runner._copy_into_prefix(SimpleNamespace(id=3, fs_name="Null Garden"), None, prefix)
 
     assert problem is None
-    assert (prefix / "drive_c" / "Program Files" / "Zero Zone" / "ZZone" / "ZeroZone.exe").read_bytes() == b"MZ"
+    assert (prefix / "drive_c" / "Program Files" / "Null Garden" / "NGarden" / "NullGarden.exe").read_bytes() == b"MZ"
 
 
 def test_the_copy_of_an_archive_unpacks_it_into_the_same_place(monkeypatch, tmp_path):

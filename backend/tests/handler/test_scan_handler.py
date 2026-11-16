@@ -58,7 +58,7 @@ class TestEmptyFolders:
 
     @patch("handler.scan_handler.db_game_handler")
     def test_a_new_game_is_named_without_the_tags_of_its_folder(self, db, tmp_path):
-        folder = tmp_path / "Ryona no Mori [Black Megane Laboratory] [English Translation]"
+        folder = tmp_path / "Tsuki no Mori [Violet Lab] [English Translation]"
         folder.mkdir()
         (folder / "setup.exe").write_bytes(b"x")
         db.get_games_for_library.return_value = []
@@ -66,7 +66,7 @@ class TestEmptyFolders:
         scan_library(Library(id=1, name="L", root_path=str(tmp_path)))
 
         added = db.add_game.call_args.args[0]
-        assert added.name == "Ryona no Mori" and added.fs_name == folder.name  # the tags stay in fs_name (fs_tags)
+        assert added.name == "Tsuki no Mori" and added.fs_name == folder.name  # the tags stay in fs_name (fs_tags)
 
     @patch("handler.scan_handler.db_game_handler")
     def test_a_known_game_whose_folder_was_emptied_is_flagged_missing(self, db, tmp_path):
@@ -169,3 +169,45 @@ def test_a_scan_lists_the_games_it_added(db, tmp_path):
 
         assert db.add_game.call_args.args[0].size_bytes == 5
         db.update_game.assert_called_once_with(2, {"size_bytes": 1})
+
+
+class TestPartialDownloads:
+    @patch("handler.scan_handler.db_game_handler")
+    def test_part_and_parts_entries_are_not_games(self, db, tmp_path):
+        """Caught live: ".<hash>.parts" (a download still being fetched) was added as a game next to the real ones."""
+        (tmp_path / ".7cb185e2c2dd.parts").mkdir()
+        (tmp_path / ".7cb185e2c2dd.parts" / "chunk").write_bytes(b"x")
+        (tmp_path / "Setup.iso.part").write_bytes(b"x")
+        (tmp_path / "Other.PART").write_bytes(b"x")
+        (tmp_path / "Real").mkdir()
+        (tmp_path / "Real" / "setup.exe").write_bytes(b"x")
+        db.get_games_for_library.return_value = []
+
+        result = scan_library(Library(id=1, name="L", root_path=str(tmp_path)))
+
+        assert [c.args[0].fs_name for c in db.add_game.call_args_list] == ["Real"]
+        assert result.total == 1
+
+    @patch("handler.scan_handler.db_game_handler")
+    def test_each_one_ignored_is_logged_as_info(self, db, tmp_path, caplog):
+        import logging
+
+        (tmp_path / "x.part").write_bytes(b"x")
+        db.get_games_for_library.return_value = []
+
+        with caplog.at_level(logging.INFO, logger="mog"):
+            scan_library(Library(id=1, name="Mine", root_path=str(tmp_path)))
+
+        record = next(r for r in caplog.records if "x.part" in r.getMessage())
+        assert record.levelno == logging.INFO and "Mine" in record.getMessage()
+
+    @patch("handler.scan_handler.db_game_handler")
+    def test_a_game_added_before_it_is_flagged_missing_not_deleted(self, db, tmp_path):
+        (tmp_path / "late.parts").write_bytes(b"x")
+        db.get_games_for_library.return_value = [_game(9, "late.parts")]
+
+        result = scan_library(Library(id=1, name="L", root_path=str(tmp_path)))
+
+        db.delete_game.assert_not_called()
+        db.update_game.assert_called_once_with(9, {"missing_from_fs": True})
+        assert result.missing == 1

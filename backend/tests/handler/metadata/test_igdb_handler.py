@@ -10,7 +10,7 @@ def test_a_quote_and_a_backslash_in_the_name_stay_inside_the_string():
 
 
 def test_control_characters_are_dropped():
-    assert igdb_handler.quote("Ha\nlf\x00-Life\x7f") == "Half-Life"
+    assert igdb_handler.quote("Sta\nr\x00-Harbor\x7f") == "Star-Harbor"
 
 
 def test_the_search_sends_the_quoted_name(monkeypatch):

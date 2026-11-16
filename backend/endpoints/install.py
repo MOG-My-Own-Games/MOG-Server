@@ -56,7 +56,7 @@ from handler.database import db_game_handler, db_install_session_handler, db_ins
 from handler.filesystem import fs_game_handler
 from handler.filesystem.installer_detection import ARCHIVE_SOURCE_KINDS, looks_portable, pick_default_installer
 from handler.install import bandwidth
-from handler.install.defaults import default_auto_mode, default_download_workers, default_manual_mode
+from handler.install.defaults import default_auto_mode, default_download_workers, default_enable_network, default_manual_mode
 from handler.install.archive_prescan import extract_suggested, is_archive_candidate, list_source_candidates
 from handler.install.copy_step import COPY_STEP, is_copy_step
 from handler.install.manifest import (
@@ -160,7 +160,10 @@ async def get_install_defaults(user: CurrentUser) -> InstallDefaultsSchema:
     """What a start request that omits auto_mode/manual_mode gets, so a client
     can prefill its own toggles with the server's Settings."""
     return InstallDefaultsSchema(
-        auto_mode=default_auto_mode(), manual_mode=default_manual_mode(), download_workers=default_download_workers()
+        auto_mode=default_auto_mode(),
+        manual_mode=default_manual_mode(),
+        enable_network=default_enable_network(),
+        download_workers=default_download_workers(),
     )
 
 

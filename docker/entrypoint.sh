@@ -19,12 +19,20 @@ if [ "$(id -u)" = "0" ]; then
     # The install caches made while the server still ran as root (the cache is a volume, which -xdev above leaves alone): the
     # server could not delete them, so expired ones stayed and a deleted one stayed on disk. Only a session's own folder that is
     # not the server's is walked, so the next starts pay nothing and a huge cache is never scanned.
+    # Some volumes refuse chown (mergerfs, rootless Docker: "Operation not permitted" even for root) but take chmod: the folder
+    # is then made writable for everyone, which is all the server needs to delete it, and is what makes the cleanup of expired
+    # caches work there.
     if [ -d /mog/cache/installs ]; then
         for dir in /mog/cache/installs/*/; do
             [ -d "$dir" ] || continue
-            [ "$(stat -c %U "$dir")" = "mog" ] ||
-                chown -R mog:mog "$dir" ||
-                echo "entrypoint: could not change the owner of $dir, going on" >&2
+            [ "$(stat -c %U "$dir")" = "mog" ] && continue
+            if chown -R mog:mog "$dir" 2>/dev/null; then
+                continue
+            elif chmod -R a+rwX "$dir"; then
+                echo "entrypoint: the volume does not allow changing the owner of $dir; made it writable for the server instead" >&2
+            else
+                echo "entrypoint: could not change the owner or the permissions of $dir, going on" >&2
+            fi
         done
     fi
     # The backup volume, when one is mounted (Docker creates the host directory root-owned): only the folder itself, as it may

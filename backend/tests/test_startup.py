@@ -1,8 +1,11 @@
+import os
+import subprocess
+import sys
 from unittest.mock import patch
 
 from handler.auth import hash_password, verify_password
 from models.user import Role, User
-from startup import _ensure_default_admin
+from startup import _ensure_default_admin, _share_new_files
 
 
 def _admin(password: str) -> User:
@@ -82,3 +85,28 @@ class TestPlaceholderAdminPassword:
         _ensure_default_admin()
 
         db.update_user.assert_not_called()
+
+
+class TestShareNewFiles:
+    def test_files_made_after_it_are_writable_for_everyone(self, tmp_path):
+        old = os.umask(0o022)
+        try:
+            _share_new_files()
+            folder = tmp_path / "session"
+            folder.mkdir()
+            made = folder / "node.dll"
+            made.write_bytes(b"x")
+            assert folder.stat().st_mode & 0o777 == 0o777
+            assert made.stat().st_mode & 0o777 == 0o666
+        finally:
+            os.umask(old)
+
+    def test_child_processes_inherit_it(self, tmp_path):
+        old = os.umask(0o022)
+        try:
+            _share_new_files()
+            target = tmp_path / "from-child"
+            subprocess.run([sys.executable, "-c", f"open({str(target)!r}, 'w').close()"], check=True)
+            assert target.stat().st_mode & 0o777 == 0o666
+        finally:
+            os.umask(old)

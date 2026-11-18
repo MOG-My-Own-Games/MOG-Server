@@ -22,6 +22,18 @@ from models.install_session import InstallSessionState
 from models.user import Role, User
 
 
+def _share_new_files() -> None:
+    """New files and folders are made writable for everyone (umask 0).
+
+    On the install cache (a mergerfs or rootless-Docker volume) everything the server creates shows up owned by root, not by
+    the unprivileged `mog` user that made it, so with the usual umask 022/002 the server could not overwrite or delete its
+    own files: a second install on the same session failed in 7z with "Cannot delete output file: Permission denied", and
+    the cleanup of an expired cache failed the same way. The entrypoint opens up the caches that exist at boot; this covers
+    the ones made afterwards, including those of the processes the server starts (7z, the sandbox). Files that must stay
+    private are made with an explicit mode (mkstemp, chmod 0o600), which the umask does not widen."""
+    os.umask(0)
+
+
 def _ensure_dirs() -> None:
     for path in (
         MOG_BASE_PATH,
@@ -112,6 +124,7 @@ def _fail_orphaned_installs() -> None:
 
 
 def run_startup_tasks() -> None:
+    _share_new_files()
     _ensure_dirs()
     _remove_public_image_cache()
     _run_migrations()

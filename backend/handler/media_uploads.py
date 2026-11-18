@@ -1,6 +1,6 @@
 """The artwork a person uploads for a game (cover, banner, hero, logo, icon), kept on this server next to the providers' own.
 
-An upload is checked (a real PNG, JPEG, WebP or GIF of a sane size), stored under the resources folder as a PNG or JPEG
+An upload is checked (a real PNG, JPEG, WebP, GIF, AVIF, BMP or TIFF of a sane size), stored under the resources folder as a PNG or JPEG
 and chosen for its kind like a provider's image: `game.media[kind]` is `{"url": "/resources/media/<game>/<file>", "source":
 "upload"}`. The URL is relative to this server, as the avatars' are. Only the newest upload of a kind is kept."""
 
@@ -24,6 +24,9 @@ MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 MAX_PIXELS = 50_000_000  # width x height: a bomb of a few kilobytes that unpacks to gigabytes is not an artwork
 URL_PREFIX = "/resources/media/"
 _ALLOWED = (".png", ".jpg", ".webp", ".gif")
+# Formats a browser or a client may not show: kept as PNG, found by their first bytes like the others are
+_CONVERTED = ((b"BM", "BMP"), (b"II*\x00", "TIFF"), (b"MM\x00*", "TIFF"))
+_AVIF_BRANDS = (b"avif", b"avis")
 _URL = re.compile(r"/resources/media/(?P<game>\d+)/(?P<name>(?:%s)-[0-9a-f]{12}\.(?:png|jpg))" % "|".join(KINDS))
 
 
@@ -48,20 +51,36 @@ def path_for(url: str | None) -> Path | None:
     return path if path.resolve().is_relative_to(media_dir().resolve()) else None
 
 
+def _needs_png(data: bytes) -> bool:
+    """True for a BMP, TIFF or AVIF (an ISO box `ftyp` with an AVIF brand), which are converted to PNG."""
+    if data.startswith(tuple(signature for signature, _ in _CONVERTED)):
+        return True
+    return data[4:8] == b"ftyp" and data[8:12] in _AVIF_BRANDS
+
+
+def _as_png(image: Image.Image) -> bytes:
+    out = io.BytesIO()
+    image.convert("RGBA").save(out, "PNG")
+    return out.getvalue()
+
+
 def check(data: bytes) -> bytes:
-    """`data` as the bytes to keep (WebP and GIF become PNG), or UploadRefused."""
+    """`data` as the bytes to keep (WebP, GIF, AVIF, BMP and TIFF become PNG), or UploadRefused."""
     if not data:
         raise UploadRefused("The file is empty")
     if len(data) > MAX_UPLOAD_BYTES:
         raise UploadRefused(f"The image is larger than {MAX_UPLOAD_BYTES // (1024 * 1024)} MiB")
-    if _kind_of(data)[0] not in _ALLOWED:
-        raise UploadRefused("Must be a PNG, JPEG, WebP or GIF image")
+    convert = _needs_png(data)
+    if not convert and _kind_of(data)[0] not in _ALLOWED:
+        raise UploadRefused("Must be a PNG, JPEG, WebP, GIF, AVIF, BMP or TIFF image")
     try:
         with Image.open(io.BytesIO(data)) as image:
             width, height = image.size
             if width * height > MAX_PIXELS:
                 raise UploadRefused("The image has too many pixels")
             image.load()  # a file that only starts like an image fails here
+            if convert:
+                return _as_png(image)
     except (UnidentifiedImageError, OSError, SyntaxError, Image.DecompressionBombError) as e:
         raise UploadRefused("The file is not a usable image") from e
     return _usable_everywhere(data)

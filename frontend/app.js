@@ -3133,7 +3133,7 @@ function renderEditMedia() {
 
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = "image/png,image/jpeg,image/webp,image/gif";
+    input.accept = "image/png,image/jpeg,image/webp,image/gif,image/avif,image/bmp,image/tiff";
     input.hidden = true;
     const upload = document.createElement("button");
     upload.type = "button";

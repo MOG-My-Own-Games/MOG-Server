@@ -72,6 +72,17 @@ def test_webp_and_gif_are_kept_as_png_so_every_client_can_show_them(world, fmt):
     assert _upload(world, "logo", _image(fmt)).json()["media"]["logo"]["url"].endswith(".png")
 
 
+@pytest.mark.parametrize("fmt", ["BMP", "TIFF", "AVIF"])
+def test_bmp_tiff_and_avif_are_accepted_and_kept_as_png(world, fmt):
+    """A file saved as BMP, TIFF or AVIF (often renamed .png) was refused as "must be a PNG"; it is now converted."""
+    response = _upload(world, "banner", _image(fmt))
+
+    url = response.json()["media"]["banner"]["url"]
+    assert response.status_code == 200 and url.endswith(".png")
+    served = world.client.get(f"/api/games/{world.game.id}/media/banner")
+    assert Image.open(io.BytesIO(served.content)).size == (40, 30)
+
+
 def test_a_new_upload_of_a_kind_replaces_the_old_file(world):
     first = _upload(world, "banner", _image(color=(1, 2, 3))).json()["media"]["banner"]["url"]
     second = _upload(world, "banner", _image(color=(9, 9, 9))).json()["media"]["banner"]["url"]

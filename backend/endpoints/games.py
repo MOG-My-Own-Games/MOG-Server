@@ -302,7 +302,7 @@ async def upload_game_media(
     user: AdminUser, id: Annotated[int, Path(ge=1)], kind: str, file: UploadFile
 ) -> GameSchema:
     """Use an image of the person's own as the game's artwork of this kind (cover, banner, hero, logo or icon). A PNG, JPEG,
-    WebP or GIF up to 10 MiB; it replaces the earlier choice of that kind, and a scrape does not replace it."""
+    WebP, GIF, AVIF, BMP or TIFF up to 10 MiB; it replaces the earlier choice of that kind, and a scrape does not replace it."""
     if kind not in media_handler.KINDS:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     game = check_visible(user, db_game_handler.get_game(id))

@@ -154,7 +154,7 @@ Artwork is served by the server so a client does not depend on the metadata prov
 `GET /api/games/{id}/cover`, `GET /api/games/{id}/media/{kind}`, `GET /api/games/{id}/screenshots/{index}` and
 `GET /api/games/{id}/videos`. Ask for what the game object says exists and fall back gracefully when it does not.
 An administrator sets artwork of their own with `POST /api/games/{id}/media/{kind}` (multipart field `file`; a PNG, JPEG,
-WebP or GIF up to 10 MiB, WebP and GIF being kept as PNG; `kind` is one of the five above). It becomes the choice for
+WebP, GIF, AVIF, BMP or TIFF up to 10 MiB, all but PNG and JPEG being kept as PNG; `kind` is one of the five above). It becomes the choice for
 that kind, replaces the earlier one, and a scrape does not replace it; `PUT /api/games/{id}/media` with `null` for the kind
 removes it, whether it is an upload or a provider's image, and the automatic scrape leaves that kind empty from then on (a scrape
 an administrator asks for, or choosing or uploading an image for the kind, fills it again). A refused file answers `400` with the reason. Uploaded files are served without credentials from

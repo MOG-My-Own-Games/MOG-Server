@@ -22,6 +22,7 @@ TIMEOUT = 15.0
 # server is the person's own).
 MIN_INTERVAL = {"api.vndb.org": 1.6, "store.steampowered.com": 1.5, "itch.io": 1.0, "www.dlsite.com": 1.0}
 RETRY_AFTER_MAX = 30.0  # a Retry-After longer than this is not waited for
+RETRY_AFTER_DEFAULT = 3.0  # a 429 that does not say how long: itch.io's edge sends them one request in a few, the next goes through
 COOLDOWN_LIMITED = 600.0  # a site that refused (429, 403) is left alone for this long
 COOLDOWN_FAILED = 120.0  # a site that failed (5xx, unreachable)
 
@@ -62,10 +63,14 @@ def _pace(site: str | None) -> None:
 
 
 def _retry_after(response: httpx.Response) -> float | None:
+    """How long a 429 asks to wait, RETRY_AFTER_DEFAULT when it does not say, or None when it asks for more than is worth waiting."""
+    header = response.headers.get("Retry-After")
+    if header is None:
+        return RETRY_AFTER_DEFAULT
     try:
-        wait = float(response.headers.get("Retry-After", ""))
+        wait = float(header)
     except ValueError:
-        return None
+        return RETRY_AFTER_DEFAULT
     return wait if 0 <= wait <= RETRY_AFTER_MAX else None
 
 

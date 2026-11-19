@@ -210,16 +210,51 @@ def _clean_up(keep: Game, drop: Game, replaced: list[str], users: set[int]) -> N
         shutil.rmtree(resolve_path(f"{user_id}/{drop.id}"), ignore_errors=True)
 
 
+def _lend_metadata(this: Game, other: Game, db) -> None:
+    """A version without a record of its own takes the one the other version has (provider, ids, HowLongToBeat)."""
+    for game, lender in ((this, other), (other, this)):
+        values: dict = {}
+        if not game.igdb_metadata and lender.igdb_metadata and not game.provider_ids:
+            values = {
+                "igdb_metadata": lender.igdb_metadata,
+                "metadata_source": lender.metadata_source,
+                "provider_ids": lender.provider_ids,
+            }
+        for field in ("hltb_id", "hltb_metadata"):
+            if not getattr(game, field) and getattr(lender, field):
+                values[field] = getattr(lender, field)
+        if values:
+            db.update_game(game.id, values)
+
+
+def _share_artwork(this: Game, other: Game, choice: dict, db) -> None:
+    """Both versions end with the same artwork of each kind: the chosen one, which is this game's unless it has none and the
+    other has (a version without artwork of its own takes the other's). "none" clears it from both."""
+    for kind in media_handler.KINDS:
+        mine, theirs = (this.media or {}).get(kind), (other.media or {}).get(kind)
+        picked = choice.get(kind) or ("this" if mine or not theirs else "other")
+        if picked == "none":
+            for game in (this, other):
+                titles.share_artwork(db.get_game(game.id), kind, None, db)
+            continue
+        source, entry = (this, mine) if picked == "this" else (other, theirs)
+        if entry is None:
+            continue
+        target = other if source is this else this
+        titles.share_artwork(db.get_game(target.id), kind, entry, db)  # the game it comes from already has it
+
+
 def link(this: Game, other: Game, form: dict, user, db=db_game_handler) -> Game:
     """Tie two versions to one title (mode "link"): the IGDB id the person chose goes to both, or, when neither game has one,
-    a title of our own. The name, summary and artwork they chose go to both."""
+    a title of our own. The name, summary and artwork they chose go to both; what they did not choose is this game's, or the
+    other's when this one has none. A version with no metadata record of its own takes the other's."""
     if mode(this, other) != "link":
         raise MergeRefused("not_versions", "One of the games has no files: merge them instead")
     chosen = other if form.get("igdb_id") == "other" else this
-    shared: dict = {}
-    for field in ("name", "summary"):
-        if field in form:
-            shared[field] = form[field]
+    shared: dict = {
+        "name": form.get("name", this.name),
+        "summary": form.get("summary", this.summary or other.summary),
+    }
     if chosen.igdb_id:
         for game in (this, other):
             db.update_game(game.id, {**shared, "igdb_id": chosen.igdb_id, "title_key": None})
@@ -228,13 +263,7 @@ def link(this: Game, other: Game, form: dict, user, db=db_game_handler) -> Game:
             db.update_game(game.id, {**shared, "title_key": f"mog:{this.id}"})
     if form.get("sgdb_id") == "other":
         db.update_game(this.id, {"sgdb_id": other.sgdb_id})
-    for kind, picked in (form.get("media") or {}).items():
-        if picked == "this":
-            entry = (this.media or {}).get(kind)
-        elif picked == "other":
-            entry = (other.media or {}).get(kind)
-        else:
-            entry = None
-        for game in (this, other):
-            titles.share_artwork(db.get_game(game.id), kind, entry, db)
+    _share_artwork(this, other, form.get("media") or {}, db)
+    if not chosen.igdb_id:  # an IGDB id changing has the endpoint fetch that game's record
+        _lend_metadata(db.get_game(this.id), db.get_game(other.id), db)
     return db.get_game(this.id)

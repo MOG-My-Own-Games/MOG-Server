@@ -249,6 +249,37 @@ def test_linking_versions_nobody_matched_ties_them_with_a_title_of_our_own(world
     assert titles.title_key(a) == titles.title_key(b)
 
 
+def test_linking_gives_the_version_without_artwork_or_metadata_what_the_other_has(world):
+    """Dungeon Keep Her: the version the merge started from had a cover and the other had none, but the choice "this" was
+    never sent, so the other version stayed bare. The title's artwork and record now reach both."""
+    one, two = _scanned(world, "A"), _scanned(world, "B")
+    url = media_uploads.store(one.id, "cover", _png())
+    record = {"id": "x.y", "name": "Dungeon: Keep Her"}
+    db_game_handler.update_game(
+        one.id,
+        {"media": {"cover": {"url": url, "source": "upload"}}, "cover_path": url, "summary": "Nice",
+         "igdb_metadata": record, "metadata_source": "itch", "provider_ids": {"itch": "x.y"}},
+    )
+
+    response = _merge(world, one, two)
+
+    assert response.status_code == 200
+    a, b = db_game_handler.get_game(one.id), db_game_handler.get_game(two.id)
+    assert a.media["cover"]["url"] == url and media_uploads.path_for(url).is_file()
+    assert b.media["cover"]["url"].startswith(f"/resources/media/{two.id}/cover-") and b.cover_path == b.media["cover"]["url"]
+    assert (b.summary, b.igdb_metadata, b.metadata_source, b.provider_ids) == ("Nice", record, "itch", {"itch": "x.y"})
+
+
+def test_linking_keeps_the_record_a_version_already_has(world):
+    one, two = _scanned(world, "A"), _scanned(world, "B")
+    db_game_handler.update_game(one.id, {"igdb_metadata": {"name": "One"}, "provider_ids": {"itch": "1"}})
+    db_game_handler.update_game(two.id, {"igdb_metadata": {"name": "Two"}, "provider_ids": {"itch": "2"}})
+
+    _merge(world, one, two)
+
+    assert db_game_handler.get_game(two.id).igdb_metadata == {"name": "Two"}
+
+
 def test_an_install_in_progress_stops_the_merge_and_nothing_changes(world):
     from models.install_session import InstallSession, InstallSessionState
 

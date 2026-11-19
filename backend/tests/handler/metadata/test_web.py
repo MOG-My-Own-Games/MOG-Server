@@ -58,7 +58,7 @@ def test_a_missing_page_is_none_but_a_site_that_cannot_answer_is_not_a_missing_p
     assert web.request("GET", "https://api.vndb.org/kana/vn") is None
     for code in (429, 403, 500, 503):
         web._cooldown.clear()
-        net.answers.append(Reply(code))
+        net.answers += [Reply(code)] * (2 if code == 429 else 1)  # a 429 is asked once more
         with pytest.raises(web.Unavailable):
             web.request("GET", "https://api.vndb.org/kana/vn")
 
@@ -74,8 +74,20 @@ def test_a_429_with_a_short_retry_after_is_waited_for_once(net):
         web.request("GET", "https://api.vndb.org/kana/vn")
 
 
+def test_a_429_that_does_not_say_how_long_is_asked_again_once_instead_of_holding_the_site_off(net):
+    """itch.io's edge answered a game page with a bare 429 one request in a few, and the next went through: the first one used to
+    leave the site refused for ten minutes ("itch is not answering right now") although it was fine."""
+    net.answers += [Reply(429), Reply(200)]
+    assert web.request("GET", "https://someauthor.itch.io/cave-panic").status_code == 200
+    assert web.RETRY_AFTER_DEFAULT in net.clock["slept"]
+
+    net.answers += [Reply(429, {"Retry-After": "600"})]  # too long to wait for: refused at once
+    with pytest.raises(web.Unavailable):
+        web.request("GET", "https://itch.io/search")
+
+
 def test_a_site_that_refused_is_left_alone_for_a_while_then_asked_again(net):
-    net.answers += [Reply(429)]
+    net.answers += [Reply(429), Reply(429)]
     with pytest.raises(web.Unavailable):
         web.request("GET", "https://store.steampowered.com/api/storesearch")
     calls = len(net.calls)

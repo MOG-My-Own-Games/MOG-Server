@@ -1296,6 +1296,16 @@ def _copy_game_files(game, work_dir: Path) -> str | None:
     return None
 
 
+def _own_archive(game) -> Path | None:
+    """The game itself when it is one archive file (a game shipped ready to play, only zipped): "its files as they are"
+    then means its contents, not the archive copied into the install."""
+    try:
+        root = fs_game_handler.get_game_root_abs_path(game)
+    except (ValueError, FileNotFoundError):
+        return None
+    return root if root.is_file() and is_archive_candidate(root) else None
+
+
 def _copy_into_prefix(game, source_rel: str | None, prefix_root: Path) -> str | None:
     """The copy step of a chain: the game's own files (or the archive named, unpacked) as they are, in the folder an
     installer would have made under Program Files, so the installers after it find the game there. Returns what went
@@ -1304,7 +1314,8 @@ def _copy_into_prefix(game, source_rel: str | None, prefix_root: Path) -> str | 
     dest = prefix_root / "drive_c" / "Program Files" / name
     dest.mkdir(parents=True, exist_ok=True)
     if source_rel is None:
-        return _copy_game_files(game, dest)
+        own = _own_archive(game)
+        return extract_archive(own, dest) if own is not None else _copy_game_files(game, dest)
     try:
         source_abs = Path(fs_game_handler.resolve_installer_abs_path(game, source_rel))
     except (ValueError, FileNotFoundError) as e:
@@ -1323,6 +1334,8 @@ def _run_extract_only(install_session_id: int, game, source_rel: str | None) -> 
         except (ValueError, FileNotFoundError) as e:
             _fail(install_session_id, str(e))
             return
+    else:
+        source_abs = _own_archive(game)
     what = source_abs.name if source_abs is not None else game.fs_name
 
     work_dir = ensure_session_cache_dir(install_session_id)

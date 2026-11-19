@@ -158,3 +158,25 @@ def test_a_raw_image_is_listed_through_a_plain_copy(monkeypatch, tmp_path):
     plain = tmp_path / "Plain.img"
     plain.write_bytes(b"\x00" * 100)
     assert archives.try_list_archive_members(plain) is None
+
+
+def test_a_zip_made_with_backslashes_gets_its_folders_back(monkeypatch, tmp_path):
+    """Game 260's zip names its members `game\\assets\\a.js` (made on Windows with Compress-Archive): 7z unpacked them
+    as flat files with the backslashes in their names, and the game could not find anything."""
+    run_returning(monkeypatch, writes=["launch.py", "game\\index.html", "game\\assets\\a.js", "runtime\\python.exe"])
+    out = tmp_path / "out"
+    assert archives.extract_archive(tmp_path / "x.zip", out) is None
+    found = sorted(str(p.relative_to(out)) for p in out.rglob("*") if p.is_file())
+    assert found == ["game/assets/a.js", "game/index.html", "launch.py", "runtime/python.exe"]
+
+
+def test_backslash_names_never_leave_the_folder_or_replace_a_file(tmp_path):
+    (tmp_path / "evil").mkdir()
+    (tmp_path / "evil" / "..\\..\\x.txt").write_bytes(b"1")
+    (tmp_path / "a").mkdir()
+    (tmp_path / "a" / "b.txt").write_bytes(b"keep")
+    (tmp_path / "a\\b.txt").write_bytes(b"new")
+    archives.restore_backslash_paths(tmp_path)
+    assert (tmp_path / "evil" / "x.txt").read_bytes() == b"1"
+    assert not (tmp_path.parent / "x.txt").exists()
+    assert (tmp_path / "a" / "b.txt").read_bytes() == b"keep" and (tmp_path / "a\\b.txt").exists()

@@ -273,10 +273,11 @@ def build_platform(file_name: str) -> str | None:
 def is_platform_bundle(candidates: list[InstallerCandidate]) -> bool:
     """Whether the archives a listing found are the same game built for several systems, with one for Windows: a
     release that carries a `-pc`, a `-mac` and a `-linux` build is no installer, it is a game to unpack (see
-    `handler.install.archive_prescan.unwrap_platform_builds`)."""
+    `handler.install.archive_prescan.unwrap_platform_builds`). A lone `game-windows.zip` is not one: with nothing to
+    choose between there is no bundle, and it is looked into like any archive."""
     probable = [c for c in candidates if c.category == GAME_CATEGORY and is_probable_installer(c)]
     builds = [build_platform(c.file_name) for c in probable if c.rank == RANK_ARCHIVE]
-    return bool(probable) and len(builds) == len(probable) and "windows" in builds and all(builds)
+    return bool(probable) and len(builds) == len(probable) and "windows" in builds and "other" in builds and all(builds)
 
 
 def looks_portable(candidates: list[InstallerCandidate]) -> bool:

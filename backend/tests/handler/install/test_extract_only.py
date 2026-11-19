@@ -225,6 +225,26 @@ def test_a_game_that_is_one_file_is_taken_as_that_file(env, monkeypatch, tmp_pat
     assert [e.path for e in read_manifest(env.work)] == ["Metroid.exe"]
 
 
+def test_a_game_that_is_one_zip_is_unpacked_not_copied_as_the_zip(env, monkeypatch, tmp_path):
+    """Game 260 (a single `...-windows.zip` in the library) was "installed" as the zip itself: with no archive named,
+    the game's own files were copied, and the only file was the archive."""
+    single = tmp_path / "library" / "magic-dice-windows.zip"
+    single.write_bytes(b"PK")
+    monkeypatch.setattr(runner.fs_game_handler, "get_game_root_abs_path", lambda game: single)
+    unpacked = []
+
+    def extract(archive, dest):
+        unpacked.append(archive)
+        (dest / "Magic Dice").mkdir()
+        (dest / "Magic Dice" / "game.exe").write_bytes(b"MZ")
+
+    monkeypatch.setattr(runner, "extract_archive", extract)
+    runner._run_extract_only(1, SimpleNamespace(fs_name=single.name), None)
+    assert unpacked == [single]
+    assert [e.path for e in read_manifest(env.work)] == ["Magic Dice/game.exe"]
+    assert env.db.updates[0]["phase_detail"] == single.name
+
+
 def test_a_game_whose_files_are_gone_fails_cleanly(env, monkeypatch, tmp_path):
     monkeypatch.setattr(runner.fs_game_handler, "get_game_root_abs_path", lambda game: tmp_path / "nowhere")
     runner._run_extract_only(1, SimpleNamespace(fs_name="Metroid"), None)

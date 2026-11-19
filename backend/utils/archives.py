@@ -8,6 +8,7 @@ revisiting if a specific format turns out to need it (see docs/TODO.md).
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import tempfile
@@ -167,6 +168,29 @@ def _extract_raw_image(file_path: Path, dest_dir: Path, exclude: Sequence[str]) 
         return None
 
 
+def restore_backslash_paths(root: Path) -> None:
+    """Put back the folders of a zip made on Windows with `\\` as the separator (PowerShell's Compress-Archive does it): on
+    Linux 7z unpacks each of its members as one flat file called `game\\assets\\a.js`, and the game cannot find its own
+    files. A file whose name holds a backslash moves to the path the backslashes spell, never out of `root` and never
+    over a file that is already there."""
+    flat = [
+        Path(folder, name)
+        for folder, _dirs, names in os.walk(root, followlinks=False)
+        for name in names
+        if "\\" in name and not Path(folder, name).is_symlink()
+    ]
+    for src in flat:
+        parts = [part for part in src.name.split("\\") if part not in ("", ".", "..")]
+        dest = src.parent.joinpath(*parts) if parts else src
+        if dest == src or dest.exists():
+            continue
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            src.rename(dest)
+        except OSError as e:  # a name that is already a file where a folder is needed: left as 7z made it
+            log.warning(f"Could not restore the folders of {src.name}: {e}")
+
+
 def extract_archive(file_path: Path, dest_dir: Path, exclude: Sequence[str] = ()) -> str | None:
     """Extract every member of an archive/disc image into `dest_dir`, preserving its internal directory
     structure, except the members named in `exclude`. Returns None when it worked, else why it did not."""
@@ -196,6 +220,7 @@ def extract_archive(file_path: Path, dest_dir: Path, exclude: Sequence[str] = ()
     except OSError as e:
         log.error(f"Error extracting archive tree from {file_path}: {e}")
         return f"7z could not be run: {e}"
+    restore_backslash_paths(dest_dir)
     if not any(p.is_file() for p in dest_dir.rglob("*")):
         return "the archive holds no files"
     return None

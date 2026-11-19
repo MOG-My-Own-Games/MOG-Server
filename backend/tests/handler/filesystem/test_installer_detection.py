@@ -111,6 +111,19 @@ def _found(*paths):
 class TestLooksPortable:
     """A folder with no installer in it (the Metroid case) is offered its executables and "just extract"."""
 
+    def test_a_lone_windows_zip_is_not_a_bundle_so_it_is_still_unpacked_by_name(self):
+        """Game 260 (`magic-dice-waifu-roll-windows.zip`, the only file) was taken for a release packed once per system:
+        the web UI offered "extract as it is" with no archive named, and the zip itself was copied as the install."""
+        from handler.filesystem.installer_detection import is_platform_bundle, looks_portable
+
+        assert not is_platform_bundle(_found("magic-dice-waifu-roll-windows.zip"))
+        assert not looks_portable(_found("magic-dice-waifu-roll-windows.zip"))
+
+    def test_a_build_per_system_is_still_a_bundle(self):
+        from handler.filesystem.installer_detection import is_platform_bundle
+
+        assert is_platform_bundle(_found("game-1.0-pc.zip", "game-1.0-mac.zip"))
+
     def test_only_game_executables_is_portable(self):
         from handler.filesystem.installer_detection import looks_portable
 

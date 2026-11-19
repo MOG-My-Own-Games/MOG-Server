@@ -1,5 +1,5 @@
 from handler.install.auto_mode.catalog import load_catalog
-from handler.install.auto_mode.engine import ScreenMemory, is_progress_page, plan_action
+from handler.install.auto_mode.engine import MAX_ATTEMPTS_PER_BUTTON, ScreenMemory, is_progress_page, plan_action
 from handler.install.auto_mode.matcher import Word
 
 CATALOG = load_catalog()
@@ -377,3 +377,30 @@ class TestButtonInFocus:
         for words in (sentence, framed_sentence):
             _action, matches = plan_action(words, CATALOG, ScreenMemory(), installing=False)
             assert not any(m.entry.category == "install" for m in matches)
+
+
+class TestRestartPage:
+    """Regression test: the last page of a Windows installer selects "Yes, I want to restart my computer now" by default, and
+    Finish would reboot the sandbox. The "No, I will restart later" radio must be picked first, then Finish pressed."""
+
+    def page(self):
+        return [
+            _word("Setup has finished copying files to your computer.", line=0),
+            _word("Yes, I want to restart my computer now.", line=1),
+            _word("No, I will restart my computer later.", line=2),
+            _word("Finish", line=3),
+        ]
+
+    def test_the_later_radio_is_picked_before_finish(self):
+        action, _ = plan_action(self.page(), CATALOG, ScreenMemory(), installing=True)
+        assert action is not None
+        assert action.kind == "click"
+        assert action.match.entry.category == "option" and action.match.entry.toggle
+        assert "later" in action.match.text.lower()
+
+    def test_finish_is_pressed_once_the_later_radio_is_picked(self):
+        memory = ScreenMemory()
+        action, _ = plan_action(self.page(), CATALOG, memory, installing=True)
+        memory.attempts[action.memory_key] = MAX_ATTEMPTS_PER_BUTTON  # what the driver records after a visible tick
+        action, _ = plan_action(self.page(), CATALOG, memory, installing=True)
+        assert action is not None and action.match.entry.category == "finish"

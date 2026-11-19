@@ -226,6 +226,14 @@ buttons:
       - "Limit installer to 2 GB of RAM usage"
       - "Limit installer to 2GB of RAM usage"
       - "Limit install to 2 GB of RAM usage"
+  # The last page of a Windows installer selects "Yes, restart now" by default. A sandboxed install must not reboot
+  # (there is no Windows to come back to), so the "later" radio is picked before Finish. A toggle, so it is not clicked again.
+  - category: option
+    toggle: true
+    labels:
+      - "No, I will restart my computer later"
+      - "No, riavvierò il computer più tardi"
+      - "No, riavvierò il computer in un secondo momento"
   - category: install
     mnemonic: i
     labels:

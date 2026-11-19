@@ -155,3 +155,15 @@ def test_a_failed_install_passes_its_short_reason_to_the_notification(monkeypatc
     runner._fail(9, "The installer exited with code 253 ...", "no program to launch in the install")
 
     assert sent == [(9, "The installer exited with code 253 ...", "no program to launch in the install")]
+
+
+def test_a_game_that_runs_from_its_disc_is_a_finished_install_when_the_installer_registered_its_shortcut(tmp_path):
+    """Caught live (Barbie Ocean Discovery, a CD game): the installer copied its data (wav, bmp, wpk) and ended on its last
+    page, but its program stays on the disc, so "no program to launch" failed the session three times over. The shortcut it
+    registered in the Start Menu is the proof that the setup got to its end."""
+    data = make_named(tmp_path / "files", ("Ocean/level1a.wpk", EARLY_STOP_BYTES * 2), ("Ocean/Uninst.isu", 10))
+    shortcut = make_named(tmp_path / "prefix", ("Barbie Ocean Discovery.lnk", 10))
+
+    with pytest.raises(InstallStoppedEarly, match="no program to launch"):
+        check_not_stopped_early(data, 0)
+    check_not_stopped_early(data, 0, shortcut)

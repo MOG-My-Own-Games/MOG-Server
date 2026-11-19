@@ -104,7 +104,7 @@ def chain(monkeypatch, tmp_path):
     monkeypatch.setattr(runner, "_set_phase", lambda *a, **k: None)
     monkeypatch.setattr(runner, "_route_disc_games_dir", lambda *a: None)
 
-    def finalize(install_session_id, prefix_dir, work_dir, baseline=frozenset(), exit_code=None, installer_bytes=None):
+    def finalize(install_session_id, prefix_dir, work_dir, baseline=frozenset(), exit_code=None, installer_bytes=None, disc_source=None):
         run.finalized.append(installer_bytes)
 
     def stream(install_session_id, vnc):

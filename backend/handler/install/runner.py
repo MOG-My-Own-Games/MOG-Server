@@ -44,9 +44,11 @@ from config import (
 )
 from handler.database import db_game_handler, db_install_session_handler
 from handler.filesystem import fs_game_handler
+from handler.filesystem.installer_detection import DISC_IMAGE_EXTENSIONS
 from handler.install.archive_prescan import extract_and_rescan, is_archive_candidate, source_phase, unwrap_platform_builds
 from handler.install.copy_step import is_copy_step
 from handler.install.defaults import default_enable_network
+from handler.install.disc_program import copy_missing_disc_files
 from handler.install.executables import has_game_program
 from utils.archives import extract_archive
 from handler.install.auto_mode.runtime import start_auto_mode
@@ -79,6 +81,7 @@ from handler.install.windows_output import (
     KNOWN_VENDOR_DIR_NAMES,
     collect_extra_work_dir_files,
     collect_windows_install_files,
+    installer_shortcuts,
     load_baseline,
     resolve_install_root,
     save_baseline,
@@ -571,6 +574,16 @@ class _Step:
     extract_temp_dir: TemporaryDirectory[str] | None = None
 
 
+def _is_real_disc(step: _Step) -> bool:
+    """Whether d: is a disc: an image unpacked, alone or inside an archive. The unpacked archive of a distributor is not one, and
+    what is in it that the installer did not copy (its payload, say) is no part of the game."""
+    if step.disc_source is None:
+        return False
+    return step.disc_source.name.endswith(".extracted") or (
+        step.source_abs is not None and step.source_abs.suffix.lower() in DISC_IMAGE_EXTENSIONS
+    )
+
+
 def _steps_of(session: InstallSession) -> list[tuple[str | None, str | None]]:
     """The (installer, source) pairs the session runs in order: its chain, or the one installer it was started with."""
     if session.steps:
@@ -757,6 +770,8 @@ def _run_install(install_session_id: int, attempt: int = 1) -> bool:
     windows_baseline: frozenset[Path] = frozenset()
     installer_sizes: list[int | None] = []
     exit_code: int | None = None
+    # The unpacked disc of the last step that came from one: a game that runs from it takes its program from there.
+    disc_source: Path | None = None
     # What the first installer left on drive_c, to tell the patches after it apart (a chain only).
     after_first: dict[Path, tuple[int, int]] | None = None
     last_name = ""
@@ -774,6 +789,8 @@ def _run_install(install_session_id: int, attempt: int = 1) -> bool:
                 temp_dirs.append(step.extract_temp_dir)
             installer_sizes.append(step.installer_bytes)
             last_name = Path(step.installer_abs).name
+            if _is_real_disc(step):
+                disc_source = step.disc_source
             step_wine = _uses_wine(step.installer_abs)
 
             if position == 0:
@@ -992,6 +1009,7 @@ def _run_install(install_session_id: int, attempt: int = 1) -> bool:
                     windows_baseline,
                     exit_code,
                     installer_bytes,
+                    disc_source,
                 )
             except BaseException:
                 if patch_zip is not None:
@@ -1413,6 +1431,7 @@ def _finalize_install(
     windows_baseline: frozenset[Path] = frozenset(),
     exit_code: int | None = None,
     installer_bytes: int | None = None,
+    disc_source: Path | None = None,
 ) -> None:
     """Hash whatever the installer produced and mark the session DONE.
 
@@ -1432,7 +1451,10 @@ def _finalize_install(
             "Installer finished but no files were found under drive_c or work_dir "
             "(it may have installed to a blacklisted or unrecognized path)"
         )
-    check_not_stopped_early(files, exit_code)
+    check_not_stopped_early(files, exit_code, installer_shortcuts(prefix_dir))
+    if disc_source is not None:
+        # A game that runs from its disc keeps its program and what it reads there (see disc_program.py).
+        files += copy_missing_disc_files(disc_source, work_dir, files)
 
     report = ThrottledProgress(
         lambda hashed: db_install_session_handler.update_session(install_session_id, {"bytes_written": hashed})
@@ -1476,12 +1498,14 @@ def _warn_if_smaller_than_installer(
         notify_install_small(install_session_id, installed, installer_bytes or 0, exit_code)
 
 
-def check_not_stopped_early(files: list[Path], exit_code: int | None) -> None:
+def check_not_stopped_early(files: list[Path], exit_code: int | None, shortcuts: list[Path] | tuple[Path, ...] = ()) -> None:
     """Raise InstallStoppedEarly when what the installer left is not an install: only empty files, next to nothing from a run
     that ended with a non-zero code, or no program to launch for any system (Windows, Linux or macOS) whatever its exit code
     and however much it wrote: a payload that was never unpacked can be gigabytes. (Caught live: an installer exited with 253
     seconds after "Install", leaving one empty file, and the session was marked done, so the client downloaded it and asked
-    for an executable in an empty folder; another left its 3.8 GB payload and an uninstaller.)"""
+    for an executable in an empty folder; another left its 3.8 GB payload and an uninstaller.) A shortcut the installer
+    registered counts as the program: a game that runs from its disc installs only its data, and its shortcut is the proof
+    that the setup got to its end."""
     sizes = []
     for path in files:
         try:
@@ -1496,7 +1520,7 @@ def check_not_stopped_early(files: list[Path], exit_code: int | None) -> None:
         raise InstallStoppedEarly(f"The installer {how} having written only empty files ({len(sizes)}): it stopped before its install.", closed)
     if failed_exit and total < EARLY_STOP_BYTES:
         raise InstallStoppedEarly(f"The installer {how} after writing only {total} bytes in {len(sizes)} files: it stopped before its install.", closed)
-    if not has_game_program(files):
+    if not has_game_program(files) and not shortcuts:
         short = "no program to launch in the install" + (f" (the installer exited with code {exit_code})" if failed_exit else "")
         raise InstallStoppedEarly(
             f"The installer {how} leaving no program to launch ({total} bytes in {len(sizes)} files): it stopped before it unpacked its install.",

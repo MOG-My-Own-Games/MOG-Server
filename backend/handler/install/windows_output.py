@@ -126,6 +126,37 @@ def collect_windows_install_files(
     return [p for p in _iter_content_files(prefix_dir) if p not in baseline]
 
 
+# Where an installer registers the shortcut to its game: the shared Start Menu and desktop, and the launchers Proton
+# makes from them. All of it is outside the files kept (see BLACKLIST_PATTERNS), so a game whose program stays on its
+# disc is only seen as installed through them.
+_SHORTCUT_FOLDERS = (
+    ("proton_shortcuts",),
+    ("users", "Public", "Desktop"),  # the case of a real prefix: the disk tells it apart
+    ("ProgramData", "Microsoft", "Windows", "Start Menu", "Programs"),
+)
+_SHORTCUT_SUFFIXES = (".lnk", ".desktop")
+_UNINSTALL_PREFIXES = ("unins", "uninst")  # unins000, Uninstall Game
+
+
+def installer_shortcuts(prefix_dir: Path) -> list[Path]:
+    """The shortcuts to a game the installer left in the prefix, its uninstaller's not counted. An installer that stopped
+    before it unpacked anything made none, so one is the sign of a finished install even when the game's program is not in
+    the files (a game that runs from its disc keeps only its data on the disk)."""
+    drive_c = prefix_dir / "drive_c"
+    found: list[Path] = []
+    for folder in _SHORTCUT_FOLDERS:
+        root = drive_c.joinpath(*folder)
+        if not root.is_dir():
+            continue
+        for path in root.rglob("*"):
+            name = path.name.lower()
+            if path.is_symlink() or not path.is_file() or not name.endswith(_SHORTCUT_SUFFIXES):
+                continue
+            if not name.startswith(_UNINSTALL_PREFIXES):
+                found.append(path)
+    return found
+
+
 def resolve_install_root(drive_c: Path, files: Iterable[Path]) -> Path:
     """Where manifest paths should be computed relative to.
 

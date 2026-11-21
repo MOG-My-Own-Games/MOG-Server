@@ -134,6 +134,14 @@ A game object carries, among others:
   `steamgriddb.com/game/<id>` address; each result has an `id` and a `name`) and `POST /api/games/{id}/metadata/sgdb/games/{sgdb_id}`,
   which sets `sgdb_id` and chooses the artwork again from that game; the HowLongToBeat search takes an id or address in `query` too. The search answers `409`
   when the provider is off or has no key or address; the apply answers `404` when it is not set up or has no game with that id;
+- `controller_support`: whether the game plays with a gamepad, the value to go by: `full`, `partial`, or `none` (made for the keyboard
+  and mouse); `null` when it is not known. It is what the administrator said by hand for the game (`controller_support_manual`, set in
+  Edit metadata with `PUT /api/games/{id}` and `{"controller_support_manual": "full" | "partial" | "none" | null}`, `null` going back to
+  Steam's; no scrape changes it, and the versions of one title share it), else what the Steam store declares for the game's Steam app
+  (`controller_support_detected`: the app it is matched with, else the one IGDB lists it as; Steam lists the support only when the
+  developer declares it, so a game it knows with none is `none`). Never take `null` for `none`. With Settings > Controller support
+  off (`controller_support_enabled` in `GET/PUT /api/settings`, on by default) nothing is looked up and all three fields go out as
+  `null`; what was found or said is kept;
 - `hltb_id` and `hltb_metadata`: how long the game takes, in **seconds**: `main_story`, `main_plus_extra`,
   `completionist` and `all_styles` (any of them may be missing), each with a `_count` of reports. Show nothing
   when it is empty: a game that has not been matched simply has no times;
@@ -528,9 +536,10 @@ starts it the same way. They belong to the game, not to a user.
 - `launch_args` is the list of arguments put after the game's executable, as **tags** (`["-savetouserdir", "-res 1280 720",
   "--nosound"]`): each tag is one option with what belongs to it, up to 50 of 200 characters each, one line, no spaces at the
   ends, once each. A client splits each tag like a shell does and puts the words after the executable, in the order of the
-  list: they are arguments, never a command. `null` means none were set; a device uses its own entry when it has one, else
+  list: they are arguments, never a command. A tag that is one word `NAME=value` (`WINEDLLOVERRIDES=dinput8=n,b`) is an
+  **environment variable** instead: the client sets it before the game starts and does not pass it as an argument. `null` means none were set; a device uses its own entry when it has one, else
   the shared one. Text typed by a person is split into tags at each word that starts with `-` or `--` (a negative number is a
-  value): `-res 1280 720 -windowed` is `["-res 1280 720", "-windowed"]`. Because the list is made of tags, two editors can be
+  value), and at each `NAME=value`: `-res 1280 720 -windowed` is `["-res 1280 720", "-windowed"]`. Because the list is made of tags, two editors can be
   merged: `PUT` takes `launch_args` to replace the list, or `launch_args_add` and `launch_args_remove` (lists of tags, not with
   `launch_args`) to change the list the server holds by now, so a tag one editor put in is not lost when another edits.
   A client keeps the tags it last agreed on with the server and merges its list, the server's and that one by tag.

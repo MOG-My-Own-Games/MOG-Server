@@ -18,11 +18,11 @@ from handler.database import db_game_handler
 from handler.filesystem.fs_tags import ARCHIVE_EXT, name_without_tags
 from handler.imports import adopt_placeholders, merged_into
 from handler.notifications import notify_games_added
-from handler import cover_art
+from handler import controller_support, cover_art
 from handler import media as media_handler
 from handler import media_uploads
 from handler import video_handler
-from handler.metadata import hltb_handler, igdb_handler, providers, sgdb_handler, web
+from handler.metadata import hltb_handler, igdb_handler, providers, sgdb_handler, steam_handler, web
 from logger.logger import log
 from handler.name_matching import best_match, query_variants
 from models.game import Game
@@ -341,6 +341,61 @@ def _find_hltb(game: Game, matched_name: str | None) -> dict | None:
     return best_match(query_variants(names), names[0], hltb_handler.search_games, lambda r: r.get("name", ""))
 
 
+MAX_STEAM_APPS = 4  # of the apps IGDB lists a game as, so a game with many editions does not cost many requests
+SUPPORT_RANK = {"none": 0, "partial": 1, "full": 2}
+
+
+def _steam_apps(game: Game) -> list[int]:
+    """The Steam apps the game is: the one it is matched with, else the ones IGDB lists it as."""
+    ref = (game.provider_ids or {}).get("steam")
+    if ref is not None and str(ref).isdigit():
+        return [int(ref)]
+    if game.igdb_id and igdb_handler.is_configured():
+        return igdb_handler.steam_app_ids(game.igdb_id)[:MAX_STEAM_APPS]
+    return []
+
+
+def _controller_pending(game: Game) -> bool:
+    """Whether a game with a match is still to be asked whether it supports a gamepad (see _fill_controller)."""
+    return bool(
+        (game.igdb_id or game.metadata_source)
+        and not game.controller_support
+        and not game.controller_support_manual
+        and controller_support.is_enabled()
+        and steam_handler.is_configured()
+        and not _missed(game, "controller")
+        and not _dismissed(game, "steam")
+    )
+
+
+def _fill_controller(game: Game, misses: dict[str, str], refresh: bool = False) -> bool:
+    """What the Steam store says about gamepads for the game (`controller_support`), looked up by the game's Steam app. A game that is
+    not on Steam, or that Steam would not answer for, is noted in `misses` and not asked again for a while (MISS_RETRY); the store
+    being unreachable is no miss. Returns True if the value changed."""
+    if not (game.igdb_id or game.metadata_source) or not controller_support.is_enabled() or not steam_handler.is_configured():
+        return False
+    if _dismissed(game, "steam") or game.controller_support_manual:  # what a person said wins: Steam is not asked
+        return False
+    if not refresh and not _controller_pending(game):
+        return False
+    fresh = db_game_handler.get_game(game.id) or game  # the match of this very scrape has set the ids
+    try:
+        # An edition, a beta or a test build of the game can be an app of its own with less support: the best one counts.
+        known = [v for v in (steam_handler.controller_support(app) for app in _steam_apps(fresh)) if v]
+        value = max(known, key=SUPPORT_RANK.__getitem__) if known else None
+    except web.Unavailable as e:
+        log.debug(f"Steam gamepad support for {game.name!r} not read: {e}")
+        return False
+    except Exception as e:  # noqa: BLE001 - a lookup that fails must not stop the scrape
+        log.warning(f"Steam gamepad support for {game.name!r} failed: {e}")
+        return False
+    _note(misses, "controller", value is not None)
+    if value is None or value == fresh.controller_support:
+        return False
+    db_game_handler.update_game(game.id, {"controller_support": value})
+    return True
+
+
 def _fill_hltb(game: Game, matched_name: str | None = None, refresh: bool = False) -> bool:
     """Completion times from HowLongToBeat, for a game with an IGDB match only (`matched_name` is the name
     that match just gave it). hltb_id 0 records a lookup that found nothing, so a scan does not search again
@@ -496,6 +551,7 @@ def scrape_game(game: Game) -> bool:
         applied |= _store_media(game, sgdb_id, replace=False)
 
     applied |= _fill_hltb(game, igdb_name)
+    applied |= _fill_controller(game, misses)
     if misses != (game.provider_misses or {}):
         db_game_handler.update_game(game.id, {"provider_misses": misses})
     return applied
@@ -549,6 +605,7 @@ def refresh_game(game: Game, keep: frozenset[str] = frozenset(), rematch_cover: 
 
     matched_name = (full or {}).get("name") or next((found[key].get("name") for key in PRIORITY if key in found), None)
     applied |= _fill_hltb(game, matched_name, refresh=True)
+    applied |= _fill_controller(game, misses, refresh=True)
     if misses != (game.provider_misses or {}):
         db_game_handler.update_game(game.id, {"provider_misses": misses})
     return applied
@@ -578,7 +635,7 @@ def needs_scrape(game: Game) -> bool:
     )  # a game with no cover is given one (a poster at the least), whatever providers it has
     # hltb_id 0 is a lookup that found nothing, so only a game never looked up is still to do.
     hltb_pending = matched and game.hltb_id is None and hltb_handler.is_enabled()
-    return metadata_pending or media_pending or hltb_pending
+    return metadata_pending or media_pending or hltb_pending or _controller_pending(game)
 
 
 def scrape_library(library_id: int, refresh: bool = False) -> ScrapeResult:

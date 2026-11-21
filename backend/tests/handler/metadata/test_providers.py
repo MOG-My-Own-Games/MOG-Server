@@ -243,6 +243,27 @@ class TestSteam:
         assert steam_handler.get(10) is None
 
 
+class TestSteamControllers:
+    @pytest.mark.parametrize(
+        ("data", "expected"),
+        [
+            ({"controller_support": "full"}, "full"),
+            ({"controller_support": "partial"}, "partial"),
+            ({"categories": [{"id": 28, "description": "Full controller support"}]}, "full"),
+            ({"categories": [{"id": 18, "description": "Partial Controller Support"}]}, "partial"),
+            ({"categories": [{"id": 2, "description": "Single-player"}]}, "none"),  # Steam lists support only when declared
+            ({}, "none"),
+        ],
+    )
+    def test_the_store_page_says_full_partial_or_nothing(self, monkeypatch, data, expected):
+        _answers(monkeypatch, Answer({"10": {"success": True, "data": {"type": "game", **data}}}))
+        assert steam_handler.controller_support(10) == expected
+
+    def test_a_game_the_store_would_not_show_is_unknown_not_without_a_gamepad(self, monkeypatch):
+        _answers(monkeypatch, Answer({"10": {"success": False}}), Answer({"10": {"success": True, "data": {"type": "dlc"}}}))
+        assert steam_handler.controller_support(10) is None and steam_handler.controller_support(10) is None
+
+
 class TestItch:
     def test_search_reads_the_game_links_of_the_page(self, monkeypatch):
         page = (

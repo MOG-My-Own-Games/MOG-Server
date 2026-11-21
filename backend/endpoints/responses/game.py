@@ -26,6 +26,11 @@ class GameSchema(BaseModel):
     # The title the game is a version of: games with the same key are one game (their time played, saves, name and artwork go
     # together). `igdb:<id>` when the IGDB id says so, else `mog:<id>`, which MOG gives a game by itself or that was set by hand.
     title_key: str = Field(validation_alias="effective_title_key")
+    # Gamepad support to go by: `full`, `partial`, `none` (made for the keyboard and mouse), null when not known. It is what a person
+    # set by hand (`controller_support_manual`) else what the Steam store declares (`controller_support_detected`).
+    controller_support: str | None = Field(default=None, validation_alias="effective_controller_support")
+    controller_support_manual: str | None = None
+    controller_support_detected: str | None = Field(default=None, validation_alias="controller_support")
     # Completion times in seconds; empty when the game is not scraped or HowLongToBeat had nothing.
     hltb_id: int | None = None
     hltb_metadata: dict[str, Any] | None = None
@@ -139,6 +144,8 @@ class GameUpdateForm(BaseModel):
     cover_path: str | None = None
     igdb_id: int | None = None
     sgdb_id: int | None = None
+    # What the person says about gamepads for this game: `full`, `partial` or `none`; null goes back to what Steam says.
+    controller_support_manual: Literal["full", "partial", "none"] | None = None
 
 
 class GameMergeForm(BaseModel):

@@ -1,4 +1,4 @@
-"""Launch arguments as tags: a list in which each tag is one option with what belongs to it (`-res 1280 720`, `--nosound`), so
+"""Launch arguments as tags: a list in which each tag is one option with what belongs to it (`-res 1280 720`, `--nosound`) or one environment variable (`WINEDLLOVERRIDES=dinput8=n,b`), so
 two editors (the web page, a client) can be merged by tag instead of one replacing the other's text."""
 
 from __future__ import annotations
@@ -10,11 +10,13 @@ LAUNCH_TAG_MAX_LENGTH = 200
 LAUNCH_MAX_TAGS = 50
 
 _NEGATIVE_NUMBER = re.compile(r"-\d+(?:\.\d+)?")
+_ENV_WORD = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")  # a variable set before the command, as in Steam's launch options
 
 
 def split_tags(text: str) -> list[str]:
     """Typed arguments as tags: a new tag starts at each word that begins with `-` or `--` (a negative number is a value, not
-    an option), and the words after it, up to the next such word, are part of it. Quoting is kept (`-title 'My Game'`)."""
+    an option), and the words after it, up to the next such word, are part of it. A word `NAME=value` is a tag of its own, an
+    environment variable. Quoting is kept (`-title 'My Game'`)."""
     try:
         words = shlex.split(text)
         join = shlex.join
@@ -24,6 +26,12 @@ def split_tags(text: str) -> list[str]:
     tags: list[str] = []
     group: list[str] = []
     for word in words:
+        if _ENV_WORD.match(word):
+            if group:
+                tags.append(join(group))
+                group = []
+            tags.append(join([word]))
+            continue
         if word.startswith("-") and not _NEGATIVE_NUMBER.fullmatch(word) and group:
             tags.append(join(group))
             group = []

@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException
 from starlette.concurrency import run_in_threadpool
 
 from endpoints.responses.settings import SettingsSchema, SettingsUpdateForm, SettingsValidationSchema
-from handler import backups, library_watcher, log_level, saves
+from handler import backups, controller_support, library_watcher, log_level, saves
 from handler.install import cache_quota
 from handler.auth import AdminUser
 from handler.database import db_settings_handler
@@ -49,6 +49,7 @@ def _schema(row: Settings) -> SettingsSchema:
     fields["backup_saves"] = backups.saves_in_daily(row)
     fields["saves_keep_versions"] = saves.keep_versions(row)
     fields["install_enable_network"] = row.install_enable_network is not False
+    fields["controller_support_enabled"] = controller_support.enabled_in(row)
     return SettingsSchema(**fields)
 
 

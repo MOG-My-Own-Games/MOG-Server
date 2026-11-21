@@ -49,6 +49,12 @@ class Game(BaseModel):
     # igdb_metadata keeps its name for every source: it holds the record of whichever match is in use.
     metadata_source: Mapped[str | None] = mapped_column(String(length=20), default=None)
     provider_ids: Mapped[dict[str, Any] | None] = mapped_column(CustomJSON(), default=dict)
+    # What Steam says about gamepads for the game: "full", "partial" or "none" (a game made for the keyboard and mouse); NULL when
+    # it is not known (the game is not on Steam, or the store was not asked yet).
+    controller_support: Mapped[str | None] = mapped_column(String(length=10), default=None)
+    # What a person said about it by hand (Edit metadata), the same three values: it wins over what Steam says, and no scrape
+    # changes it. NULL means they said nothing (the automatic value counts).
+    controller_support_manual: Mapped[str | None] = mapped_column(String(length=10), default=None)
     hltb_id: Mapped[int | None] = mapped_column(Integer(), default=None)
     # Completion times in seconds (main_story, main_plus_extra, completionist, all_styles) and their report counts.
     hltb_metadata: Mapped[dict[str, Any] | None] = mapped_column(CustomJSON(), default=dict)
@@ -95,6 +101,11 @@ class Game(BaseModel):
         ids = self.provider_ids or {}
         key = next((key for key in PROVIDER_PRIORITY if ids.get(key)), None)
         return f"{key}:{ids[key]}" if key else f"mog:{self.id}"
+
+    @property
+    def effective_controller_support(self) -> str | None:
+        """The gamepad support to go by: what a person set by hand, else what Steam says (None when neither is known)."""
+        return self.controller_support_manual or self.controller_support
 
     def __repr__(self) -> str:
         return f"Game({self.id} {self.name!r})"

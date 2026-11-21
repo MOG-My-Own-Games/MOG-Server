@@ -56,7 +56,8 @@ def search(name: str) -> list[dict[str, Any]]:
     return [record.make(item["id"], item.get("name") or "", url=f"{_STORE}/{item['id']}") for item in items if item.get("id")]
 
 
-def get(ref: str | int) -> dict[str, Any] | None:
+def _details(ref: str | int) -> dict[str, Any] | None:
+    """The store's data for one app, None when it is not a game, is not shown without an age check, or could not be read."""
     if not str(ref).isdigit():
         return None
     resp = web.request("GET", _DETAILS, params={"appids": str(ref), "l": "english", "cc": "US"})
@@ -67,7 +68,30 @@ def get(ref: str | int) -> dict[str, Any] | None:
     except (ValueError, AttributeError):
         return None
     game = answer.get("data") if answer.get("success") else None
-    if not game or game.get("type") != "game":
+    return game if game and game.get("type") == "game" else None
+
+
+def _controllers(game: dict[str, Any]) -> str:
+    """What the store page says about gamepads: `full`, `partial` or `none`. Steam lists controller support only when the developer
+    declares it, so a page without it is a game made for the keyboard and the mouse."""
+    declared = str(game.get("controller_support") or "").lower()
+    if declared in ("full", "partial"):
+        return declared
+    categories = " ".join(str(c.get("description") or "").lower() for c in game.get("categories") or [])
+    if "full controller support" in categories:
+        return "full"
+    return "partial" if "partial controller support" in categories else "none"
+
+
+def controller_support(ref: str | int) -> str | None:
+    """`full`, `partial` or `none` for the game with this app id; None when the store did not say (see `_details`)."""
+    game = _details(ref)
+    return _controllers(game) if game else None
+
+
+def get(ref: str | int) -> dict[str, Any] | None:
+    game = _details(ref)
+    if not game:
         return None
     return record.make(
         int(ref),

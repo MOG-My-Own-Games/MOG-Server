@@ -22,6 +22,7 @@ def row(**over):
         install_default_auto_mode=None,
         install_default_manual_mode=None,
         install_enable_network=None,
+        controller_support_enabled=None,
         download_workers=None,
         debug_logging=None,
         backup_daily=None,

@@ -98,14 +98,14 @@ def _get_token() -> tuple[str, str] | None:
     return client_id, _token
 
 
-def _query(body: str) -> list[dict[str, Any]]:
+def _query(body: str, endpoint: str = "games") -> list[dict[str, Any]]:
     resolved = _get_token()
     if resolved is None:
         return []
     client_id, token = resolved
     try:
         resp = httpx.post(
-            f"{_API_BASE}/games",
+            f"{_API_BASE}/{endpoint}",
             headers={"Client-ID": client_id, "Authorization": f"Bearer {token}"},
             content=body,
             timeout=15,
@@ -154,6 +154,27 @@ def get_game_by_id(igdb_id: int) -> dict[str, Any] | None:
     is what RomM's own igdb_handler.py does for this same reason."""
     results = _query(f"fields {_GAME_FIELDS}; where id = {igdb_id};")
     return _resolve_media(results[0]) if results else None
+
+
+_STEAM_APP = re.compile(r"store\.steampowered\.com/app/(\d+)", re.IGNORECASE)
+_STEAM_SOURCE = 1  # IGDB's id for Steam among the stores a game is listed in
+
+
+def steam_app_ids(igdb_id: int) -> list[int]:
+    """The Steam apps IGDB lists a game as, in its order: a game can be several (an edition, a beta, a test build), so there may be
+    more than one. The store's address is read first, then the id IGDB keeps (its `category` and `external_game_source` fields both
+    name Steam as 1). Empty when it is not on Steam or IGDB did not say."""
+    apps: list[int] = []
+    for row in _query(f"fields *; where game = {int(igdb_id)}; limit 50;", "external_games"):
+        if found := _STEAM_APP.search(str(row.get("url") or "")):
+            app = int(found.group(1))
+        elif _STEAM_SOURCE in (row.get("external_game_source"), row.get("category")) and str(row.get("uid") or "").isdigit():
+            app = int(row["uid"])
+        else:
+            continue
+        if app not in apps:
+            apps.append(app)
+    return apps
 
 
 _GAME_ADDRESS = re.compile(r"^https?://(?:www\.)?igdb\.com/games/([a-z0-9-]+)", re.IGNORECASE)

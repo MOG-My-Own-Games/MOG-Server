@@ -69,6 +69,9 @@ class Settings(BaseModel):
     install_default_manual_mode: Mapped[bool | None] = mapped_column(Boolean, default=None)
     # Whether an installer can reach the network (see handler/install/defaults.py). NULL means on.
     install_enable_network: Mapped[bool | None] = mapped_column(Boolean, default=None)
+    # Whether the gamepad support Steam declares is looked up for the games and shown (see handler/controller_support.py).
+    # NULL means on.
+    controller_support_enabled: Mapped[bool | None] = mapped_column(Boolean, default=None)
     # Files a client downloads in parallel. NULL falls back to
     # config.INSTALL_DOWNLOAD_WORKERS_DEFAULT.
     download_workers: Mapped[int | None] = mapped_column(Integer, default=None)

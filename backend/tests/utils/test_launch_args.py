@@ -16,6 +16,8 @@ from utils.launch_args import is_tag, patch_tags, split_tags
         ("-title 'My Game' -w", ["-title 'My Game'", "-w"]),  # quoting is kept, so the client splits it back
         ("-w -w -nosound", ["-w", "-nosound"]),  # once each
         ("-title 'oops -w", ["-title 'oops", "-w"]),  # a quote left open: the words as they are
+        ('WINEDLLOVERRIDES="dinput8=n,b" -w', ["WINEDLLOVERRIDES=dinput8=n,b", "-w"]),  # a variable is a tag of its own
+        ("-res 1280 720 MANGOHUD=1", ["-res 1280 720", "MANGOHUD=1"]),
     ],
 )
 def test_typed_arguments_are_split_into_tags_at_each_word_that_starts_with_a_dash(typed, tags):

@@ -156,7 +156,7 @@ def _values(keep: Game, drop: Game, form: dict, moves: _Moves) -> dict:
         )
     if form.get("sgdb_id", "this") == "other":
         values["sgdb_id"] = drop.sgdb_id
-    for field in ("hltb_id", "hltb_metadata"):  # what the kept game lacks, the other one lends
+    for field in ("hltb_id", "hltb_metadata", "controller_support", "controller_support_manual"):  # what the kept game lacks, the other lends
         if not getattr(keep, field) and getattr(drop, field):
             values[field] = getattr(drop, field)
     values["media"], values["cover_path"] = _artwork(keep, drop, form.get("media") or {}, moves)

@@ -7,7 +7,7 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Path, Query, UploadFile, status
 from fastapi.responses import FileResponse
 from handler.visibility import check_visible
-from handler import titles
+from handler import controller_support, titles
 from handler import merge as merge_handler
 from handler.auth import AdminUser, CurrentUser
 from handler.database import (
@@ -63,6 +63,9 @@ def _installed_game_ids(user_id: int) -> set[int]:
     }
 
 
+_NO_PAD = {"controller_support": None, "controller_support_manual": None, "controller_support_detected": None}  # the switch is off
+
+
 @router.get("")
 async def list_games(user: CurrentUser, library_id: int | None = None) -> list[GameSchema]:
     if library_id is not None and not user.is_admin and library_id in user.hidden_library_ids:
@@ -78,6 +81,7 @@ async def list_games(user: CurrentUser, library_id: int | None = None) -> list[G
     last_played = db_saves_handler.last_saved_by_game(user.id)
     last_played_on = db_saves_handler.last_saved_on_by_game(user.id)
     playtime = db_playtime_handler.seconds_by_game(user.id)
+    hide_pad = not controller_support.is_enabled()  # the switch is off: the games go out with no word on gamepads
 
     def played_last(ids: list[int]) -> int | None:
         return max((i for i in ids if last_played.get(i)), key=lambda i: last_played[i], default=None)
@@ -94,6 +98,7 @@ async def list_games(user: CurrentUser, library_id: int | None = None) -> list[G
                     "last_played": last_played.get(newest),
                     "last_played_on": last_played_on.get(newest),
                     "playtime_seconds": sum(playtime.get(i, 0) for i in ids),
+                    **(_NO_PAD if hide_pad else {}),
                 }
             )
         )
@@ -204,6 +209,7 @@ async def get_game(user: CurrentUser, id: Annotated[int, Path(ge=1)]) -> GameSch
             "last_played": played.get(newest),
             "last_played_on": played_on.get(newest),
             "playtime_seconds": db_playtime_handler.summary_for_games(user.id, ids)[0],
+            **(_NO_PAD if not controller_support.is_enabled() else {}),
         }
     )
 
@@ -513,8 +519,8 @@ async def update_game(user: AdminUser, id: Annotated[int, Path(ge=1)], data: Gam
             body["provider_ids"] = {}
 
     game = db_game_handler.update_game(id, body)
-    shared = {k: body[k] for k in ("name", "summary") if k in changed}
-    if shared:  # the name and the summary are the title's, not a version's
+    shared = {k: body[k] for k in ("name", "summary", "controller_support_manual") if k in changed}
+    if shared:  # the name, the summary and whether it plays with a gamepad are the title's, not a version's
         for sibling in titles.versions(game, user)[1:]:
             db_game_handler.update_game(sibling.id, shared)
     if rematch:

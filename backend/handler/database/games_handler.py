@@ -106,6 +106,8 @@ class DBGamesHandler(DBBaseHandler):
             "igdb_metadata",
             "metadata_source",
             "provider_ids",
+            "controller_support",
+            "controller_support_manual",
             "sgdb_id",
             "hltb_id",
             "hltb_metadata",

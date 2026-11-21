@@ -725,6 +725,7 @@ async function openSettingsPage(subTab) {
     document.getElementById("setting-cache-auto-clean").checked = apiSettings.install_cache_auto_clean !== false;
     applyProviderToggles(apiSettings);
     document.getElementById("setting-watch-libraries").checked = apiSettings.watch_libraries !== false;
+    document.getElementById("setting-controller-support").checked = apiSettings.controller_support_enabled !== false;
     document.getElementById("setting-debug-logging").checked = apiSettings.debug_logging === true;
     await refreshProtonBuildsTable(apiSettings.install_default_proton_build || "");
   } catch (_) {
@@ -853,6 +854,18 @@ document.getElementById("setting-watch-libraries").addEventListener("change", as
   const box = e.target;
   try {
     await api("/api/settings", { method: "PUT", body: JSON.stringify({ watch_libraries: box.checked }) });
+  } catch (err) {
+    box.checked = !box.checked;
+    alert(`Could not save: ${err.message}`);
+  }
+});
+
+// --- Gamepad support (Settings > Controller support) ---
+
+document.getElementById("setting-controller-support").addEventListener("change", async (e) => {
+  const box = e.target;
+  try {
+    await api("/api/settings", { method: "PUT", body: JSON.stringify({ controller_support_enabled: box.checked }) });
   } catch (err) {
     box.checked = !box.checked;
     alert(`Could not save: ${err.message}`);
@@ -2240,7 +2253,8 @@ async function loadLaunchSettings(gameId) {
   }
 }
 
-// Launch arguments are tags: each is one option with what goes with it ("-res 1280 720", "--nosound"). The page and the clients
+// Launch arguments are tags: each is one option with what goes with it ("-res 1280 720", "--nosound") or one environment
+// variable the game starts with ("WINEDLLOVERRIDES=dinput8=n,b"). The page and the clients
 // edit the same list, so the page sends what it added and what it took out, and the server merges that into the list it holds.
 const LAUNCH_TAG_MAX = 200;
 const LAUNCH_TAGS_MAX = 50;
@@ -2287,7 +2301,8 @@ function shellQuote(word) {
 }
 
 // Typed arguments as tags: a new tag starts at each word that begins with "-" or "--" (a negative number is a value), and the
-// words after it, up to the next such word, belong to it. The same rule as the server's and the client's.
+// words after it, up to the next such word, belong to it. A word NAME=value is a tag of its own (an environment variable). The
+// same rule as the server's and the client's.
 function splitLaunchTags(text) {
   let words = shellWords(text);
   let join = (group) => group.map(shellQuote).join(" ");
@@ -2298,6 +2313,12 @@ function splitLaunchTags(text) {
   const tags = [];
   let group = [];
   for (const word of words) {
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(word)) {
+      if (group.length) tags.push(join(group));
+      group = [];
+      tags.push(join([word]));
+      continue;
+    }
     if (word.startsWith("-") && !/^-\d+(\.\d+)?$/.test(word) && group.length) {
       tags.push(join(group));
       group = [];
@@ -2548,6 +2569,7 @@ async function openGamePage(id) {
   loadGameSizes(game.id);
   loadLaunchSettings(game.id);
   renderLastPlayed(game);
+  renderControllerBadge(game);
   document.querySelector("#view-game .back-link").href = selectedLibraryId !== null ? `#library/${selectedLibraryId}` : "#";
   const libName = (libraries.find((l) => l.id === game.library_id) || {}).name || "";
   document.getElementById("game-library").textContent = libName;
@@ -2727,7 +2749,8 @@ function renderOverview(game) {
     if (mp.onlinecoop) mpBits.push(`online co-op (up to ${mp.onlinemax || "?"})`);
     if (mp.offlinecoop) mpBits.push(`offline co-op (up to ${mp.offlinemax || "?"})`);
   }
-  playerEl.textContent = [...modes, ...mpBits].join(" · ");
+  const gamepad = { full: "gamepad: full support", partial: "gamepad: partial support", none: "keyboard and mouse only" }[game.controller_support];
+  playerEl.textContent = [...modes, ...mpBits, gamepad].filter(Boolean).join(" · "); // null (unknown, or the switch is off) adds nothing
 
   renderHltb(game);
 
@@ -2896,6 +2919,25 @@ const MEDIA_KINDS = [
   ["logo", "Title (logo)", "logo"],
   ["icon", "Icon", "icon"],
 ];
+
+// The mark of a game with no gamepad support (null when unknown, or when the switch in Settings is off).
+function renderControllerBadge(game) {
+  document.getElementById("game-no-pad").hidden = game.controller_support !== "none";
+}
+
+const CONTROLLER_HINTS = { full: "plays with a gamepad", partial: "partial gamepad support", none: "keyboard and mouse only" };
+
+// The Gamepad support field of Edit metadata: what the person said, and what Steam says under it. What the form held when it
+// opened is kept, so only a change is sent (the server hides the value while the switch is off, and saving must not wipe it).
+function fillControllerField(game) {
+  const select = document.getElementById("edit-controller-support");
+  select.value = game.controller_support_manual || "";
+  select.dataset.initial = select.value;
+  const detected = game.controller_support_detected;
+  document.getElementById("edit-controller-hint").textContent = detected
+    ? `Steam says: ${CONTROLLER_HINTS[detected]}. Choosing another says it for you; a scrape does not change it.`
+    : "Steam has nothing on this game (it may not be on Steam, or not matched). Say it here if you know.";
+}
 
 // The game's artwork around its header: the hero (else the banner) behind it, the logo in place of the
 // title text and the icon beside it. Each is optional, and one that fails to load falls back quietly.
@@ -3192,6 +3234,7 @@ document.getElementById("edit-metadata-btn").addEventListener("click", () => {
   document.getElementById("edit-media-status").textContent = "";
   document.getElementById("edit-name").value = activeGame.name;
   document.getElementById("edit-summary").value = activeGame.summary || activeGame.igdb_metadata?.summary || "";
+  fillControllerField(activeGame);
   closeProviderSearch();
   renderProviderLinks();
   const linkedKeys = new Set(linkedProviders(activeGame).map((l) => l.key));
@@ -3207,14 +3250,15 @@ document.getElementById("edit-metadata-cancel-btn").addEventListener("click", ()
 document.getElementById("edit-metadata-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   try {
-    const game = await api(`/api/games/${activeGame.id}`, {
-      method: "PUT",
-      body: JSON.stringify({
-        name: document.getElementById("edit-name").value,
-        summary: document.getElementById("edit-summary").value,
-      }),
-    });
+    const body = {
+      name: document.getElementById("edit-name").value,
+      summary: document.getElementById("edit-summary").value,
+    };
+    const pad = document.getElementById("edit-controller-support");
+    if (pad.value !== pad.dataset.initial) body.controller_support_manual = pad.value || null; // only a change is sent
+    const game = await api(`/api/games/${activeGame.id}`, { method: "PUT", body: JSON.stringify(body) });
     activeGame = game;
+    renderControllerBadge(game);
     document.getElementById("game-title").textContent = game.name;
     renderOverview(game);
     document.getElementById("edit-metadata-form").hidden = true;

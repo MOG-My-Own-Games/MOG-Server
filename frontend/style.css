@@ -537,6 +537,9 @@ p.warning { margin: 0.4em 0; }
   mask-composite: intersect;
 }
 .game-header.has-art .game-header-art { opacity: 1; }
+/* The mark of a game with no gamepad support, at the top right of the header. */
+.game-header > .no-pad-badge { position: absolute; top: 14px; right: 18px; z-index: 2; line-height: 0; filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.6)); }
+.game-header > .no-pad-badge[hidden] { display: none; }
 .game-header-info { min-width: 0; }
 .game-title-row { display: flex; align-items: center; gap: 0.9em; margin-bottom: 0.3em; }
 .game-header h2 { margin: 0; }

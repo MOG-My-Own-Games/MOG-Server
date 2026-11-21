@@ -115,6 +115,15 @@
 
           <div class="game-header" id="game-header">
             <div class="game-header-art" id="game-header-art" aria-hidden="true"></div>
+            <div id="game-no-pad" class="no-pad-badge" role="img" aria-label="No gamepad support: played with keyboard and mouse" title="No gamepad support: played with keyboard and mouse" hidden>
+              <svg viewBox="0 0 30 30" width="44" height="44" aria-hidden="true">
+                <circle cx="15" cy="15" r="14.4" fill="rgba(14,16,20,0.9)" stroke="rgba(255,255,255,0.8)" stroke-width="1.2" />
+                <rect x="5" y="10" width="20" height="11" rx="5.5" fill="none" stroke="#fff" stroke-width="1.8" />
+                <path d="M9 15.5h4M11 13.5v4" stroke="#fff" stroke-width="1.8" stroke-linecap="round" />
+                <circle cx="19" cy="14.5" r="1.3" fill="#fff" /><circle cx="21.5" cy="17" r="1.3" fill="#fff" />
+                <path d="M6 24L24 6" stroke="#ff4d4d" stroke-width="2.6" stroke-linecap="round" />
+              </svg>
+            </div>
             <div class="game-header-cover">
               <img id="game-cover-img" hidden />
               <div id="game-cover-placeholder" class="cover-placeholder" hidden>&#127918;</div>
@@ -146,6 +155,15 @@
           <form id="edit-metadata-form" class="card edit-metadata-form" hidden>
             <label class="field-label">Name<input type="text" id="edit-name" required /></label>
             <label class="field-label">Summary<textarea id="edit-summary" rows="4"></textarea></label>
+            <label class="field-label">Gamepad support
+              <select id="edit-controller-support">
+                <option value="">Automatic (from Steam)</option>
+                <option value="full">Plays with a gamepad</option>
+                <option value="partial">Partial gamepad support</option>
+                <option value="none">Keyboard and mouse only</option>
+              </select>
+            </label>
+            <p id="edit-controller-hint" class="muted small"></p>
             <div class="metadata-search">
               <h4>Your own artwork</h4>
               <p class="muted small">Upload an image of your own for any kind of artwork (PNG, JPEG, WebP, GIF, AVIF, BMP or TIFF, up to 10 MiB). It is used at once, replaces the earlier choice of that kind and is not replaced by a scrape. Pick or clear provider artwork with Scrape.</p>
@@ -440,6 +458,13 @@
               <div class="toggle-row">
                 <div><strong>Watch the library folders</strong><p class="muted small">A game added, removed or renamed on disk is picked up by itself: its library is scanned and the new games are matched with the metadata providers. No need to press Scan.</p></div>
                 <label class="switch"><input type="checkbox" id="setting-watch-libraries" aria-label="Watch the library folders" /><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="card">
+              <h3>Controller support</h3>
+              <div class="toggle-row">
+                <div><strong>Gamepad support of the games</strong><p class="muted small">Look up whether each game plays with a gamepad (from its Steam store page) and show it: a game with none is marked on its page, and clients can use it to set keyboard and mouse for it. Off, nothing is looked up and no game goes out with it; what was found is kept.</p></div>
+                <label class="switch"><input type="checkbox" id="setting-controller-support" aria-label="Look up and show the gamepad support of the games" /><span class="slider"></span></label>
               </div>
             </div>
             <div class="card">
@@ -814,10 +839,10 @@
       <p id="launch-edit-who" class="muted small"></p>
       <form id="launch-edit-form">
         <h4>Arguments</h4>
-        <p class="muted small">Put after the game's executable. Each tag is an option with what goes with it: type arguments and press + (or Enter), and they split at each <code>-</code> or <code>--</code>.</p>
+        <p class="muted small">Put after the game's executable. Each tag is an option with what goes with it, or an environment variable set before the game starts (<code>NAME=value</code>): type arguments and press + (or Enter), and they split at each <code>-</code> or <code>--</code> and at each <code>NAME=value</code>.</p>
         <ul id="launch-tags" class="chip-row launch-chips"></ul>
         <div class="launch-add">
-          <input id="launch-tag-input" type="text" placeholder="e.g. -windowed -res 1280 720" maxlength="400" autocomplete="off" />
+          <input id="launch-tag-input" type="text" placeholder="e.g. -windowed -res 1280 720 WINEDLLOVERRIDES=dinput8=n,b" maxlength="400" autocomplete="off" />
           <button id="launch-tag-add" type="button" title="Add what is typed as tags" aria-label="Add what is typed as tags">+</button>
         </div>
         <h4>Winetricks</h4>
